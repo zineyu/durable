@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: cachix/install-nix-action@v31
+      - uses: cachix/cachix-action@v17
+        with:
+          name: devenv
+
+      - name: Install devenv
+        run: nix profile install nixpkgs#devenv
+
+      - name: Install client dependencies
+        run: devenv shell -- bash -c 'cd client && npm ci'
+
+      - name: Client checks
+        run: devenv shell -- bash -c 'cd client && npm run lint && npm run typecheck && npm run test'
+
+      - name: Build client
+        run: devenv shell -- bash -c 'cd client && npm run build'
+
+      - name: Rust checks
+        run: devenv shell -- bash -c 'cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace'
+
+      - name: Protocol type consistency
+        run: devenv shell -- bash -c 'cargo run --quiet -p agent --bin export-types && git add --intent-to-add -- client/src/api/generated && git diff --exit-code -- client/src/api/generated'
+
+      - name: Build Storybook
+        run: devenv shell -- bash -c 'cd client && npm run build-storybook'
+
+      - name: Chromatic
+        run: devenv shell -- bash -c 'cd client && npx chromatic --storybook-build-dir=storybook-static'
+        env:
+          CHROMATIC_PROJECT_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}

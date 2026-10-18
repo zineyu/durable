@@ -1,0 +1,74 @@
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+}
+
+.body > p {
+  margin: 0;
+}
+
+.caret {
+  display: inline-block;
+  width: var(--marker-size);
+  height: var(--caret-height);
+  margin-left: var(--space-0-5);
+  background: var(--color-accent);
+  animation: blink 1000ms steps(2, start) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.status {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0;
+  padding-top: var(--space-2);
+  border-top: var(--border-hairline) solid var(--color-border-2);
+}
+
+.state {
+  flex: none;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-secondary);
+}
+
+.state[data-state='streaming'] {
+  color: var(--color-accent-text);
+}
+
+.state[data-state='cancelled'] {
+  color: var(--color-warn-text);
+}
+
+.state[data-state='failed'] {
+  color: var(--color-danger-text);
+}
+
+.note {
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-tertiary);
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+}
