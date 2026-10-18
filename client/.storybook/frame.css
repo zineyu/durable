@@ -1,0 +1,36 @@
+.page {
+  height: 100%;
+}
+
+.centered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: var(--space-6);
+}
+
+.sidebar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-6);
+}
+
+.sidebar > * {
+  width: 280px;
+  height: 100%;
+}
+
+.content {
+  display: flex;
+  justify-content: center;
+  min-height: 100%;
+  padding: var(--space-6);
+}
+
+.content > * {
+  width: var(--content-max-width);
+  max-width: 100%;
+}

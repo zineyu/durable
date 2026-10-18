@@ -1,0 +1,35 @@
+.dot {
+  flex: none;
+  width: var(--dot-size);
+  height: var(--dot-size);
+  border-radius: var(--radius-full);
+  background: var(--color-border-4);
+}
+
+.dot[data-tone='running'] {
+  background: var(--color-accent);
+  animation: pulse 1600ms ease-in-out infinite;
+}
+
+.dot[data-tone='queued'],
+.dot[data-tone='warn'] {
+  background: var(--color-warn);
+}
+
+.dot[data-tone='success'] {
+  background: var(--color-success);
+}
+
+.dot[data-tone='danger'] {
+  background: var(--color-danger);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
