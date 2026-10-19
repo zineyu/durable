@@ -265,4 +265,46 @@ describe('侧栏状态', () => {
       { id: toSessionId('s-2'), title: '标题 s-2', state: 'idle', queuedCount: 0 },
     ]);
   });
+
+  it('入队事件用事件携带的 session 元数据更新队列长度与标题', () => {
+    const state = createSidebarState(
+      bootstrap([workspaceA], [session('s-1', '/work/a', 100), session('s-2', '/work/a', 200)]),
+    );
+
+    const next = applyEvent(state, {
+      kind: 'message_queued',
+      session: session('s-1', '/work/a', 300, { title: '首条消息', queueLength: 2 }),
+      item: { id: 4, text: '首条消息', createdAt: 300 },
+    });
+
+    expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '首条消息', state: 'queued', queuedCount: 2 },
+      { id: toSessionId('s-2'), title: '标题 s-2', state: 'idle', queuedCount: 0 },
+    ]);
+  });
+
+  it('移除队列项后减少对应 session 的队列长度', () => {
+    const state = createSidebarState(
+      bootstrap([workspaceA], [session('s-1', '/work/a', 100, { queueLength: 2 })]),
+    );
+
+    const next = applyEvent(state, {
+      kind: 'queue_item_removed',
+      sessionId: 's-1',
+      itemId: 5,
+    });
+
+    expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '标题 s-1', state: 'queued', queuedCount: 1 },
+    ]);
+
+    const emptied = applyEvent(next, {
+      kind: 'queue_item_removed',
+      sessionId: 's-1',
+      itemId: 4,
+    });
+    expect(sidebarWorkspaces(emptied)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0 },
+    ]);
+  });
 });

@@ -6,8 +6,9 @@ use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{SessionId, SessionTitle, WorkspacePath};
-use crate::message::{Message, MessageNode, MessageRole, MessageText};
-use crate::session::{SessionMetadata, SessionRecord, SessionTree};
+use crate::message::MessageText;
+use crate::queue::QueueItem;
+use crate::session::{SessionMetadata, SessionRecord, SessionTree, derive_title};
 use crate::storage::Snapshot;
 use crate::storage::sqlite::SqliteStorage;
 use crate::workspace::WorkspaceMetadata;
@@ -137,6 +138,7 @@ impl Store {
             id: SessionId::generate(),
             workspace: workspace.clone(),
             title,
+            title_auto: true,
             created_at,
             updated_at: created_at,
             active_leaf: None,
@@ -145,12 +147,12 @@ impl Store {
         changes.insert_session(session.clone());
         changes.append_event(
             FactEvent::SessionCreated {
-                session: session.metadata(),
+                session: session.metadata(0),
             },
             created_at,
         );
         self.storage.apply(&changes).await?;
-        Ok(session.metadata())
+        Ok(session.metadata(0))
     }
 
     /// 重命名 session。
@@ -166,22 +168,25 @@ impl Store {
         let _line = self.line.lock().await;
         let mut session = self.find_session(id).await?;
         session.title = title.clone();
+        session.title_auto = false;
         session.updated_at = now_millis();
+        let pending = self.storage.queue_length(id).await?;
         let mut changes = Changeset::new();
         changes.update_session(
             session.id.clone(),
             session.title.clone(),
+            session.title_auto,
             session.updated_at,
             session.active_leaf,
         );
         changes.append_event(
             FactEvent::SessionRenamed {
-                session: session.metadata(),
+                session: session.metadata(pending),
             },
             session.updated_at,
         );
         self.storage.apply(&changes).await?;
-        Ok(session.metadata())
+        Ok(session.metadata(pending))
     }
 
     /// 删除 session。
@@ -208,61 +213,66 @@ impl Store {
     ///
     /// 失败：session 不存在。
     pub async fn session_tree(&self, id: &SessionId) -> Result<SessionTree, StoreError> {
-        let (session, messages) = self
+        let snapshot = self
             .storage
             .session_tree(id)
             .await?
             .ok_or_else(|| StoreError::SessionNotFound(id.clone()))?;
         Ok(SessionTree {
-            session: session.metadata(),
-            active_leaf: session.active_leaf,
-            nodes: messages.into_iter().map(|message| message.node).collect(),
+            session: snapshot.session.metadata(snapshot.queue_length),
+            active_leaf: snapshot.session.active_leaf,
+            nodes: snapshot
+                .messages
+                .into_iter()
+                .map(|message| message.node)
+                .collect(),
+            queue: snapshot.queue,
         })
     }
 
-    /// 将一条用户消息追加为当前 active leaf 的子节点。
+    /// 把一条用户消息写入 session 的 FIFO 队列。此阶段不创建消息节点，不移动 active leaf。
     ///
     /// 输入：session 身份与已校验的消息正文。
     /// 失败：session 不存在。
-    /// 副作用：写入消息行、移动 active leaf、更新 `updated_at`，写入 `message_appended` 事实事件。
-    pub async fn admit_message(
+    /// 副作用：写入队列项、更新 `updated_at`，必要时把自动标题改为由首行推导的标题，
+    /// 并写入 `message_queued` 事实事件。
+    pub async fn enqueue_message(
         &self,
         id: &SessionId,
         text: MessageText,
-    ) -> Result<MessageNode, StoreError> {
+    ) -> Result<QueueItem, StoreError> {
         let _line = self.line.lock().await;
         let mut session = self.find_session(id).await?;
-        let message_id = self.storage.mint_message_id().await?;
+        let pending = self.storage.queue_length(id).await?;
+        let messages = self.storage.message_count(id).await?;
         let created_at = now_millis();
-        let node = MessageNode {
-            id: message_id,
-            parent_id: session.active_leaf,
-            role: MessageRole::User,
+        if session.title_auto && pending == 0 && messages == 0 {
+            session.title = derive_title(&text);
+        }
+        session.updated_at = created_at;
+        let item = QueueItem {
+            id: self.storage.mint_queue_item_id().await?,
             text,
             created_at,
         };
-        session.updated_at = created_at;
-        session.active_leaf = Some(message_id);
         let mut changes = Changeset::new();
-        changes.insert_message(Message {
-            session: id.clone(),
-            node: node.clone(),
-        });
+        changes.insert_queue_item(id.clone(), item.clone());
         changes.update_session(
             session.id.clone(),
             session.title.clone(),
+            session.title_auto,
             session.updated_at,
             session.active_leaf,
         );
         changes.append_event(
-            FactEvent::MessageAppended {
-                session: session.metadata(),
-                message: node.clone(),
+            FactEvent::MessageQueued {
+                session: session.metadata(pending + 1),
+                item: item.clone(),
             },
             created_at,
         );
         self.storage.apply(&changes).await?;
-        Ok(node)
+        Ok(item)
     }
 
     async fn find_session(&self, id: &SessionId) -> Result<SessionRecord, StoreError> {

@@ -1,6 +1,7 @@
 use crate::event::FactEvent;
 use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::Message;
+use crate::queue::QueueItem;
 use crate::session::SessionRecord;
 use crate::workspace::WorkspaceMetadata;
 
@@ -27,17 +28,19 @@ impl Changeset {
         self.push(Change::InsertSession(session));
     }
 
-    /// 写入 session 的全部可变字段：标题、更新时间与 active leaf。
+    /// 写入 session 的全部可变字段：标题、标题是否自动、更新时间与 active leaf。
     pub fn update_session(
         &mut self,
         id: SessionId,
         title: SessionTitle,
+        title_auto: bool,
         updated_at: i64,
         active_leaf: Option<MessageId>,
     ) {
         self.push(Change::UpdateSession {
             id,
             title,
+            title_auto,
             updated_at,
             active_leaf,
         });
@@ -49,6 +52,10 @@ impl Changeset {
 
     pub fn insert_message(&mut self, message: Message) {
         self.push(Change::InsertMessage(message));
+    }
+
+    pub fn insert_queue_item(&mut self, session: SessionId, item: QueueItem) {
+        self.push(Change::InsertQueueItem { session, item });
     }
 
     pub fn append_event(&mut self, event: FactEvent, created_at: i64) {
@@ -72,11 +79,16 @@ pub(crate) enum Change {
     UpdateSession {
         id: SessionId,
         title: SessionTitle,
+        title_auto: bool,
         updated_at: i64,
         active_leaf: Option<MessageId>,
     },
     DeleteSession(SessionId),
     InsertMessage(Message),
+    InsertQueueItem {
+        session: SessionId,
+        item: QueueItem,
+    },
     AppendEvent {
         event: FactEvent,
         created_at: i64,

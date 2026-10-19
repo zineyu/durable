@@ -213,8 +213,39 @@ impl fmt::Display for MessageIdError {
 
 impl std::error::Error for MessageIdError {}
 
+/// 队列项身份。由存储的全局分配器产生，单调递增，同一次分配永不重复。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct QueueItemId(i64);
+
+impl QueueItemId {
+    /// 从存储值构造。
+    ///
+    /// 失败：id 不是正数。
+    pub fn parse(raw: i64) -> Result<Self, QueueItemIdError> {
+        if raw <= 0 {
+            return Err(QueueItemIdError(raw));
+        }
+        Ok(Self(raw))
+    }
+
+    pub fn get(self) -> i64 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueueItemIdError(i64);
+
+impl fmt::Display for QueueItemIdError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "队列项 id 必须是正数: {}", self.0)
+    }
+}
+
+impl std::error::Error for QueueItemIdError {}
+
 deserialize_validated!(WorkspacePath, SessionId, SessionTitle);
-deserialize_validated_number!(MessageId);
+deserialize_validated_number!(MessageId, QueueItemId);
 
 #[cfg(test)]
 mod tests {
@@ -225,6 +256,8 @@ mod tests {
     fn rejects_invalid_deserialized_values() {
         assert!(serde_json::from_value::<MessageId>(json!(0)).is_err());
         assert!(serde_json::from_value::<MessageId>(json!(-3)).is_err());
+        assert!(serde_json::from_value::<QueueItemId>(json!(0)).is_err());
+        assert!(serde_json::from_value::<QueueItemId>(json!(-1)).is_err());
         assert_eq!(
             serde_json::from_value::<MessageId>(json!(7)).expect("正数是合法消息 id"),
             MessageId::parse(7).expect("正数是合法消息 id")

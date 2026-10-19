@@ -19,6 +19,8 @@
 | changeset | 一次提交登记的变更集合，顺序即意图，在单条存储事务内整体生效。 |
 | delta | 流式 token 增量。仅经 SSE 实时传输，不落库。 |
 | queue item | 等待执行的用户消息。session 级 FIFO，持久化。 |
+| 入队 | 把用户消息写入 session 的 FIFO 队列。此阶段不创建消息节点，不移动 active leaf。 |
+| 自动标题 | 首条用户消息的首行前 50 个字符决定的 session 标题。重命名后不再自动更新。 |
 | bootstrap | 客户端启动时获取的元数据快照与事件游标。 |
 | scripted provider | 测试用本地 OpenAI 兼容 SSE 服务。按脚本返回响应，不替换被测代码。 |
 | seam | 规格定义的公开测试边界。 |

@@ -6,7 +6,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use durable::{MessageNode, MessageText, SessionId, SessionTitle, WorkspacePath};
+use durable::{MessageText, QueueItem, SessionId, SessionTitle, WorkspacePath};
 use serde::de::DeserializeOwned;
 
 use crate::Store;
@@ -176,10 +176,10 @@ async fn submit_message(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
     JsonBody(request): JsonBody<SubmitMessageRequest>,
-) -> Result<(StatusCode, Json<MessageNode>), ApiError> {
+) -> Result<(StatusCode, Json<QueueItem>), ApiError> {
     let text = MessageText::parse(&request.text)?;
     Ok((
         StatusCode::CREATED,
-        Json(state.store().admit_message(&id, text).await?),
+        Json(state.store().enqueue_message(&id, text).await?),
     ))
 }

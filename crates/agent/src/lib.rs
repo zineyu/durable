@@ -16,8 +16,9 @@ pub use config::{
 };
 pub use durable::{
     DEFAULT_SESSION_TITLE, FactEvent, MessageId, MessageNode, MessageRole, MessageText,
-    MessageTextError, SessionId, SessionIdError, SessionMetadata, SessionTitle, SessionTitleError,
-    SessionTree, Store, StoreError, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    MessageTextError, QueueItem, QueueItemId, SessionId, SessionIdError, SessionMetadata,
+    SessionTitle, SessionTitleError, SessionTree, Store, StoreError, WorkspaceMetadata,
+    WorkspacePath, WorkspacePathError,
 };
 pub use error::ApiError;
 pub use protocol::{
@@ -70,6 +71,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     MessageText::export_all(&config)?;
     MessageNode::export_all(&config)?;
     SessionTree::export_all(&config)?;
+    QueueItem::export_all(&config)?;
     FactEvent::export_all(&config)?;
     ErrorCode::export_all(&config)?;
     ErrorResponse::export_all(&config)?;

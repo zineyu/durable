@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::id::{SessionId, WorkspacePath};
+use crate::id::{QueueItemId, SessionId, WorkspacePath};
 use crate::message::MessageNode;
+use crate::queue::QueueItem;
 use crate::session::SessionMetadata;
 use crate::workspace::WorkspaceMetadata;
 
@@ -33,6 +34,15 @@ pub enum FactEvent {
         session: SessionMetadata,
         message: MessageNode,
     },
+    MessageQueued {
+        session: SessionMetadata,
+        item: QueueItem,
+    },
+    QueueItemRemoved {
+        session_id: SessionId,
+        #[ts(type = "number")]
+        item_id: QueueItemId,
+    },
 }
 
 impl FactEvent {
@@ -42,8 +52,11 @@ impl FactEvent {
             Self::WorkspaceRegistered { .. } | Self::WorkspaceRemoved { .. } => None,
             Self::SessionCreated { session }
             | Self::SessionRenamed { session }
-            | Self::MessageAppended { session, .. } => Some(&session.id),
-            Self::SessionDeleted { session_id } => Some(session_id),
+            | Self::MessageAppended { session, .. }
+            | Self::MessageQueued { session, .. } => Some(&session.id),
+            Self::SessionDeleted { session_id } | Self::QueueItemRemoved { session_id, .. } => {
+                Some(session_id)
+            }
         }
     }
 }
