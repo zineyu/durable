@@ -949,3 +949,211 @@ async fn reports_corrupted_stored_metadata_as_internal_error() {
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(error_code(response).await, agent::ErrorCode::Internal);
 }
+
+/// 规格「读取 bootstrap 元数据」：空数据库返回空列表与最大事件 id 0。
+#[tokio::test]
+async fn empty_bootstrap_reports_no_metadata_and_zero_events() {
+    let harness = Harness::start().await;
+
+    let bootstrap = harness.bootstrap().await;
+    assert_eq!(bootstrap.model, "test-model");
+    assert_eq!(bootstrap.max_event_id, 0);
+    assert!(bootstrap.workspaces.is_empty());
+    assert!(bootstrap.sessions.is_empty());
+}
+
+/// 规格 user story 1 与「持久化」：重复注册在重启后仍被拒绝，且不写事件。
+#[tokio::test]
+async fn duplicate_workspace_registration_survives_restart() {
+    let harness = Harness::start().await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    let before = harness.bootstrap().await;
+
+    let harness = harness.restart().await;
+    let response = harness.register(workspace.path.as_str()).await;
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        error_code(response).await,
+        agent::ErrorCode::WorkspaceDuplicate
+    );
+
+    let after = harness.bootstrap().await;
+    assert_eq!(after.workspaces, before.workspaces);
+    assert_eq!(
+        after.max_event_id, before.max_event_id,
+        "被拒绝的注册不写事实事件"
+    );
+}
+
+/// 规格「显式失败」与「事件 id 由数据库自增序列产生」：被拒绝的命令不写事实事件。
+#[tokio::test]
+async fn rejected_commands_do_not_advance_event_ids() {
+    let harness = Harness::start().await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    let session = harness.created_session(&workspace.path).await;
+    let before = harness.bootstrap().await;
+
+    assert_eq!(
+        harness.register(workspace.path.as_str()).await.status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        harness.remove(workspace.path.as_str()).await.status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        harness.rename_session(&missing_id(), "标题").await.status(),
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        harness
+            .create_session(&workspace.path, Some("  "))
+            .await
+            .status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(
+        harness.delete_session(&missing_id()).await.status(),
+        StatusCode::NOT_FOUND
+    );
+
+    let after = harness.bootstrap().await;
+    assert_eq!(after.max_event_id, before.max_event_id);
+    assert_eq!(after.sessions, vec![session]);
+}
+
+/// 规格「错误响应…session 不存在」：删除后再删除报告缺失，而非成功。
+#[tokio::test]
+async fn repeated_session_deletion_reports_missing_session() {
+    let harness = Harness::start().await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    let session = harness.created_session(&workspace.path).await;
+
+    assert_eq!(
+        harness.delete_session(&session.id).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let response = harness.delete_session(&session.id).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        error_code(response).await,
+        agent::ErrorCode::SessionNotFound
+    );
+}
+
+/// 规格「错误响应…workspace 未注册」：移除后再移除报告缺失。
+#[tokio::test]
+async fn repeated_workspace_removal_reports_missing_registration() {
+    let harness = Harness::start().await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+
+    assert_eq!(
+        harness.remove(workspace.path.as_str()).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    let response = harness.remove(workspace.path.as_str()).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        error_code(response).await,
+        agent::ErrorCode::WorkspaceNotFound
+    );
+}
+
+/// 规格「错误码至少区分 workspace 路径无效」：移除非绝对路径是路径错误，不是「未注册」。
+#[tokio::test]
+async fn removing_workspace_with_relative_path_is_invalid() {
+    let harness = Harness::start().await;
+
+    let response = harness.remove("relative/workspace").await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        error_code(response).await,
+        agent::ErrorCode::WorkspacePathInvalid
+    );
+}
+
+/// 规格「协议类型由 Rust 定义…生成 TS 类型」：事实事件的 kind 使用客户端 reducer 约定的名字。
+#[tokio::test]
+async fn persists_event_kind_wire_names() {
+    let harness = Harness::start().await;
+    let read_kinds = || {
+        recorded_event_rows(&harness.database)
+            .into_iter()
+            .map(|(_, _, _, payload)| {
+                serde_json::from_str::<serde_json::Value>(&payload).expect("解析事件负载")["kind"]
+                    .as_str()
+                    .expect("事件负载有 kind")
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    let session = harness.created_session(&workspace.path).await;
+    assert_eq!(
+        harness.rename_session(&session.id, "新标题").await.status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        read_kinds(),
+        vec!["workspace_registered", "session_created", "session_renamed"]
+    );
+
+    assert_eq!(
+        harness.delete_session(&session.id).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        harness.remove(workspace.path.as_str()).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        read_kinds(),
+        vec![
+            "workspace_registered",
+            "session_deleted",
+            "workspace_removed"
+        ]
+    );
+}
+
+/// 规格「边界解析，核心信任」：存储的 session id 非法时以 internal 显式失败。
+#[tokio::test]
+async fn reports_corrupted_stored_session_id_as_internal_error() {
+    let harness = Harness::start().await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    {
+        let connection = rusqlite::Connection::open(&harness.database).expect("打开 SQLite");
+        connection
+            .execute(
+                "INSERT INTO session (id, workspace, title, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, 0, 0)",
+                rusqlite::params!["   ", workspace.path.as_str(), "标题"],
+            )
+            .expect("写入空 id 的 session 行");
+    }
+
+    let response = harness
+        .client
+        .get(harness.url("/api/bootstrap"))
+        .send()
+        .await
+        .expect("请求 bootstrap");
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(error_code(response).await, agent::ErrorCode::Internal);
+}
+
+/// 规格「协议」：路径参数无法解码时也返回错误信封。
+#[tokio::test]
+async fn rejects_undecodable_session_path_with_error_envelope() {
+    let harness = Harness::start().await;
+
+    let response = harness
+        .client
+        .get(harness.url("/api/sessions/%FF/tree"))
+        .send()
+        .await
+        .expect("请求消息树");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(response).await, agent::ErrorCode::InvalidRequest);
+}

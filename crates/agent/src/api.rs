@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use axum::extract::rejection::JsonRejection;
-use axum::extract::{FromRequest, Path, Request, State};
+use axum::extract::rejection::{JsonRejection, PathRejection};
+use axum::extract::{FromRequest, FromRequestParts, Path, Request, State};
+use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -33,6 +34,25 @@ where
                     ApiError::invalid_request(rejection.status(), rejection.body_text())
                 })?;
         Ok(Self(value))
+    }
+}
+
+/// session id 路径参数；提取失败返回协议错误信封。
+struct SessionPath(SessionId);
+
+impl<S> FromRequestParts<S> for SessionPath
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Path(raw) = Path::<String>::from_request_parts(parts, state)
+            .await
+            .map_err(|rejection: PathRejection| {
+                ApiError::invalid_request(rejection.status(), rejection.body_text())
+            })?;
+        Ok(Self(SessionId::parse(&raw)?))
     }
 }
 
@@ -129,28 +149,25 @@ async fn create_session(
 
 async fn rename_session(
     State(state): State<AgentState>,
-    Path(id): Path<String>,
+    SessionPath(id): SessionPath,
     JsonBody(request): JsonBody<RenameSessionRequest>,
 ) -> Result<Json<SessionMetadata>, ApiError> {
-    let id = SessionId::parse(&id)?;
     let title = SessionTitle::parse(&request.title)?;
     Ok(Json(state.store().rename_session(&id, &title)?))
 }
 
 async fn delete_session(
     State(state): State<AgentState>,
-    Path(id): Path<String>,
+    SessionPath(id): SessionPath,
 ) -> Result<StatusCode, ApiError> {
-    let id = SessionId::parse(&id)?;
     state.store().delete_session(&id)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn session_tree(
     State(state): State<AgentState>,
-    Path(id): Path<String>,
+    SessionPath(id): SessionPath,
 ) -> Result<Json<SessionTree>, ApiError> {
-    let id = SessionId::parse(&id)?;
     Ok(Json(SessionTree {
         session: state.store().session(&id)?,
         active_leaf: None,

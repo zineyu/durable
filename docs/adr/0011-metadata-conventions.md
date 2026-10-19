@@ -13,7 +13,7 @@
 
 三条命令的解析方式差异是显式的：注册与创建 session 必须定位到一个存在的目录，因此规范化；移除只删除注册记录，因此按身份字符串匹配。差异体现在两个构造函数（`WorkspacePath::resolve` 与 `WorkspacePath::parse`）上，而不是隐含在字符串比较里。
 
-**边界解析**：`WorkspacePath`、`SessionId`、`SessionTitle` 是协议中的领域类型，构造时校验（绝对路径、非空 id、去空白后非空的标题）。HTTP 处理器负责解析，`Store` 只接受已构造的领域对象；数据库读取也重新校验，失败归类为 `CorruptedData`。请求体反序列化失败返回同一错误信封，状态码取 axum 的拒绝状态，错误码为 `invalid_request`。
+**边界解析**：`WorkspacePath`、`SessionId`、`SessionTitle` 是协议中的领域类型，构造时校验（绝对路径、非空 id、去空白后非空的标题）。HTTP 处理器负责解析，`Store` 只接受已构造的领域对象；数据库读取也重新校验，失败归类为 `CorruptedData`。请求体反序列化失败与路径参数提取失败都返回同一错误信封，状态码取 axum 的拒绝状态，错误码为 `invalid_request`。
 
 **删除 session 保留删除事实**：删除在单个事务内按顺序执行——删除该 session 的全部事件、删除 session 行、写入 `session_deleted` 事实事件。每个已删除 session 因此只保留一条事件。规格的「删除其事件」与「删除产生事实事件」由此同时成立：历史事件清除，终止事实保留，带 `after` 游标的重连客户端可以回放删除。
 

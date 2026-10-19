@@ -17,10 +17,10 @@ pub use config::{
 pub use error::{ApiError, StoreError};
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, ErrorCode, ErrorResponse, FactEvent, HealthResponse,
-    HealthStatus, MessageNode, MessageRole, RegisterWorkspaceRequest, RemoveWorkspaceRequest,
-    RenameSessionRequest, SessionId, SessionIdError, SessionMetadata, SessionTitle,
-    SessionTitleError, SessionTree, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
-    DEFAULT_SESSION_TITLE,
+    HealthStatus, MessageId, MessageIdError, MessageNode, MessageRole, RegisterWorkspaceRequest,
+    RemoveWorkspaceRequest, RenameSessionRequest, SessionId, SessionIdError, SessionMetadata,
+    SessionTitle, SessionTitleError, SessionTree, WorkspaceMetadata, WorkspacePath,
+    WorkspacePathError, DEFAULT_SESSION_TITLE,
 };
 pub use store::{Snapshot, Store};
 

@@ -17,6 +17,25 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+/// 为校验型 newtype 生成 `Deserialize`：先读字符串，再走 `parse` 校验。
+macro_rules! deserialize_validated {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl<'de> Deserialize<'de> for $type {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    let raw = String::deserialize(deserializer)?;
+                    Self::parse(&raw).map_err(serde::de::Error::custom)
+                }
+            }
+        )+
+    };
+}
+
+deserialize_validated!(WorkspacePath, SessionId, SessionTitle, MessageId);
+
 /// workspace 身份：规范化后的绝对路径。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, TS)]
 pub struct WorkspacePath(String);
@@ -97,46 +116,6 @@ impl SessionId {
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-impl<'de> Deserialize<'de> for WorkspacePath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
-    }
-}
-
-impl<'de> Deserialize<'de> for SessionId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
-    }
-}
-
-impl<'de> Deserialize<'de> for SessionTitle {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
-    }
-}
-
-impl<'de> Deserialize<'de> for MessageId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
 
