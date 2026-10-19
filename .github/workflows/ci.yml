@@ -8,6 +8,8 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    env:
+      CHROMATIC_PROJECT_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,6 +42,5 @@ jobs:
         run: devenv shell -- bash -c 'cd client && npm run build-storybook'
 
       - name: Chromatic
+        if: env.CHROMATIC_PROJECT_TOKEN != ''
         run: devenv shell -- bash -c 'cd client && npx chromatic --storybook-build-dir=storybook-static'
-        env:
-          CHROMATIC_PROJECT_TOKEN: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
