@@ -1157,3 +1157,23 @@ async fn rejects_undecodable_session_path_with_error_envelope() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(error_code(response).await, agent::ErrorCode::InvalidRequest);
 }
+
+/// 路径无法读取时给出与「不存在」不同的原因。
+#[tokio::test]
+async fn reports_unreadable_workspace_path_with_its_own_reason() {
+    let harness = Harness::start().await;
+    let file = harness.directory.path().join("datei.txt");
+    std::fs::write(&file, "内容").expect("写入文件");
+
+    let response = harness
+        .register(&file.join("child").to_string_lossy())
+        .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body: agent::ErrorResponse = response.json().await.expect("解析错误响应");
+    assert_eq!(body.code, agent::ErrorCode::WorkspacePathInvalid);
+    assert!(
+        body.message.contains("无法读取"),
+        "message: {}",
+        body.message
+    );
+}

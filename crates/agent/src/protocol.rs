@@ -53,11 +53,13 @@ impl WorkspacePath {
 
     /// 解析路径并规范化为身份：路径必须存在且是目录，符号链接被解析到目标。
     ///
-    /// 失败：路径不是绝对路径、不存在、不是目录或不是 UTF-8。
+    /// 失败：路径不是绝对路径、不存在、不是目录、不是 UTF-8，或无法读取。
     pub fn resolve(raw: &str) -> Result<Self, WorkspacePathError> {
         let path = Self::parse(raw)?;
-        let canonical = std::fs::canonicalize(&path.0)
-            .map_err(|_| WorkspacePathError::NotFound(raw.to_owned()))?;
+        let canonical = std::fs::canonicalize(&path.0).map_err(|error| match error.kind() {
+            std::io::ErrorKind::NotFound => WorkspacePathError::NotFound(raw.to_owned()),
+            _ => WorkspacePathError::Unreadable(raw.to_owned(), error.to_string()),
+        })?;
         if !canonical.is_dir() {
             return Err(WorkspacePathError::NotDirectory(raw.to_owned()));
         }
@@ -78,6 +80,7 @@ pub enum WorkspacePathError {
     NotUtf8(String),
     NotFound(String),
     NotDirectory(String),
+    Unreadable(String, String),
 }
 
 impl fmt::Display for WorkspacePathError {
@@ -87,6 +90,9 @@ impl fmt::Display for WorkspacePathError {
             Self::NotUtf8(raw) => write!(formatter, "workspace 路径不是 UTF-8: {raw}"),
             Self::NotFound(raw) => write!(formatter, "workspace 路径不存在: {raw}"),
             Self::NotDirectory(raw) => write!(formatter, "workspace 路径不是目录: {raw}"),
+            Self::Unreadable(raw, detail) => {
+                write!(formatter, "workspace 路径无法读取: {raw} ({detail})")
+            }
         }
     }
 }
