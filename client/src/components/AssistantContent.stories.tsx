@@ -46,3 +46,42 @@ export const WithFailedTool: Story = {
     toolCalls: [readCall, failedCall],
   },
 };
+
+export const MarkdownText: Story = {
+  args: {
+    text: [
+      '## 检查结果',
+      '',
+      '`ui` 反代不缓冲 SSE；`agent` 通过 `after` 游标续传。',
+      '',
+      '- 协议类型由 Rust 导出',
+      '- 生成文件随协议变更提交',
+      '',
+      '1. 先取快照',
+      '2. 再回放尾部',
+      '',
+      '> 断线后先刷新 bootstrap 与当前 session tree。',
+      '',
+      '**重点**：游标只能回退，不能跳过未应用的事件。',
+    ].join('\n'),
+    toolCalls: [],
+  },
+};
+
+export const MarkdownCode: Story = {
+  args: {
+    text: [
+      '重建事件流时使用快照水位作为游标：',
+      '',
+      '```ts',
+      'const cursor = snapshotCursor(previous, tree.maxEventId);',
+      'stream.resume(cursor);',
+      '```',
+      '',
+      '```',
+      'devenv shell -- durable-test',
+      '```',
+    ].join('\n'),
+    toolCalls: [readCall],
+  },
+};

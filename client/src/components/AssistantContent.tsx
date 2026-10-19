@@ -1,5 +1,5 @@
+import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
-import styles from './AssistantContent.module.css';
 import { toolCardModel } from '../view/tools';
 import type { ToolCallRecord } from '../api/generated/ToolCallRecord';
 
@@ -11,7 +11,7 @@ export type AssistantContentProps = {
 export function AssistantContent({ text, toolCalls }: AssistantContentProps) {
   return (
     <>
-      {text.length > 0 ? <p className={styles.text}>{text}</p> : null}
+      {text.length > 0 ? <Markdown text={text} /> : null}
       {toolCalls.map((record) => {
         const model = toolCardModel(record);
         return (
