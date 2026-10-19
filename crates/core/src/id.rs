@@ -22,6 +22,25 @@ macro_rules! deserialize_validated {
     };
 }
 
+pub(crate) use deserialize_validated;
+
+/// 为校验型数值 newtype 生成 `Deserialize`：先读整数，再走 `parse` 校验。
+macro_rules! deserialize_validated_number {
+    ($($type:ty),+ $(,)?) => {
+        $(
+            impl<'de> Deserialize<'de> for $type {
+                fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    let raw = i64::deserialize(deserializer)?;
+                    Self::parse(raw).map_err(serde::de::Error::custom)
+                }
+            }
+        )+
+    };
+}
+
 /// workspace 身份：规范化后的绝对路径。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, TS)]
 pub struct WorkspacePath(String);
@@ -164,7 +183,7 @@ impl fmt::Display for SessionTitleError {
 impl std::error::Error for SessionTitleError {}
 
 /// 消息身份。由存储的全局分配器产生，单调递增，同一次分配永不重复。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct MessageId(i64);
 
 impl MessageId {
@@ -195,3 +214,23 @@ impl fmt::Display for MessageIdError {
 impl std::error::Error for MessageIdError {}
 
 deserialize_validated!(WorkspacePath, SessionId, SessionTitle);
+deserialize_validated_number!(MessageId);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn rejects_invalid_deserialized_values() {
+        assert!(serde_json::from_value::<MessageId>(json!(0)).is_err());
+        assert!(serde_json::from_value::<MessageId>(json!(-3)).is_err());
+        assert_eq!(
+            serde_json::from_value::<MessageId>(json!(7)).expect("正数是合法消息 id"),
+            MessageId::parse(7).expect("正数是合法消息 id")
+        );
+        assert!(serde_json::from_value::<WorkspacePath>(json!("relative/path")).is_err());
+        assert!(serde_json::from_value::<SessionId>(json!("   ")).is_err());
+        assert!(serde_json::from_value::<SessionTitle>(json!("  ")).is_err());
+    }
+}

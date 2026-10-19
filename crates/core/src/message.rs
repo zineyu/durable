@@ -3,7 +3,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::id::{MessageId, SessionId};
+use crate::id::{MessageId, SessionId, deserialize_validated};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -74,15 +74,7 @@ impl fmt::Display for MessageTextError {
 
 impl std::error::Error for MessageTextError {}
 
-impl<'de> Deserialize<'de> for MessageText {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::parse(&raw).map_err(serde::de::Error::custom)
-    }
-}
+deserialize_validated!(MessageText);
 
 /// 消息树节点，同时是协议中的消息形状。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -101,6 +93,6 @@ pub struct MessageNode {
 /// 消息节点及其所属 session。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
-    pub session: SessionId,
-    pub node: MessageNode,
+    pub(crate) session: SessionId,
+    pub(crate) node: MessageNode,
 }

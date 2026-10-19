@@ -20,12 +20,12 @@ pub struct SessionMetadata {
 /// session 的持久记录。`active_leaf` 是当前 transcript 的叶子消息。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
-    pub id: SessionId,
-    pub workspace: WorkspacePath,
-    pub title: SessionTitle,
-    pub created_at: i64,
-    pub updated_at: i64,
-    pub active_leaf: Option<MessageId>,
+    pub(crate) id: SessionId,
+    pub(crate) workspace: WorkspacePath,
+    pub(crate) title: SessionTitle,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
+    pub(crate) active_leaf: Option<MessageId>,
 }
 
 impl SessionRecord {

@@ -75,9 +75,8 @@ impl From<StoreError> for ApiError {
             StoreError::Database(_)
             | StoreError::Migration(_)
             | StoreError::Serialization(_)
-            | StoreError::CorruptedData(_) => {
-                (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR)
-            }
+            | StoreError::CorruptedData(_)
+            | StoreError::Invariant(_) => (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR),
             StoreError::WorkspaceDuplicate(_) => {
                 (ErrorCode::WorkspaceDuplicate, StatusCode::CONFLICT)
             }

@@ -12,6 +12,8 @@ pub enum StoreError {
     Serialization(#[from] serde_json::Error),
     #[error("数据库中的值不符合领域约束: {0}")]
     CorruptedData(String),
+    #[error("写入违反内核不变量: {0}")]
+    Invariant(String),
     #[error("workspace 已注册: {}", .0.as_str())]
     WorkspaceDuplicate(WorkspacePath),
     #[error("workspace 未注册: {}", .0.as_str())]

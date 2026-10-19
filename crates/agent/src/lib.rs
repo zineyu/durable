@@ -15,10 +15,9 @@ pub use config::{
     ConfigError, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME, ModelConfig, model_config_from_env,
 };
 pub use durable::{
-    DEFAULT_SESSION_TITLE, FactEvent, MessageId, MessageIdError, MessageNode, MessageRole,
-    MessageRoleError, MessageText, MessageTextError, SessionId, SessionIdError, SessionMetadata,
-    SessionRecord, SessionTitle, SessionTitleError, SessionTree, SqliteStorage, StoreError,
-    WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    DEFAULT_SESSION_TITLE, FactEvent, MessageId, MessageNode, MessageRole, MessageText,
+    MessageTextError, SessionId, SessionIdError, SessionMetadata, SessionTitle, SessionTitleError,
+    SessionTree, Store, StoreError, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
 pub use error::ApiError;
 pub use protocol::{
@@ -26,9 +25,6 @@ pub use protocol::{
     HealthStatus, RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest,
     SubmitMessageRequest,
 };
-
-/// agent 使用的 store：SQLite 持久化。
-pub type Store = durable::Store<SqliteStorage>;
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
 

@@ -231,7 +231,8 @@ describe('侧栏状态', () => {
     ]);
   });
 
-  it('重命名忙碌 session 保留活动 run 与队列长度', () => {    const state = createSidebarState(
+  it('重命名忙碌 session 保留活动 run 与队列长度', () => {
+    const state = createSidebarState(
       bootstrap([workspaceA], [session('s-1', '/work/a', 100, { busy: true, queueLength: 2 })]),
     );
 

@@ -27,11 +27,19 @@ impl Changeset {
         self.push(Change::InsertSession(session));
     }
 
-    pub fn update_session(&mut self, session: SessionRecord) {
+    /// 写入 session 的全部可变字段：标题、更新时间与 active leaf。
+    pub fn update_session(
+        &mut self,
+        id: SessionId,
+        title: SessionTitle,
+        updated_at: i64,
+        active_leaf: Option<MessageId>,
+    ) {
         self.push(Change::UpdateSession {
-            id: session.id,
-            title: session.title,
-            updated_at: session.updated_at,
+            id,
+            title,
+            updated_at,
+            active_leaf,
         });
     }
 
@@ -41,10 +49,6 @@ impl Changeset {
 
     pub fn insert_message(&mut self, message: Message) {
         self.push(Change::InsertMessage(message));
-    }
-
-    pub fn set_active_leaf(&mut self, session: SessionId, leaf: MessageId) {
-        self.push(Change::SetActiveLeaf { session, leaf });
     }
 
     pub fn append_event(&mut self, event: FactEvent, created_at: i64) {
@@ -69,13 +73,10 @@ pub(crate) enum Change {
         id: SessionId,
         title: SessionTitle,
         updated_at: i64,
+        active_leaf: Option<MessageId>,
     },
     DeleteSession(SessionId),
     InsertMessage(Message),
-    SetActiveLeaf {
-        session: SessionId,
-        leaf: MessageId,
-    },
     AppendEvent {
         event: FactEvent,
         created_at: i64,

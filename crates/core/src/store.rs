@@ -8,35 +8,29 @@ use crate::event::FactEvent;
 use crate::id::{SessionId, SessionTitle, WorkspacePath};
 use crate::message::{Message, MessageNode, MessageRole, MessageText};
 use crate::session::{SessionMetadata, SessionRecord, SessionTree};
+use crate::storage::Snapshot;
 use crate::storage::sqlite::SqliteStorage;
-use crate::storage::{Snapshot, Storage};
 use crate::workspace::WorkspaceMetadata;
 
 /// 领域内核：唯一写入线 + 持久化边界。
 ///
-/// 所有写入经 [`Store::lock_line`] 串行化，读-改-写之间不会被其它写入插入。每次写入以
-/// 一个 [`Changeset`] 在一次存储事务内生效；事务成功前不发布任何事实事件。
-pub struct Store<S: Storage> {
-    storage: S,
+/// 所有写入经写入线串行化，读-改-写之间不会被其它写入插入。每次写入以一个
+/// [`Changeset`] 在一次存储事务内生效；事务成功前不发布任何事实事件。
+pub struct Store {
+    storage: SqliteStorage,
     line: Mutex<()>,
 }
 
-impl Store<SqliteStorage> {
+impl Store {
     /// 打开 SQLite 文件并应用迁移。
     ///
     /// 失败：数据库无法打开、连接参数被拒绝或迁移失败。
     /// 副作用：创建数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
-        Ok(Self::new(SqliteStorage::open(path).await?))
-    }
-}
-
-impl<S: Storage> Store<S> {
-    pub fn new(storage: S) -> Self {
-        Self {
-            storage,
+        Ok(Self {
+            storage: SqliteStorage::open(path).await?,
             line: Mutex::new(()),
-        }
+        })
     }
 
     /// 读取 bootstrap 元数据。
@@ -56,7 +50,10 @@ impl<S: Storage> Store<S> {
         path: &WorkspacePath,
     ) -> Result<WorkspaceMetadata, StoreError> {
         let _line = self.line.lock().await;
-        self.register_workspace_locked(path).await
+        if self.storage.workspace(path).await?.is_some() {
+            return Err(StoreError::WorkspaceDuplicate(path.clone()));
+        }
+        self.insert_workspace(path).await
     }
 
     /// 注册启动参数给出的初始 workspace。
@@ -73,18 +70,15 @@ impl<S: Storage> Store<S> {
             if self.storage.workspace(path).await?.is_some() {
                 continue;
             }
-            self.register_workspace_locked(path).await?;
+            self.insert_workspace(path).await?;
         }
         Ok(())
     }
 
-    async fn register_workspace_locked(
+    async fn insert_workspace(
         &self,
         path: &WorkspacePath,
     ) -> Result<WorkspaceMetadata, StoreError> {
-        if self.storage.workspace(path).await?.is_some() {
-            return Err(StoreError::WorkspaceDuplicate(path.clone()));
-        }
         let registered_at = now_millis();
         let workspace = WorkspaceMetadata {
             path: path.clone(),
@@ -174,7 +168,12 @@ impl<S: Storage> Store<S> {
         session.title = title.clone();
         session.updated_at = now_millis();
         let mut changes = Changeset::new();
-        changes.update_session(session.clone());
+        changes.update_session(
+            session.id.clone(),
+            session.title.clone(),
+            session.updated_at,
+            session.active_leaf,
+        );
         changes.append_event(
             FactEvent::SessionRenamed {
                 session: session.metadata(),
@@ -209,18 +208,15 @@ impl<S: Storage> Store<S> {
     ///
     /// 失败：session 不存在。
     pub async fn session_tree(&self, id: &SessionId) -> Result<SessionTree, StoreError> {
-        let session = self.find_session(id).await?;
-        let nodes = self
+        let (session, messages) = self
             .storage
-            .messages(id)
+            .session_tree(id)
             .await?
-            .into_iter()
-            .map(|message| message.node)
-            .collect();
+            .ok_or_else(|| StoreError::SessionNotFound(id.clone()))?;
         Ok(SessionTree {
             session: session.metadata(),
             active_leaf: session.active_leaf,
-            nodes,
+            nodes: messages.into_iter().map(|message| message.node).collect(),
         })
     }
 
@@ -252,8 +248,12 @@ impl<S: Storage> Store<S> {
             session: id.clone(),
             node: node.clone(),
         });
-        changes.update_session(session.clone());
-        changes.set_active_leaf(id.clone(), message_id);
+        changes.update_session(
+            session.id.clone(),
+            session.title.clone(),
+            session.updated_at,
+            session.active_leaf,
+        );
         changes.append_event(
             FactEvent::MessageAppended {
                 session: session.metadata(),

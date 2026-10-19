@@ -19,7 +19,6 @@ pub use message::{
     Message, MessageNode, MessageRole, MessageRoleError, MessageText, MessageTextError,
 };
 pub use session::{SessionMetadata, SessionRecord, SessionTree};
-pub use storage::sqlite::SqliteStorage;
-pub use storage::{Snapshot, Storage};
+pub use storage::Snapshot;
 pub use store::Store;
 pub use workspace::WorkspaceMetadata;
