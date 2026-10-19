@@ -24,7 +24,7 @@
 
 .select {
   display: grid;
-  grid-template-columns: var(--dot-size) minmax(0, 1fr) auto;
+  grid-template-columns: var(--dot-size) minmax(0, 1fr) auto auto;
   column-gap: var(--space-2);
   align-items: center;
   width: 100%;
@@ -99,8 +99,17 @@
   font-weight: var(--weight-semibold);
 }
 
+.time {
+  flex: none;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .badge {
-  grid-column: 3;
+  grid-column: 4;
   flex: none;
   min-width: var(--control-height-2xs);
   padding: 0 var(--space-1);

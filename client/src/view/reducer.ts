@@ -9,6 +9,7 @@ import type { StreamEvent } from '../api/generated/StreamEvent';
 import type { ToolCallRecord } from '../api/generated/ToolCallRecord';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
+import { runFailureLabel } from './labels';
 import type { ConnectionState, MessageState, SessionSummary, WorkspaceSummary } from './types';
 
 export type SessionTreeState = {
@@ -233,7 +234,13 @@ export function messageView(
     case 'running':
       return { state: 'streaming', note: null };
     case 'failed':
-      return { state: 'failed', note: run.failure === null ? null : run.failure.message };
+      return {
+        state: 'failed',
+        note:
+          run.failure === null
+            ? null
+            : `${runFailureLabel[run.failure.code]}：${run.failure.message}`,
+      };
     case 'cancelled':
       return { state: 'cancelled', note: null };
     case 'succeeded':
@@ -365,6 +372,7 @@ function toSessionSummary(session: SessionMetadata): SessionSummary {
     title: session.title,
     state,
     queuedCount: session.queueLength,
+    updatedAt: session.updatedAt,
   };
 }
 

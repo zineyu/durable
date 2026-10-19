@@ -19,6 +19,7 @@ export type SessionSummary = {
   title: string;
   state: SessionState;
   queuedCount: number;
+  updatedAt: number;
 };
 
 export type WorkspaceSummary = {

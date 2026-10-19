@@ -3,6 +3,9 @@ import type { QueueItem, WorkspaceSummary } from '../view/types';
 
 export const modelName = 'gpt-5-codex';
 
+const updated = (hours: number, minutes: number): number =>
+  new Date(2026, 9, 19, hours, minutes).getTime();
+
 export const workspaces: WorkspaceSummary[] = [
   {
     id: toWorkspaceId('ws-durable'),
@@ -13,18 +16,21 @@ export const workspaces: WorkspaceSummary[] = [
         title: '双二进制骨架与工程基线',
         state: 'running',
         queuedCount: 0,
+        updatedAt: updated(15, 58),
       },
       {
         id: toSessionId('s-2'),
         title: 'UI 反代与静态资源内嵌',
         state: 'queued',
         queuedCount: 2,
+        updatedAt: updated(14, 12),
       },
       {
         id: toSessionId('s-3'),
         title: '类型生成一致性检查',
         state: 'idle',
         queuedCount: 0,
+        updatedAt: updated(9, 30),
       },
     ],
   },
@@ -37,6 +43,7 @@ export const workspaces: WorkspaceSummary[] = [
         title: 'SQLite 迁移与恢复',
         state: 'idle',
         queuedCount: 0,
+        updatedAt: updated(8, 5),
       },
     ],
   },

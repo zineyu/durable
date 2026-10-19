@@ -3,11 +3,14 @@ import { SessionListItem } from './SessionListItem';
 import { toSessionId } from '../view/ids';
 import type { SessionSummary } from '../view/types';
 
+const updatedAt = new Date(2026, 9, 19, 15, 58).getTime();
+
 const idle: SessionSummary = {
   id: toSessionId('s-idle'),
   title: '类型生成一致性检查',
   state: 'idle',
   queuedCount: 0,
+  updatedAt,
 };
 
 const meta = {
@@ -43,6 +46,7 @@ export const Running: Story = {
       title: '双二进制骨架与工程基线',
       state: 'running',
       queuedCount: 0,
+      updatedAt,
     },
     selected: false,
   },
@@ -55,6 +59,7 @@ export const QueuedWithBacklog: Story = {
       title: 'UI 反代与静态资源内嵌',
       state: 'queued',
       queuedCount: 3,
+      updatedAt,
     },
     selected: false,
   },
@@ -67,6 +72,7 @@ export const LongTitle: Story = {
       title: '把 ui 的静态资源改为内嵌并确认 SSE 在反代中不被缓冲且断线可续传',
       state: 'idle',
       queuedCount: 0,
+      updatedAt,
     },
     selected: false,
   },

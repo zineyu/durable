@@ -87,8 +87,8 @@ export const Failed: Story = {
   render: () => (
     <AppShell sidebar={sidebar}>
       <ErrorBanner
-        code="llm.upstream_error"
-        message="模型上游返回 502，当前 run 已结束，队列将继续执行。"
+        code="run_in_progress"
+        message="session 有 run 进行中：分支操作需要 session 空闲且队列为空。"
       />
       <MainHeader
         title="SQLite 迁移与恢复"

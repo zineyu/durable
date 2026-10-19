@@ -4,6 +4,7 @@ import { IconButton } from './IconButton';
 import { StatusDot } from './StatusDot';
 import styles from './SessionListItem.module.css';
 import { sessionStateTone } from '../view/labels';
+import { formatUpdatedAt } from '../view/time';
 import type { SessionSummary } from '../view/types';
 import type { SessionId } from '../view/ids';
 
@@ -97,6 +98,9 @@ export function SessionListItem({
           <span className={styles.title}>
             <span className={styles.titleText}>{session.title}</span>
           </span>
+          <time className={styles.time} dateTime={new Date(session.updatedAt).toISOString()}>
+            {formatUpdatedAt(session.updatedAt)}
+          </time>
           {session.queuedCount > 0 ? (
             <span className={styles.badge}>{session.queuedCount}</span>
           ) : null}

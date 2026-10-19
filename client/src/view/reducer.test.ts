@@ -116,15 +116,17 @@ describe('侧栏状态', () => {
         id: '/work/a',
         path: '/work/a',
         sessions: [
-          { id: toSessionId('s-new'), title: '标题 s-new', state: 'idle', queuedCount: 0 },
-          { id: toSessionId('s-mid'), title: '标题 s-mid', state: 'idle', queuedCount: 0 },
-          { id: toSessionId('s-old'), title: '标题 s-old', state: 'idle', queuedCount: 0 },
+          { id: toSessionId('s-new'), title: '标题 s-new', state: 'idle', queuedCount: 0, updatedAt: 300 },
+          { id: toSessionId('s-mid'), title: '标题 s-mid', state: 'idle', queuedCount: 0, updatedAt: 200 },
+          { id: toSessionId('s-old'), title: '标题 s-old', state: 'idle', queuedCount: 0, updatedAt: 100 },
         ],
       },
       {
         id: '/work/b',
         path: '/work/b',
-        sessions: [{ id: toSessionId('s-b'), title: '标题 s-b', state: 'idle', queuedCount: 0 }],
+        sessions: [
+          { id: toSessionId('s-b'), title: '标题 s-b', state: 'idle', queuedCount: 0, updatedAt: 50 },
+        ],
       },
     ]);
   });
@@ -139,8 +141,20 @@ describe('侧栏状态', () => {
     );
 
     expect(sidebarWorkspaces(state)[0]?.sessions).toEqual([
-      { id: toSessionId('s-queued'), title: '标题 s-queued', state: 'queued', queuedCount: 2 },
-      { id: toSessionId('s-running'), title: '标题 s-running', state: 'running', queuedCount: 0 },
+      {
+        id: toSessionId('s-queued'),
+        title: '标题 s-queued',
+        state: 'queued',
+        queuedCount: 2,
+        updatedAt: 200,
+      },
+      {
+        id: toSessionId('s-running'),
+        title: '标题 s-running',
+        state: 'running',
+        queuedCount: 0,
+        updatedAt: 100,
+      },
     ]);
   });
 
@@ -176,11 +190,12 @@ describe('侧栏状态', () => {
       title: '新标题',
       state: 'idle',
       queuedCount: 0,
+      updatedAt: 300,
     });
 
     const deleted = applyFact(renamed, { kind: 'session_deleted', sessionId: 's-2' });
     expect(sidebarWorkspaces(deleted)[0]?.sessions).toEqual([
-      { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0 },
+      { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0, updatedAt: 200 },
     ]);
   });
 
@@ -352,7 +367,10 @@ describe('流式增量与 run 状态', () => {
         updatedAt: 300,
       },
     });
-    expect(messageView(state, 's-1', assistant)).toEqual({ state: 'failed', note: '上游 502' });
+    expect(messageView(state, 's-1', assistant)).toEqual({
+      state: 'failed',
+      note: '模型上游错误：上游 502',
+    });
   });
 });
 
