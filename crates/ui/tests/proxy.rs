@@ -1,8 +1,8 @@
 use std::net::{Ipv4Addr, SocketAddr};
 
-async fn start_agent() -> SocketAddr {
-    let directory = tempfile::tempdir().expect("创建临时目录").keep();
-    let store = agent::Store::open(&directory.join("agent.sqlite")).expect("打开 SQLite");
+async fn start_agent() -> (tempfile::TempDir, SocketAddr) {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let store = agent::Store::open(&directory.path().join("agent.sqlite")).expect("打开 SQLite");
     let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await
         .expect("绑定 agent 端口");
@@ -15,7 +15,7 @@ async fn start_agent() -> SocketAddr {
         .await
         .expect("agent 服务运行");
     });
-    address
+    (directory, address)
 }
 
 async fn start_ui(agent_url: String) -> SocketAddr {
@@ -31,7 +31,7 @@ async fn start_ui(agent_url: String) -> SocketAddr {
 
 #[tokio::test]
 async fn health_is_reachable_through_ui_proxy() {
-    let agent_address = start_agent().await;
+    let (_directory, agent_address) = start_agent().await;
     let ui_address = start_ui(format!("http://{agent_address}")).await;
 
     let response = reqwest::get(format!("http://{ui_address}/api/health"))
@@ -46,7 +46,7 @@ async fn health_is_reachable_through_ui_proxy() {
 
 #[tokio::test]
 async fn serves_embedded_index() {
-    let agent_address = start_agent().await;
+    let (_directory, agent_address) = start_agent().await;
     let ui_address = start_ui(format!("http://{agent_address}")).await;
 
     let response = reqwest::get(format!("http://{ui_address}/"))

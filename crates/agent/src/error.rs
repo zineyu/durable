@@ -91,8 +91,8 @@ impl From<WorkspacePathError> for ApiError {
 impl From<SessionIdError> for ApiError {
     fn from(error: SessionIdError) -> Self {
         Self::new(
-            ErrorCode::SessionNotFound,
-            StatusCode::NOT_FOUND,
+            ErrorCode::InvalidRequest,
+            StatusCode::UNPROCESSABLE_ENTITY,
             error.to_string(),
         )
     }

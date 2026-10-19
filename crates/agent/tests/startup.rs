@@ -135,3 +135,34 @@ async fn restarts_with_same_initial_workspace_without_duplicating() {
     second.start_kill().expect("结束第二个 agent");
     second.wait().await.expect("等待第二个 agent 退出");
 }
+/// 规格「进程与部署」：空值视为缺失。
+#[test]
+fn fails_when_model_config_is_blank() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let output = run_agent(directory.path(), |command| {
+        command.env(agent::MODEL_API_KEY, "  ");
+    });
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr 是 UTF-8");
+    assert!(stderr.contains(agent::MODEL_API_KEY), "stderr: {stderr}");
+    assert!(!stderr.contains(agent::MODEL_NAME), "stderr: {stderr}");
+}
+
+/// 规格「进程与部署」：配置不是 UTF-8 与配置缺失是不同失败。
+#[cfg(unix)]
+#[test]
+fn fails_when_model_config_is_not_unicode() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let output = run_agent(directory.path(), |command| {
+        command.env(agent::MODEL_NAME, OsString::from_vec(vec![0xff, 0xfe]));
+    });
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr 是 UTF-8");
+    assert!(stderr.contains("配置不是 UTF-8"), "stderr: {stderr}");
+    assert!(stderr.contains(agent::MODEL_NAME), "stderr: {stderr}");
+}

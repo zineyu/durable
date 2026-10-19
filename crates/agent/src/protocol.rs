@@ -3,6 +3,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -17,7 +18,7 @@ pub struct HealthResponse {
 }
 
 /// workspace 身份：规范化后的绝对路径。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, TS)]
 pub struct WorkspacePath(String);
 
 impl WorkspacePath {
@@ -74,7 +75,7 @@ impl fmt::Display for WorkspacePathError {
 impl std::error::Error for WorkspacePathError {}
 
 /// session 身份。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, TS)]
 pub struct SessionId(String);
 
 impl SessionId {
@@ -89,8 +90,53 @@ impl SessionId {
         Ok(Self(trimmed.to_owned()))
     }
 
+    /// 生成新的 session id（UUID v7，按时间有序）。
+    pub fn generate() -> Self {
+        Self(Uuid::now_v7().to_string())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for WorkspacePath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for SessionTitle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for MessageId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -106,7 +152,7 @@ impl fmt::Display for SessionIdError {
 impl std::error::Error for SessionIdError {}
 
 /// session 标题。构造时去掉首尾空白，因此总是非空。
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct SessionTitle(String);
 
 pub const DEFAULT_SESSION_TITLE: &str = "新 session";
@@ -176,6 +222,38 @@ pub struct BootstrapResponse {
     pub sessions: Vec<SessionMetadata>,
 }
 
+/// 消息节点身份。
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, TS)]
+pub struct MessageId(String);
+
+impl MessageId {
+    /// 解析消息节点 id。
+    ///
+    /// 失败：id 为空。
+    pub fn parse(raw: &str) -> Result<Self, MessageIdError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(MessageIdError(raw.to_owned()));
+        }
+        Ok(Self(trimmed.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageIdError(String);
+
+impl fmt::Display for MessageIdError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "消息 id 不能为空: {}", self.0)
+    }
+}
+
+impl std::error::Error for MessageIdError {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageRole {
@@ -186,8 +264,8 @@ pub enum MessageRole {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageNode {
-    pub id: String,
-    pub parent_id: Option<String>,
+    pub id: MessageId,
+    pub parent_id: Option<MessageId>,
     pub role: MessageRole,
 }
 
@@ -195,7 +273,7 @@ pub struct MessageNode {
 #[serde(rename_all = "camelCase")]
 pub struct SessionTree {
     pub session: SessionMetadata,
-    pub active_leaf: Option<String>,
+    pub active_leaf: Option<MessageId>,
     pub nodes: Vec<MessageNode>,
 }
 

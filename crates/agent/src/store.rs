@@ -4,12 +4,13 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection, OptionalExtension, Row, Transaction};
-use uuid::Uuid;
 
 use crate::error::StoreError;
 use crate::protocol::{
     FactEvent, SessionId, SessionMetadata, SessionTitle, WorkspaceMetadata, WorkspacePath,
 };
+
+const SESSION_COLUMNS: &str = "id, workspace, title, updated_at";
 
 const MIGRATIONS: &[&str] = &["CREATE TABLE workspace (
          path TEXT PRIMARY KEY,
@@ -167,8 +168,7 @@ impl Store {
         }
         let created_at = now_millis();
         let session = SessionMetadata {
-            id: SessionId::parse(&Uuid::now_v7().to_string())
-                .expect("生成的 UUID 是合法 session id"),
+            id: SessionId::generate(),
             workspace: workspace.clone(),
             title,
             busy: SESSION_BUSY,
@@ -308,29 +308,41 @@ fn read_workspaces(connection: &Connection) -> Result<Vec<WorkspaceMetadata>, St
 }
 
 fn read_sessions(connection: &Connection) -> Result<Vec<SessionMetadata>, StoreError> {
-    let mut statement = connection.prepare(
-        "SELECT id, workspace, title, updated_at
-         FROM session ORDER BY updated_at DESC, rowid DESC",
-    )?;
+    let mut statement = connection.prepare(&format!(
+        "SELECT {SESSION_COLUMNS} FROM session ORDER BY updated_at DESC, rowid DESC"
+    ))?;
     let rows = statement.query_map([], read_session_row)?;
-    rows.map(|row| session_from_row(row?)).collect()
+    rows.map(|row| row?.into_metadata()).collect()
 }
 
-fn read_session_row(row: &Row<'_>) -> rusqlite::Result<(String, String, String, i64)> {
-    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+struct SessionRow {
+    id: String,
+    workspace: String,
+    title: String,
+    updated_at: i64,
 }
 
-fn session_from_row(
-    (id, workspace, title, updated_at): (String, String, String, i64),
-) -> Result<SessionMetadata, StoreError> {
-    Ok(SessionMetadata {
-        id: SessionId::parse(&id).map_err(|error| corrupted("session.id", error))?,
-        workspace: WorkspacePath::parse(&workspace)
-            .map_err(|error| corrupted("session.workspace", error))?,
-        title: SessionTitle::parse(&title).map_err(|error| corrupted("session.title", error))?,
-        busy: SESSION_BUSY,
-        queue_length: SESSION_QUEUE_LENGTH,
-        updated_at,
+impl SessionRow {
+    fn into_metadata(self) -> Result<SessionMetadata, StoreError> {
+        Ok(SessionMetadata {
+            id: SessionId::parse(&self.id).map_err(|error| corrupted("session.id", error))?,
+            workspace: WorkspacePath::parse(&self.workspace)
+                .map_err(|error| corrupted("session.workspace", error))?,
+            title: SessionTitle::parse(&self.title)
+                .map_err(|error| corrupted("session.title", error))?,
+            busy: SESSION_BUSY,
+            queue_length: SESSION_QUEUE_LENGTH,
+            updated_at: self.updated_at,
+        })
+    }
+}
+
+fn read_session_row(row: &Row<'_>) -> rusqlite::Result<SessionRow> {
+    Ok(SessionRow {
+        id: row.get(0)?,
+        workspace: row.get(1)?,
+        title: row.get(2)?,
+        updated_at: row.get(3)?,
     })
 }
 
@@ -340,12 +352,12 @@ fn find_session(
 ) -> Result<Option<SessionMetadata>, StoreError> {
     connection
         .query_row(
-            "SELECT id, workspace, title, updated_at FROM session WHERE id = ?1",
+            &format!("SELECT {SESSION_COLUMNS} FROM session WHERE id = ?1"),
             [id.as_str()],
             read_session_row,
         )
         .optional()?
-        .map(session_from_row)
+        .map(SessionRow::into_metadata)
         .transpose()
 }
 

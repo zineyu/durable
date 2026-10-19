@@ -1,23 +1,12 @@
-use std::net::{Ipv4Addr, SocketAddr};
+mod support;
 
 #[tokio::test]
 async fn health_endpoint_reports_ok() {
     let directory = tempfile::tempdir().expect("创建临时目录");
-    let store = agent::Store::open(&directory.path().join("agent.sqlite")).expect("打开 SQLite");
-    let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
-        .await
-        .expect("绑定回环端口");
-    let address = listener.local_addr().expect("读取本地地址");
-    tokio::spawn(async move {
-        agent::serve(
-            listener,
-            agent::AgentState::new(store, "test-model".to_owned()),
-        )
-        .await
-        .expect("agent 服务运行");
-    });
+    let agent =
+        support::TestAgent::start(&directory.path().join("agent.sqlite"), "test-model").await;
 
-    let response = reqwest::get(format!("http://{address}/api/health"))
+    let response = reqwest::get(agent.url("/api/health"))
         .await
         .expect("请求 health 端点");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
