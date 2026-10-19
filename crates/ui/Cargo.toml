@@ -16,3 +16,4 @@ tokio = { version = "1.53.3", features = ["full"] }
 [dev-dependencies]
 agent = { path = "../agent" }
 reqwest = { version = "0.13.5", features = ["json"] }
+tempfile = "3.27.0"

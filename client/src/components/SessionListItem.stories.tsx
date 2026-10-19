@@ -28,6 +28,14 @@ export const MenuOpen: Story = {
   args: { session: idle, selected: true, defaultMenuOpen: true },
 };
 
+export const Renaming: Story = {
+  args: { session: idle, selected: true, renaming: true },
+};
+
+export const DeleteConfirm: Story = {
+  args: { session: idle, selected: true, confirmDelete: true },
+};
+
 export const Running: Story = {
   args: {
     session: {

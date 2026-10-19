@@ -9,9 +9,15 @@ export type SidebarProps = {
   modelName: string;
   workspaces: WorkspaceSummary[];
   selectedSessionId: SessionId | null;
+  renamingSessionId?: SessionId | null;
+  pendingDeleteSessionId?: SessionId | null;
   onSelectSession?: (id: SessionId) => void;
-  onRenameSession?: (id: SessionId) => void;
-  onDeleteSession?: (id: SessionId) => void;
+  onRenameRequest?: (id: SessionId) => void;
+  onRenameSubmit?: (id: SessionId, title: string) => void;
+  onRenameCancel?: () => void;
+  onDeleteRequest?: (id: SessionId) => void;
+  onDeleteConfirm?: (id: SessionId) => void;
+  onDeleteCancel?: () => void;
   onAddWorkspace?: () => void;
 };
 
@@ -19,9 +25,15 @@ export function Sidebar({
   modelName,
   workspaces,
   selectedSessionId,
+  renamingSessionId,
+  pendingDeleteSessionId,
   onSelectSession,
-  onRenameSession,
-  onDeleteSession,
+  onRenameRequest,
+  onRenameSubmit,
+  onRenameCancel,
+  onDeleteRequest,
+  onDeleteConfirm,
+  onDeleteCancel,
   onAddWorkspace,
 }: SidebarProps) {
   return (
@@ -48,13 +60,15 @@ export function Sidebar({
                 key={session.id}
                 session={session}
                 selected={session.id === selectedSessionId}
+                renaming={session.id === renamingSessionId}
+                confirmDelete={session.id === pendingDeleteSessionId}
                 {...(onSelectSession ? { onSelect: onSelectSession } : {})}
-                {...(onRenameSession
-                  ? { onRename: (id: SessionId) => onRenameSession(id) }
-                  : {})}
-                {...(onDeleteSession
-                  ? { onDelete: (id: SessionId) => onDeleteSession(id) }
-                  : {})}
+                {...(onRenameRequest ? { onRenameRequest } : {})}
+                {...(onRenameSubmit ? { onRenameSubmit } : {})}
+                {...(onRenameCancel ? { onRenameCancel } : {})}
+                {...(onDeleteRequest ? { onDeleteRequest } : {})}
+                {...(onDeleteConfirm ? { onDeleteConfirm } : {})}
+                {...(onDeleteCancel ? { onDeleteCancel } : {})}
               />
             ))}
           </WorkspaceGroup>

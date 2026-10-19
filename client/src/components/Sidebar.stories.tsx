@@ -36,3 +36,21 @@ export const WorkspaceWithoutSessions: Story = {
     selectedSessionId: null,
   },
 };
+
+export const Renaming: Story = {
+  args: {
+    modelName,
+    workspaces,
+    selectedSessionId: toSessionId('s-2'),
+    renamingSessionId: toSessionId('s-2'),
+  },
+};
+
+export const DeleteConfirm: Story = {
+  args: {
+    modelName,
+    workspaces,
+    selectedSessionId: toSessionId('s-2'),
+    pendingDeleteSessionId: toSessionId('s-2'),
+  },
+};

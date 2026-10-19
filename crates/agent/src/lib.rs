@@ -1,24 +1,24 @@
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::Path;
 
-use axum::routing::get;
-use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+mod api;
+mod config;
+mod error;
+mod protocol;
+mod store;
+
+pub use api::{router, serve, AgentState};
+pub use config::{
+    model_config_from_env, ConfigError, ModelConfig, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME,
+};
+pub use error::{ApiError, StoreError};
+pub use protocol::*;
+pub use store::{Snapshot, Store};
+
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "lowercase")]
-pub enum HealthStatus {
-    Ok,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-pub struct HealthResponse {
-    pub status: HealthStatus,
-    pub version: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListenAddressError {
@@ -47,24 +47,23 @@ pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError>
     Ok(address)
 }
 
-pub fn router() -> Router {
-    Router::new().route("/api/health", get(health))
-}
-
-async fn health() -> Json<HealthResponse> {
-    Json(HealthResponse {
-        status: HealthStatus::Ok,
-        version: env!("CARGO_PKG_VERSION").to_owned(),
-    })
-}
-
-pub async fn serve(listener: tokio::net::TcpListener) -> std::io::Result<()> {
-    axum::serve(listener, router()).await
-}
-
-pub fn export_types(directory: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(directory)?;
     let config = ts_rs::Config::new().with_out_dir(directory);
     HealthResponse::export_all(&config)?;
+    HealthStatus::export_all(&config)?;
+    WorkspaceMetadata::export_all(&config)?;
+    SessionMetadata::export_all(&config)?;
+    BootstrapResponse::export_all(&config)?;
+    MessageRole::export_all(&config)?;
+    MessageNode::export_all(&config)?;
+    SessionTree::export_all(&config)?;
+    FactEvent::export_all(&config)?;
+    ErrorCode::export_all(&config)?;
+    ErrorResponse::export_all(&config)?;
+    RegisterWorkspaceRequest::export_all(&config)?;
+    RemoveWorkspaceRequest::export_all(&config)?;
+    CreateSessionRequest::export_all(&config)?;
+    RenameSessionRequest::export_all(&config)?;
     Ok(())
 }
