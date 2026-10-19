@@ -16,6 +16,7 @@ import {
   messageView,
   reduce,
   sidebarWorkspaces,
+  snapshotCursor,
   transcriptNodes,
 } from './reducer';
 import type { ClientState } from './reducer';
@@ -375,6 +376,11 @@ describe('流式增量与 run 状态', () => {
 });
 
 describe('事件流的幂等与隔离', () => {
+  it('快照游标取较老水位，无基线时取快照水位', () => {
+    expect(snapshotCursor(null, 7)).toBe(7);
+    expect(snapshotCursor(9, 7)).toBe(7);
+    expect(snapshotCursor(5, 9)).toBe(5);
+  });
   it('重复事件被忽略', () => {
     const state = loadSessionTree(withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]), {
       maxEventId: 7,

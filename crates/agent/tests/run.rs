@@ -277,6 +277,55 @@ async fn cancels_running_run_and_keeps_partial_text() {
     assert_eq!(tree.nodes[3].text.as_str(), "下一项");
 }
 
+/// 规格 user story 23：多个标签页订阅同一条事件流，任一命令对全部订阅者生效。
+#[tokio::test]
+async fn broadcasts_facts_to_every_subscriber() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Text("完成".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    let cursor = harness.bootstrap().await.max_event_id;
+    let mut first = harness.subscribe(cursor).await;
+    let mut second = harness.subscribe(cursor).await;
+
+    harness.submit_message(&session.id, "执行").await;
+
+    for events in [&mut first, &mut second] {
+        let mut kinds = Vec::new();
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(10), events.next())
+                .await
+                .expect("等待 SSE 事件")
+                .expect("事件流未结束");
+            let agent::StreamEvent::Fact { event, .. } = event else {
+                continue;
+            };
+            let kind = serde_json::to_value(&event).expect("事件可序列化")["kind"]
+                .as_str()
+                .expect("事件有 kind")
+                .to_owned();
+            kinds.push(kind);
+            if matches!(event, agent::FactEvent::RunFinished { .. }) {
+                break;
+            }
+        }
+        assert_eq!(
+            kinds,
+            vec![
+                "message_queued",
+                "message_appended",
+                "message_appended",
+                "queue_item_removed",
+                "run_started",
+                "message_updated",
+                "run_finished",
+            ]
+        );
+    }
+}
+
 /// 规格「事实事件」与 user story 9：工具调用在 run 结束前就以事实事件广播。
 #[tokio::test]
 async fn broadcasts_tool_call_fact_while_run_is_running() {
