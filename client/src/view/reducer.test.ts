@@ -275,7 +275,7 @@ describe('侧栏状态', () => {
     const next = applyEvent(state, {
       kind: 'message_queued',
       session: session('s-1', '/work/a', 300, { title: '首条消息', queueLength: 2 }),
-      item: { id: 4, text: '首条消息', createdAt: 300 },
+      item: { id: 4, text: '首条消息', anchor: null, createdAt: 300 },
     });
 
     expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
@@ -306,6 +306,20 @@ describe('侧栏状态', () => {
     });
     expect(sidebarWorkspaces(emptied)[0]?.sessions).toEqual([
       { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0 },
+    ]);
+  });
+
+  it('active leaf 变更事件更新事件携带的 session 元数据', () => {
+    const state = createSidebarState(bootstrap([workspaceA], [session('s-1', '/work/a', 100)]));
+
+    const next = applyEvent(state, {
+      kind: 'active_leaf_changed',
+      session: session('s-1', '/work/a', 300, { title: '切换后' }),
+      activeLeaf: 7,
+    });
+
+    expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '切换后', state: 'idle', queuedCount: 0 },
     ]);
   });
 

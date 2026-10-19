@@ -2,8 +2,8 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use durable::{
-    MessageTextError, QueueItemIdError, SessionIdError, SessionTitleError, StoreError,
-    WorkspacePathError,
+    MessageIdError, MessageTextError, QueueItemIdError, SessionIdError, SessionTitleError,
+    StoreError, WorkspacePathError,
 };
 
 use crate::protocol::{ErrorCode, ErrorResponse};
@@ -60,6 +60,16 @@ impl From<QueueItemIdError> for ApiError {
     }
 }
 
+impl From<MessageIdError> for ApiError {
+    fn from(error: MessageIdError) -> Self {
+        Self::new(
+            ErrorCode::InvalidRequest,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.to_string(),
+        )
+    }
+}
+
 impl From<SessionTitleError> for ApiError {
     fn from(error: SessionTitleError) -> Self {
         Self::new(
@@ -101,6 +111,15 @@ impl From<StoreError> for ApiError {
             StoreError::QueueItemNotFound(_, _) => {
                 (ErrorCode::QueueItemNotFound, StatusCode::NOT_FOUND)
             }
+            StoreError::MessageNotFound(_, _) => {
+                (ErrorCode::MessageNotFound, StatusCode::NOT_FOUND)
+            }
+            StoreError::MessageRoleMismatch(_, _) => (
+                ErrorCode::MessageRoleMismatch,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            StoreError::RunInProgress(_) => (ErrorCode::RunInProgress, StatusCode::CONFLICT),
+            StoreError::QueueNotEmpty(_) => (ErrorCode::QueueNotEmpty, StatusCode::CONFLICT),
         };
         Self::new(code, status, error.to_string())
     }

@@ -284,6 +284,53 @@ impl Harness {
             .expect("提交消息")
     }
 
+    pub async fn edit_message(
+        &self,
+        id: &agent::SessionId,
+        message: agent::MessageId,
+        text: &str,
+    ) -> Response {
+        self.client
+            .post(self.url(&format!(
+                "/api/sessions/{}/messages/{}/edit",
+                id.as_str(),
+                message.get()
+            )))
+            .json(&serde_json::json!({ "text": text }))
+            .send()
+            .await
+            .expect("编辑用户消息")
+    }
+
+    pub async fn retry_message(
+        &self,
+        id: &agent::SessionId,
+        message: agent::MessageId,
+    ) -> Response {
+        self.client
+            .post(self.url(&format!(
+                "/api/sessions/{}/messages/{}/retry",
+                id.as_str(),
+                message.get()
+            )))
+            .send()
+            .await
+            .expect("重试 assistant 消息")
+    }
+
+    pub async fn switch_active_leaf(
+        &self,
+        id: &agent::SessionId,
+        message: agent::MessageId,
+    ) -> Response {
+        self.client
+            .post(self.url(&format!("/api/sessions/{}/active-leaf", id.as_str())))
+            .json(&serde_json::json!({ "messageId": message.get() }))
+            .send()
+            .await
+            .expect("切换 active leaf")
+    }
+
     pub async fn cancel_run(&self, id: &agent::SessionId) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/cancel", id.as_str())))

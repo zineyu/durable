@@ -7,8 +7,8 @@ use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use durable::{
-    EventBus, MessageText, QueueItem, QueueItemId, SessionId, SessionTitle, Store, StoreError,
-    WorkspacePath,
+    EventBus, MessageId, MessageText, QueueItem, QueueItemId, SessionId, SessionTitle, Store,
+    StoreError, WorkspacePath,
 };
 use serde::de::DeserializeOwned;
 
@@ -16,8 +16,9 @@ use crate::config::EngineConfig;
 use crate::engine::RunEngine;
 use crate::error::ApiError;
 use crate::protocol::{
-    BootstrapResponse, CreateSessionRequest, HealthResponse, HealthStatus,
+    BootstrapResponse, CreateSessionRequest, EditMessageRequest, HealthResponse, HealthStatus,
     RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest,
+    SwitchActiveLeafRequest,
 };
 use crate::provider::ModelProvider;
 use crate::sse;
@@ -67,6 +68,31 @@ where
 struct QueueItemPath {
     session: SessionId,
     item: QueueItemId,
+}
+
+/// `{id}/messages/{message}` 路径参数。
+struct MessagePath {
+    session: SessionId,
+    message: MessageId,
+}
+
+impl<S> FromRequestParts<S> for MessagePath
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Path((session, message)) = Path::<(String, i64)>::from_request_parts(parts, state)
+            .await
+            .map_err(|rejection: PathRejection| {
+                ApiError::invalid_request(rejection.status(), rejection.body_text())
+            })?;
+        Ok(Self {
+            session: SessionId::parse(&session)?,
+            message: MessageId::parse(message)?,
+        })
+    }
 }
 
 impl<S> FromRequestParts<S> for QueueItemPath
@@ -146,6 +172,15 @@ pub fn router(state: AgentState) -> Router {
         .route("/api/sessions/{id}/rename", post(rename_session))
         .route("/api/sessions/{id}/delete", post(delete_session))
         .route("/api/sessions/{id}/messages", post(submit_message))
+        .route(
+            "/api/sessions/{id}/messages/{message}/edit",
+            post(edit_user_message),
+        )
+        .route(
+            "/api/sessions/{id}/messages/{message}/retry",
+            post(retry_assistant_message),
+        )
+        .route("/api/sessions/{id}/active-leaf", post(switch_active_leaf))
         .route("/api/sessions/{id}/cancel", post(cancel_run))
         .route(
             "/api/sessions/{id}/queue/{item}/remove",
@@ -241,6 +276,44 @@ async fn submit_message(
     let item = state.store().enqueue_message(&id, text).await?;
     state.engine().notify_session(id);
     Ok((StatusCode::CREATED, Json(item)))
+}
+
+async fn edit_user_message(
+    State(state): State<AgentState>,
+    MessagePath { session, message }: MessagePath,
+    JsonBody(request): JsonBody<EditMessageRequest>,
+) -> Result<(StatusCode, Json<durable::MessageNode>), ApiError> {
+    let text = MessageText::parse(&request.text)?;
+    let node = state
+        .store()
+        .edit_user_message(&session, message, text)
+        .await?;
+    state.engine().notify_session(session);
+    Ok((StatusCode::CREATED, Json(node)))
+}
+
+async fn retry_assistant_message(
+    State(state): State<AgentState>,
+    MessagePath { session, message }: MessagePath,
+) -> Result<StatusCode, ApiError> {
+    state
+        .store()
+        .retry_assistant_message(&session, message)
+        .await?;
+    state.engine().notify_session(session);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn switch_active_leaf(
+    State(state): State<AgentState>,
+    SessionPath(session): SessionPath,
+    JsonBody(request): JsonBody<SwitchActiveLeafRequest>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .store()
+        .switch_active_leaf(&session, request.message_id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn cancel_run(

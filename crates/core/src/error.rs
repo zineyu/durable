@@ -1,6 +1,7 @@
 use thiserror::Error;
 
-use crate::id::{QueueItemId, SessionId, WorkspacePath};
+use crate::id::{MessageId, QueueItemId, SessionId, WorkspacePath};
+use crate::message::MessageRole;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -24,4 +25,12 @@ pub enum StoreError {
     SessionNotFound(SessionId),
     #[error("队列项不存在: {}", .1.get())]
     QueueItemNotFound(SessionId, QueueItemId),
+    #[error("消息不存在: {}", .1.get())]
+    MessageNotFound(SessionId, MessageId),
+    #[error("消息角色不匹配: {} 是 {}", .0.get(), .1.as_str())]
+    MessageRoleMismatch(MessageId, MessageRole),
+    #[error("session 有 run 进行中: {}", .0.as_str())]
+    RunInProgress(SessionId),
+    #[error("session 的队列非空: {}", .0.as_str())]
+    QueueNotEmpty(SessionId),
 }

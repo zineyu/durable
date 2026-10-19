@@ -10,8 +10,8 @@ use crate::message::{Message, MessageContent, MessageNode, MessageRole, MessageT
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunFailureCode, RunRecord, RunStatus};
 use crate::session::{SessionMetadata, SessionRecord, SessionTree, derive_title};
-use crate::storage::Snapshot;
 use crate::storage::sqlite::SqliteStorage;
+use crate::storage::{SessionSnapshot, Snapshot};
 use crate::stream::{EventBus, StreamEvent};
 use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
@@ -272,6 +272,7 @@ impl Store {
         let item = QueueItem {
             id: self.storage.mint_queue_item_id().await?,
             text,
+            anchor: None,
             created_at,
         };
         let mut changes = Changeset::new();
@@ -321,10 +322,202 @@ impl Store {
         self.commit(&changes).await.map(|_| ())
     }
 
-    /// 开始执行 session 队首的用户消息：建两个消息节点、建 running 的 run、移动 active leaf。
+    /// 编辑一条历史用户消息：在其父节点下创建兄弟用户节点，把 active leaf 移到新节点并入队执行。
     ///
-    /// 失败：session 不存在。
-    /// 副作用：删除队首项，写入用户与 assistant 节点、run 行与事实事件。
+    /// 输入：session 身份、目标用户消息身份与已校验的新正文。
+    /// 失败：session 不存在，目标不是该 session 的用户消息，或 session 忙碌、队列非空。
+    /// 副作用：写入新用户节点、锚定该节点的队列项与 active leaf，并写入事实事件。
+    pub async fn edit_user_message(
+        &self,
+        id: &SessionId,
+        target: MessageId,
+        text: MessageText,
+    ) -> Result<MessageNode, StoreError> {
+        let _line = self.line.lock().await;
+        let mut session = self.find_session(id).await?;
+        self.ensure_idle(id).await?;
+        let snapshot = self.session_snapshot(id).await?;
+        let target_node = find_node(&snapshot.messages, target)
+            .ok_or_else(|| StoreError::MessageNotFound(id.clone(), target))?;
+        if target_node.role != MessageRole::User {
+            return Err(StoreError::MessageRoleMismatch(target, target_node.role));
+        }
+        let created_at = now_millis();
+        let node = MessageNode {
+            id: self.storage.mint_message_id().await?,
+            parent_id: target_node.parent_id,
+            role: MessageRole::User,
+            text: MessageContent::new(text.as_str()),
+            run_id: None,
+            tool_calls: Vec::new(),
+            created_at,
+        };
+        let item = QueueItem {
+            id: self.storage.mint_queue_item_id().await?,
+            text,
+            anchor: Some(node.id),
+            created_at,
+        };
+        session.updated_at = created_at;
+        let metadata = session.metadata(1, false);
+        let mut changes = Changeset::new();
+        changes.insert_message(Message {
+            session: id.clone(),
+            node: node.clone(),
+        });
+        changes.insert_queue_item(id.clone(), item.clone());
+        changes.update_session(
+            id.clone(),
+            session.title.clone(),
+            session.title_auto,
+            created_at,
+            Some(node.id),
+        );
+        changes.append_event(
+            FactEvent::MessageAppended {
+                session: metadata.clone(),
+                message: node.clone(),
+            },
+            created_at,
+        );
+        changes.append_event(
+            FactEvent::MessageQueued {
+                session: metadata,
+                item,
+            },
+            created_at,
+        );
+        self.commit(&changes).await?;
+        Ok(node)
+    }
+
+    /// 重试一条 assistant 消息：以其父用户节点为锚入队，run 开始时创建同父兄弟 assistant 节点。
+    ///
+    /// 输入：session 身份与目标 assistant 消息身份。
+    /// 失败：session 不存在，目标不是该 session 的 assistant 消息，或 session 忙碌、队列非空。
+    /// 副作用：写入锚定父用户节点的队列项与更新时间；不创建用户节点。
+    pub async fn retry_assistant_message(
+        &self,
+        id: &SessionId,
+        target: MessageId,
+    ) -> Result<(), StoreError> {
+        let _line = self.line.lock().await;
+        let mut session = self.find_session(id).await?;
+        self.ensure_idle(id).await?;
+        let snapshot = self.session_snapshot(id).await?;
+        let target_node = find_node(&snapshot.messages, target)
+            .ok_or_else(|| StoreError::MessageNotFound(id.clone(), target))?;
+        if target_node.role != MessageRole::Assistant {
+            return Err(StoreError::MessageRoleMismatch(target, target_node.role));
+        }
+        let parent_id = target_node.parent_id.ok_or_else(|| {
+            StoreError::Invariant(format!("assistant 消息 {} 缺少父节点", target.get()))
+        })?;
+        let parent = find_node(&snapshot.messages, parent_id)
+            .ok_or_else(|| StoreError::MessageNotFound(id.clone(), parent_id))?;
+        let text = MessageText::parse(parent.text.as_str())
+            .map_err(|error| StoreError::CorruptedData(format!("message.text: {error}")))?;
+        let created_at = now_millis();
+        let item = QueueItem {
+            id: self.storage.mint_queue_item_id().await?,
+            text,
+            anchor: Some(parent_id),
+            created_at,
+        };
+        session.updated_at = created_at;
+        let metadata = session.metadata(1, false);
+        let mut changes = Changeset::new();
+        changes.insert_queue_item(id.clone(), item.clone());
+        changes.update_session(
+            id.clone(),
+            session.title.clone(),
+            session.title_auto,
+            created_at,
+            session.active_leaf,
+        );
+        changes.append_event(
+            FactEvent::MessageQueued {
+                session: metadata,
+                item,
+            },
+            created_at,
+        );
+        self.commit(&changes).await?;
+        Ok(())
+    }
+
+    /// 切换 active leaf：把 active leaf 移到目标子树中最近创建的叶子。
+    ///
+    /// 输入：session 身份与目标消息身份。
+    /// 失败：session 不存在，目标不属于该 session，或 session 忙碌、队列非空。
+    /// 副作用：更新 active leaf 与更新时间，写入 `active_leaf_changed` 事实事件。
+    pub async fn switch_active_leaf(
+        &self,
+        id: &SessionId,
+        target: MessageId,
+    ) -> Result<MessageId, StoreError> {
+        let _line = self.line.lock().await;
+        let mut session = self.find_session(id).await?;
+        self.ensure_idle(id).await?;
+        let snapshot = self.session_snapshot(id).await?;
+        let nodes: Vec<MessageNode> = snapshot
+            .messages
+            .iter()
+            .map(|message| message.node.clone())
+            .collect();
+        if !nodes.iter().any(|node| node.id == target) {
+            return Err(StoreError::MessageNotFound(id.clone(), target));
+        }
+        let leaf = branch_leaf(&nodes, target).ok_or_else(|| {
+            StoreError::Invariant(format!("目标 {} 的子树没有叶子", target.get()))
+        })?;
+        let now = now_millis();
+        let metadata = session.metadata(snapshot.queue_length, snapshot.busy);
+        session.updated_at = now;
+        let mut changes = Changeset::new();
+        changes.update_session(
+            id.clone(),
+            session.title.clone(),
+            session.title_auto,
+            now,
+            Some(leaf),
+        );
+        changes.append_event(
+            FactEvent::ActiveLeafChanged {
+                session: metadata,
+                active_leaf: Some(leaf),
+            },
+            now,
+        );
+        self.commit(&changes).await?;
+        Ok(leaf)
+    }
+
+    /// 分支命令的前置条件：session 空闲且队列为空。队列非空优先于 run 进行中报告。
+    async fn ensure_idle(&self, id: &SessionId) -> Result<(), StoreError> {
+        if self.storage.queue_length(id).await? > 0 {
+            return Err(StoreError::QueueNotEmpty(id.clone()));
+        }
+        if self.storage.busy(id).await? {
+            return Err(StoreError::RunInProgress(id.clone()));
+        }
+        Ok(())
+    }
+
+    async fn session_snapshot(&self, id: &SessionId) -> Result<SessionSnapshot, StoreError> {
+        self.storage
+            .session_tree(id)
+            .await?
+            .ok_or_else(|| StoreError::SessionNotFound(id.clone()))
+    }
+
+    /// 开始执行 session 队首的队列项：建 assistant 节点、建 running 的 run、移动 active leaf。
+    ///
+    /// 队列项未锚定用户节点时在当前 active leaf 下新建用户节点；已锚定时接续该节点，
+    /// 已存在但未绑定 run 的节点补上 run 关联。
+    ///
+    /// 失败：session 不存在或锚定的消息与 session 不匹配。
+    /// 副作用：删除队首项，写入消息节点、run 行、active leaf 与事实事件。
     /// 队列为空或该 session 已有 running 的 run 时返回 `None`。
     pub async fn start_run(&self, id: &SessionId) -> Result<Option<RunStart>, StoreError> {
         let _line = self.line.lock().await;
@@ -337,26 +530,9 @@ impl Store {
         };
         let now = now_millis();
         let run_id = self.storage.mint_run_id().await?;
-        let user_id = self.storage.mint_message_id().await?;
-        let assistant_id = self.storage.mint_message_id().await?;
-        let user = MessageNode {
-            id: user_id,
-            parent_id: session.active_leaf,
-            role: MessageRole::User,
-            text: MessageContent::new(item.text.as_str()),
-            run_id: Some(run_id),
-            tool_calls: Vec::new(),
-            created_at: now,
-        };
-        let assistant = MessageNode {
-            id: assistant_id,
-            parent_id: Some(user_id),
-            role: MessageRole::Assistant,
-            text: MessageContent::empty(),
-            run_id: Some(run_id),
-            tool_calls: Vec::new(),
-            created_at: now,
-        };
+        let pending = self.storage.queue_length(id).await?;
+        let remaining = pending.saturating_sub(1);
+        let metadata = session.metadata(remaining, true);
         let run = RunRecord {
             id: run_id,
             session_id: id.clone(),
@@ -365,16 +541,70 @@ impl Store {
             created_at: now,
             updated_at: now,
         };
-        let pending = self.storage.queue_length(id).await?;
-        let remaining = pending.saturating_sub(1);
-        let metadata = session.metadata(remaining, true);
         let mut changes = Changeset::new();
         changes.delete_queue_item(id.clone(), item.id);
         changes.insert_run(run.clone());
-        changes.insert_message(Message {
-            session: id.clone(),
-            node: user.clone(),
-        });
+        let user = match item.anchor {
+            Some(anchor) => {
+                let message = self
+                    .storage
+                    .message(id, anchor)
+                    .await?
+                    .ok_or_else(|| StoreError::MessageNotFound(id.clone(), anchor))?;
+                if message.node.role != MessageRole::User {
+                    return Err(StoreError::MessageRoleMismatch(anchor, message.node.role));
+                }
+                if message.node.run_id.is_some() {
+                    message.node
+                } else {
+                    let bound = MessageNode {
+                        run_id: Some(run_id),
+                        ..message.node
+                    };
+                    changes.bind_message_run(bound.id, run_id);
+                    changes.append_event(
+                        FactEvent::MessageUpdated {
+                            session: metadata.clone(),
+                            message: bound.clone(),
+                        },
+                        now,
+                    );
+                    bound
+                }
+            }
+            None => {
+                let user = MessageNode {
+                    id: self.storage.mint_message_id().await?,
+                    parent_id: session.active_leaf,
+                    role: MessageRole::User,
+                    text: MessageContent::new(item.text.as_str()),
+                    run_id: Some(run_id),
+                    tool_calls: Vec::new(),
+                    created_at: now,
+                };
+                changes.insert_message(Message {
+                    session: id.clone(),
+                    node: user.clone(),
+                });
+                changes.append_event(
+                    FactEvent::MessageAppended {
+                        session: metadata.clone(),
+                        message: user.clone(),
+                    },
+                    now,
+                );
+                user
+            }
+        };
+        let assistant = MessageNode {
+            id: self.storage.mint_message_id().await?,
+            parent_id: Some(user.id),
+            role: MessageRole::Assistant,
+            text: MessageContent::empty(),
+            run_id: Some(run_id),
+            tool_calls: Vec::new(),
+            created_at: now,
+        };
         changes.insert_message(Message {
             session: id.clone(),
             node: assistant.clone(),
@@ -384,14 +614,7 @@ impl Store {
             session.title.clone(),
             session.title_auto,
             now,
-            Some(assistant_id),
-        );
-        changes.append_event(
-            FactEvent::MessageAppended {
-                session: metadata.clone(),
-                message: user.clone(),
-            },
-            now,
+            Some(assistant.id),
         );
         changes.append_event(
             FactEvent::MessageAppended {
@@ -617,4 +840,37 @@ fn path_to_leaf(nodes: &[MessageNode], leaf: Option<MessageId>) -> Vec<MessageNo
 
 fn now_millis() -> i64 {
     jiff::Timestamp::now().as_millisecond()
+}
+
+fn find_node(messages: &[Message], id: MessageId) -> Option<MessageNode> {
+    messages
+        .iter()
+        .find(|message| message.node.id == id)
+        .map(|message| message.node.clone())
+}
+
+/// 目标子树中最近创建的叶子（id 最大）。
+///
+/// 消息 id 全局单调递增，因此 id 最大即创建最晚。目标本身是叶子时返回目标。
+fn branch_leaf(nodes: &[MessageNode], target: MessageId) -> Option<MessageId> {
+    nodes
+        .iter()
+        .filter(|node| is_descendant(nodes, node.id, target))
+        .filter(|node| !nodes.iter().any(|other| other.parent_id == Some(node.id)))
+        .map(|node| node.id)
+        .max()
+}
+
+fn is_descendant(nodes: &[MessageNode], id: MessageId, ancestor: MessageId) -> bool {
+    let mut current = Some(id);
+    while let Some(node_id) = current {
+        if node_id == ancestor {
+            return true;
+        }
+        current = nodes
+            .iter()
+            .find(|node| node.id == node_id)
+            .and_then(|node| node.parent_id);
+    }
+    false
 }

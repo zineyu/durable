@@ -77,6 +77,11 @@ impl Changeset {
         });
     }
 
+    /// 把已存在的用户节点绑定到 run。用于编辑产生的节点在 run 开始时补上 run 关联。
+    pub fn bind_message_run(&mut self, id: MessageId, run_id: RunId) {
+        self.push(Change::BindMessageRun { id, run_id });
+    }
+
     pub fn insert_run(&mut self, run: RunRecord) {
         self.push(Change::InsertRun(run));
     }
@@ -135,6 +140,10 @@ pub(crate) enum Change {
         id: MessageId,
         text: MessageContent,
         tool_calls: Vec<ToolCallRecord>,
+    },
+    BindMessageRun {
+        id: MessageId,
+        run_id: RunId,
     },
     InsertRun(RunRecord),
     UpdateRun {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use durable::{SessionMetadata, WorkspaceMetadata};
+use durable::{MessageId, SessionMetadata, WorkspaceMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -35,6 +35,10 @@ pub enum ErrorCode {
     WorkspaceNotEmpty,
     SessionNotFound,
     QueueItemNotFound,
+    MessageNotFound,
+    MessageRoleMismatch,
+    RunInProgress,
+    QueueNotEmpty,
     InvalidTitle,
     InvalidMessage,
     InvalidRequest,
@@ -71,4 +75,16 @@ pub struct RenameSessionRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SubmitMessageRequest {
     pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct EditMessageRequest {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchActiveLeafRequest {
+    #[ts(type = "number")]
+    pub message_id: MessageId,
 }

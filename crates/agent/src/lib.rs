@@ -31,9 +31,9 @@ pub use durable::{
 pub use engine::RunEngine;
 pub use error::ApiError;
 pub use protocol::{
-    BootstrapResponse, CreateSessionRequest, ErrorCode, ErrorResponse, HealthResponse,
-    HealthStatus, RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest,
-    SubmitMessageRequest,
+    BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,
+    HealthResponse, HealthStatus, RegisterWorkspaceRequest, RemoveWorkspaceRequest,
+    RenameSessionRequest, SubmitMessageRequest, SwitchActiveLeafRequest,
 };
 pub use provider::{
     ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,
@@ -105,5 +105,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     CreateSessionRequest::export_all(&config)?;
     RenameSessionRequest::export_all(&config)?;
     SubmitMessageRequest::export_all(&config)?;
+    EditMessageRequest::export_all(&config)?;
+    SwitchActiveLeafRequest::export_all(&config)?;
     Ok(())
 }

@@ -154,7 +154,7 @@ impl SqliteStorage {
         .map(|row| parse_message(id, row))
         .collect::<Result<Vec<_>, _>>()?;
         let queue = sqlx::query(
-            "SELECT id, text, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC",
+            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC",
         )
         .bind(id.as_str())
         .fetch_all(&mut *transaction)
@@ -186,7 +186,7 @@ impl SqliteStorage {
     /// session 的最早队列项。
     pub async fn first_queue_item(&self, id: &SessionId) -> Result<Option<QueueItem>, StoreError> {
         sqlx::query(
-            "SELECT id, text, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC LIMIT 1",
+            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC LIMIT 1",
         )
         .bind(id.as_str())
         .fetch_optional(&self.pool)
@@ -202,14 +202,35 @@ impl SqliteStorage {
         session: &SessionId,
         id: QueueItemId,
     ) -> Result<Option<QueueItem>, StoreError> {
-        sqlx::query("SELECT id, text, created_at FROM queue_item WHERE session_id = ?1 AND id = ?2")
-            .bind(session.as_str())
-            .bind(id.get())
-            .fetch_optional(&self.pool)
-            .await?
-            .as_ref()
-            .map(parse_queue_item)
-            .transpose()
+        sqlx::query(
+            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 AND id = ?2",
+        )
+        .bind(session.as_str())
+        .bind(id.get())
+        .fetch_optional(&self.pool)
+        .await?
+        .as_ref()
+        .map(parse_queue_item)
+        .transpose()
+    }
+
+    /// 指定 session 中的单个消息节点。
+    pub async fn message(
+        &self,
+        session: &SessionId,
+        id: MessageId,
+    ) -> Result<Option<Message>, StoreError> {
+        sqlx::query(
+            "SELECT id, parent_id, role, text, run_id, tool_calls, created_at FROM message
+             WHERE session_id = ?1 AND id = ?2",
+        )
+        .bind(session.as_str())
+        .bind(id.get())
+        .fetch_optional(&self.pool)
+        .await?
+        .as_ref()
+        .map(|row| parse_message(session, row))
+        .transpose()
     }
 
     /// 全部仍为 running 的 run，按 id 升序。
@@ -315,9 +336,9 @@ impl SqliteStorage {
                 Change::DeleteSession(id) => {
                     for statement in [
                         "DELETE FROM event WHERE session_id = ?1",
+                        "DELETE FROM queue_item WHERE session_id = ?1",
                         "DELETE FROM message WHERE session_id = ?1",
                         "DELETE FROM run WHERE session_id = ?1",
-                        "DELETE FROM queue_item WHERE session_id = ?1",
                     ] {
                         sqlx::query(statement)
                             .bind(id.as_str())
@@ -360,14 +381,23 @@ impl SqliteStorage {
                             .await?;
                     ensure_written(&result, "更新消息")?;
                 }
+                Change::BindMessageRun { id, run_id } => {
+                    let result = sqlx::query("UPDATE message SET run_id = ?2 WHERE id = ?1")
+                        .bind(id.get())
+                        .bind(run_id.get())
+                        .execute(&mut *transaction)
+                        .await?;
+                    ensure_written(&result, "绑定消息 run")?;
+                }
                 Change::InsertQueueItem { session, item } => {
                     sqlx::query(
-                        "INSERT INTO queue_item (id, session_id, text, created_at)
-                         VALUES (?1, ?2, ?3, ?4)",
+                        "INSERT INTO queue_item (id, session_id, text, anchor, created_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
                     )
                     .bind(item.id.get())
                     .bind(session.as_str())
                     .bind(item.text.as_str())
+                    .bind(item.anchor.map(MessageId::get))
                     .bind(item.created_at)
                     .execute(&mut *transaction)
                     .await?;
@@ -536,11 +566,16 @@ fn parse_busy(row: &SqliteRow) -> Result<bool, StoreError> {
 }
 
 fn parse_queue_item(row: &SqliteRow) -> Result<QueueItem, StoreError> {
+    let anchor: Option<i64> = row.get("anchor");
     Ok(QueueItem {
         id: QueueItemId::parse(row.get::<i64, _>("id"))
             .map_err(|error| corrupted("queue_item.id", error))?,
         text: crate::message::MessageText::parse(&row.get::<String, _>("text"))
             .map_err(|error| corrupted("queue_item.text", error))?,
+        anchor: anchor
+            .map(MessageId::parse)
+            .transpose()
+            .map_err(|error| corrupted("queue_item.anchor", error))?,
         created_at: row.get("created_at"),
     })
 }

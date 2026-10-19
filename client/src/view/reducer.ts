@@ -38,6 +38,7 @@ export function applyEvent(state: SidebarState, event: FactEvent): SidebarState 
     case 'session_renamed':
     case 'message_appended':
     case 'message_updated':
+    case 'active_leaf_changed':
     case 'message_queued':
     case 'run_started':
     case 'run_finished':
