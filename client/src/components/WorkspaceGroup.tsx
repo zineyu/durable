@@ -11,6 +11,7 @@ export type WorkspaceGroupProps = {
   children: ReactNode;
   defaultOpen?: boolean;
   onCreateSession?: () => void;
+  onRemove?: () => void;
 };
 
 export function WorkspaceGroup({
@@ -19,6 +20,7 @@ export function WorkspaceGroup({
   children,
   defaultOpen = true,
   onCreateSession,
+  onRemove,
 }: WorkspaceGroupProps) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -42,6 +44,13 @@ export function WorkspaceGroup({
           icon="plus"
           label={`在 ${path} 下新建 session`}
           onClick={() => onCreateSession?.()}
+        />
+        <IconButton
+          icon="trash"
+          label={`移除 workspace：${path}`}
+          tone="danger"
+          className={styles.remove}
+          onClick={() => onRemove?.()}
         />
       </div>
       {open ? <div className={styles.sessions}>{children}</div> : null}

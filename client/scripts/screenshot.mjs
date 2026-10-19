@@ -178,6 +178,20 @@ async function assertSessionMenuExpandsOnHover(page) {
   await page.mouse.move(0, 0);
 }
 
+async function assertWorkspaceRemoveRevealsOnHover(page) {
+  const remove = page.getByLabel(/^移除 workspace：/).first();
+  if ((await remove.count()) === 0) {
+    return;
+  }
+  if (await remove.isVisible()) {
+    throw new Error('移除 workspace 控件在悬停前就可见');
+  }
+  const add = page.getByLabel(/^在 .* 下新建 session$/).first();
+  await add.hover();
+  await remove.waitFor({ state: 'visible' });
+  await page.mouse.move(0, 0);
+}
+
 async function capture(page, target, story, theme) {
   const globals = theme === 'dark' ? '&globals=theme:dark' : '';
   try {
@@ -192,6 +206,7 @@ async function capture(page, target, story, theme) {
       await assertChromeInViewport(page);
       await assertColumnAlignment(page);
       await assertSessionMenuExpandsOnHover(page);
+      await assertWorkspaceRemoveRevealsOnHover(page);
     }
     const file = join(target, `${story.id.replaceAll('/', '-')}.png`);
     await page.screenshot({ path: file });

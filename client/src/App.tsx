@@ -38,7 +38,8 @@ import type { BranchControl, SessionState } from './view/types';
 type DialogState =
   | { kind: 'edit'; sessionId: string; messageId: number; text: string }
   | { kind: 'retry'; sessionId: string; messageId: number }
-  | { kind: 'register-workspace'; path: string };
+  | { kind: 'register-workspace'; path: string }
+  | { kind: 'remove-workspace'; path: string };
 
 const RECONNECT_DELAY_MS = 1000;
 
@@ -313,6 +314,9 @@ export function App() {
         case 'register-workspace':
           outcome = await api.registerWorkspace(current.path);
           break;
+        case 'remove-workspace':
+          outcome = await api.removeWorkspace(current.path);
+          break;
         default: {
           const unhandled: never = current;
           throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
@@ -327,12 +331,19 @@ export function App() {
   }, [dialog, report]);
 
   const branchControl = useCallback(
-    (sessionId: string, node: MessageNode): { branch?: BranchControl } => {
+    (
+      sessionId: string,
+      idle: boolean,
+      node: MessageNode,
+    ): { branch?: BranchControl } => {
       const position = branchPosition(state, sessionId, node);
       if (position === null) {
         return {};
       }
       const control: BranchControl = { index: position.index, total: position.total };
+      if (!idle) {
+        return { branch: control };
+      }
       const previousId = position.previousId;
       const nextId = position.nextId;
       if (previousId !== null) {
@@ -374,7 +385,7 @@ export function App() {
                   })
                 }
                 editDisabled={!isIdle}
-                {...branchControl(session.id, node)}
+                {...branchControl(session.id, isIdle, node)}
               />
             );
           }
@@ -388,7 +399,7 @@ export function App() {
                 setDialog({ kind: 'retry', sessionId: session.id, messageId: node.id })
               }
               retryDisabled={!isIdle}
-              {...branchControl(session.id, node)}
+              {...branchControl(session.id, isIdle, node)}
             >
               <AssistantContent text={node.text} toolCalls={node.toolCalls} />
             </AssistantMessage>
@@ -412,6 +423,7 @@ export function App() {
             onEditCancel={() => setEditing(null)}
             onCreateSession={handleCreateSession}
             onAddWorkspace={() => setDialog({ kind: 'register-workspace', path: '' })}
+            onRemoveWorkspace={(path) => setDialog({ kind: 'remove-workspace', path })}
           />
         }
       >
@@ -480,6 +492,8 @@ function dialogTitle(dialog: DialogState): string {
       return '确认重试';
     case 'register-workspace':
       return '注册 workspace';
+    case 'remove-workspace':
+      return '移除 workspace';
     default: {
       const unhandled: never = dialog;
       throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
@@ -495,6 +509,8 @@ function dialogConfirmLabel(dialog: DialogState): string {
       return '重试';
     case 'register-workspace':
       return '注册';
+    case 'remove-workspace':
+      return '移除';
     default: {
       const unhandled: never = dialog;
       throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
@@ -532,6 +548,12 @@ function renderDialogBody(
           autoFocus
           onChange={(event) => setDialog({ ...dialog, path: event.target.value })}
         />
+      );
+    case 'remove-workspace':
+      return (
+        <p>
+          移除只删除注册记录，不触碰磁盘文件。仍有 session 时 server 会拒绝并说明原因，此操作不可撤销。
+        </p>
       );
     default: {
       const unhandled: never = dialog;

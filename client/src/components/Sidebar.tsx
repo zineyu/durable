@@ -24,6 +24,7 @@ export type SidebarProps = {
   onDeleteConfirm?: (id: SessionId) => void;
   onCreateSession?: (path: WorkspacePath) => void;
   onAddWorkspace?: () => void;
+  onRemoveWorkspace?: (path: WorkspacePath) => void;
 };
 
 export function Sidebar({
@@ -39,6 +40,7 @@ export function Sidebar({
   onDeleteConfirm,
   onCreateSession,
   onAddWorkspace,
+  onRemoveWorkspace,
 }: SidebarProps) {
   return (
     <div className={styles.sidebar}>
@@ -56,6 +58,7 @@ export function Sidebar({
             path={workspace.path}
             sessionCount={workspace.sessions.length}
             {...(onCreateSession ? { onCreateSession: () => onCreateSession(workspace.path) } : {})}
+            {...(onRemoveWorkspace ? { onRemove: () => onRemoveWorkspace(workspace.path) } : {})}
           >
             {workspace.sessions.length === 0 ? (
               <p className={styles.emptySessions}>暂无 session</p>

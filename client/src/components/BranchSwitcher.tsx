@@ -14,7 +14,7 @@ export function BranchSwitcher({ index, total, onPrev, onNext }: BranchSwitcherP
         type="button"
         className={styles.step}
         onClick={onPrev}
-        disabled={index <= 1}
+        disabled={index <= 1 || onPrev === undefined}
         aria-label="上一个分支"
       >
         ‹
@@ -26,7 +26,7 @@ export function BranchSwitcher({ index, total, onPrev, onNext }: BranchSwitcherP
         type="button"
         className={styles.step}
         onClick={onNext}
-        disabled={index >= total}
+        disabled={index >= total || onNext === undefined}
         aria-label="下一个分支"
       >
         ›

@@ -68,6 +68,18 @@
   font-variant-numeric: tabular-nums;
 }
 
+.remove {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.header:hover .remove,
+.header:focus-within .remove {
+  opacity: 1;
+  visibility: visible;
+}
+
 .sessions {
   display: flex;
   flex-direction: column;
