@@ -35,14 +35,14 @@ pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
     let base_url = read(MODEL_BASE_URL, &mut missing);
     let api_key = read(MODEL_API_KEY, &mut missing);
     let model_name = read(MODEL_NAME, &mut missing);
-    if !missing.is_empty() {
-        return Err(ConfigError { missing });
+    match (base_url, api_key, model_name) {
+        (Some(base_url), Some(api_key), Some(model_name)) => Ok(ModelConfig {
+            base_url,
+            api_key,
+            model_name,
+        }),
+        _ => Err(ConfigError { missing }),
     }
-    Ok(ModelConfig {
-        base_url: base_url.expect("已校验配置存在"),
-        api_key: api_key.expect("已校验配置存在"),
-        model_name: model_name.expect("已校验配置存在"),
-    })
 }
 
 fn read(name: &'static str, missing: &mut Vec<&'static str>) -> Option<String> {

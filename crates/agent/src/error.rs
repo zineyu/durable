@@ -66,28 +66,25 @@ impl ApiError {
 
 impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
-        let status = match error {
+        let (code, status) = match &error {
             StoreError::Database(_) | StoreError::Serialization(_) => {
-                StatusCode::INTERNAL_SERVER_ERROR
+                (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR)
             }
-            StoreError::WorkspacePathInvalid(_) | StoreError::InvalidTitle => {
-                StatusCode::UNPROCESSABLE_ENTITY
+            StoreError::WorkspacePathInvalid(_) => (
+                ErrorCode::WorkspacePathInvalid,
+                StatusCode::UNPROCESSABLE_ENTITY,
+            ),
+            StoreError::InvalidTitle => (ErrorCode::InvalidTitle, StatusCode::UNPROCESSABLE_ENTITY),
+            StoreError::WorkspaceDuplicate(_) => {
+                (ErrorCode::WorkspaceDuplicate, StatusCode::CONFLICT)
             }
-            StoreError::WorkspaceDuplicate(_) | StoreError::WorkspaceNotEmpty(_) => {
-                StatusCode::CONFLICT
+            StoreError::WorkspaceNotEmpty(_) => {
+                (ErrorCode::WorkspaceNotEmpty, StatusCode::CONFLICT)
             }
-            StoreError::WorkspaceNotFound(_) | StoreError::SessionNotFound(_) => {
-                StatusCode::NOT_FOUND
+            StoreError::WorkspaceNotFound(_) => {
+                (ErrorCode::WorkspaceNotFound, StatusCode::NOT_FOUND)
             }
-        };
-        let code = match error {
-            StoreError::Database(_) | StoreError::Serialization(_) => ErrorCode::Internal,
-            StoreError::WorkspacePathInvalid(_) => ErrorCode::WorkspacePathInvalid,
-            StoreError::WorkspaceDuplicate(_) => ErrorCode::WorkspaceDuplicate,
-            StoreError::WorkspaceNotFound(_) => ErrorCode::WorkspaceNotFound,
-            StoreError::WorkspaceNotEmpty(_) => ErrorCode::WorkspaceNotEmpty,
-            StoreError::SessionNotFound(_) => ErrorCode::SessionNotFound,
-            StoreError::InvalidTitle => ErrorCode::InvalidTitle,
+            StoreError::SessionNotFound(_) => (ErrorCode::SessionNotFound, StatusCode::NOT_FOUND),
         };
         Self::new(code, status, error.to_string())
     }
