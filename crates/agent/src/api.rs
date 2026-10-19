@@ -1,17 +1,40 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{FromRequest, Path, Request, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::de::DeserializeOwned;
 
 use crate::error::ApiError;
 use crate::protocol::{
     BootstrapResponse, CreateSessionRequest, HealthResponse, HealthStatus,
-    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SessionMetadata,
-    SessionTree, WorkspaceMetadata,
+    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SessionId,
+    SessionMetadata, SessionTitle, SessionTree, WorkspaceMetadata, WorkspacePath,
 };
 use crate::store::Store;
+
+/// 请求体；反序列化失败时返回协议错误信封而非纯文本。
+struct JsonBody<T>(T);
+
+impl<S, T> FromRequest<S> for JsonBody<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Json(value) =
+            Json::<T>::from_request(request, state)
+                .await
+                .map_err(|rejection: JsonRejection| {
+                    ApiError::invalid_request(rejection.status(), rejection.body_text())
+                })?;
+        Ok(Self(value))
+    }
+}
 
 #[derive(Clone)]
 pub struct AgentState {
@@ -20,6 +43,7 @@ pub struct AgentState {
 }
 
 impl AgentState {
+    /// 组装 agent 状态：SQLite 存储与当前模型名。
     pub fn new(store: Store, model_name: String) -> Self {
         Self {
             store: Arc::new(store),
@@ -36,6 +60,7 @@ impl AgentState {
     }
 }
 
+/// 构造 agent 的 HTTP 路由。
 pub fn router(state: AgentState) -> Router {
     Router::new()
         .route("/api/health", get(health))
@@ -49,6 +74,7 @@ pub fn router(state: AgentState) -> Router {
         .with_state(state)
 }
 
+/// 在已绑定的监听器上提供 HTTP 服务，直到进程结束或出错。
 pub async fn serve(listener: tokio::net::TcpListener, state: AgentState) -> std::io::Result<()> {
     axum::serve(listener, router(state)).await
 }
@@ -72,42 +98,50 @@ async fn bootstrap(State(state): State<AgentState>) -> Result<Json<BootstrapResp
 
 async fn register_workspace(
     State(state): State<AgentState>,
-    Json(request): Json<RegisterWorkspaceRequest>,
+    JsonBody(request): JsonBody<RegisterWorkspaceRequest>,
 ) -> Result<(StatusCode, Json<WorkspaceMetadata>), ApiError> {
-    let workspace = state.store().register_workspace(&request.path)?;
+    let path = WorkspacePath::resolve(&request.path)?;
+    let workspace = state.store().register_workspace(&path)?;
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
 async fn remove_workspace(
     State(state): State<AgentState>,
-    Json(request): Json<RemoveWorkspaceRequest>,
+    JsonBody(request): JsonBody<RemoveWorkspaceRequest>,
 ) -> Result<StatusCode, ApiError> {
-    state.store().remove_workspace(&request.path)?;
+    let path = WorkspacePath::parse(&request.path)?;
+    state.store().remove_workspace(&path)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn create_session(
     State(state): State<AgentState>,
-    Json(request): Json<CreateSessionRequest>,
+    JsonBody(request): JsonBody<CreateSessionRequest>,
 ) -> Result<(StatusCode, Json<SessionMetadata>), ApiError> {
-    let session = state
-        .store()
-        .create_session(&request.workspace, request.title.as_deref())?;
+    let workspace = WorkspacePath::resolve(&request.workspace)?;
+    let title = match request.title {
+        Some(raw) => SessionTitle::parse(&raw)?,
+        None => SessionTitle::default(),
+    };
+    let session = state.store().create_session(&workspace, title)?;
     Ok((StatusCode::CREATED, Json(session)))
 }
 
 async fn rename_session(
     State(state): State<AgentState>,
     Path(id): Path<String>,
-    Json(request): Json<RenameSessionRequest>,
+    JsonBody(request): JsonBody<RenameSessionRequest>,
 ) -> Result<Json<SessionMetadata>, ApiError> {
-    Ok(Json(state.store().rename_session(&id, &request.title)?))
+    let id = SessionId::parse(&id)?;
+    let title = SessionTitle::parse(&request.title)?;
+    Ok(Json(state.store().rename_session(&id, &title)?))
 }
 
 async fn delete_session(
     State(state): State<AgentState>,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
+    let id = SessionId::parse(&id)?;
     state.store().delete_session(&id)?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -116,6 +150,7 @@ async fn session_tree(
     State(state): State<AgentState>,
     Path(id): Path<String>,
 ) -> Result<Json<SessionTree>, ApiError> {
+    let id = SessionId::parse(&id)?;
     Ok(Json(SessionTree {
         session: state.store().session(&id)?,
         active_leaf: None,

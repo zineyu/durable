@@ -29,11 +29,11 @@ export const MenuOpen: Story = {
 };
 
 export const Renaming: Story = {
-  args: { session: idle, selected: true, renaming: true },
+  args: { session: idle, selected: true, view: 'renaming' },
 };
 
 export const DeleteConfirm: Story = {
-  args: { session: idle, selected: true, confirmDelete: true },
+  args: { session: idle, selected: true, view: 'deleting' },
 };
 
 export const Running: Story = {

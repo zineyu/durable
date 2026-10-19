@@ -4,18 +4,20 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use crate::protocol::{ErrorCode, ErrorResponse};
+use crate::protocol::{
+    ErrorCode, ErrorResponse, SessionId, SessionIdError, SessionTitleError, WorkspacePath,
+    WorkspacePathError,
+};
 
 #[derive(Debug)]
 pub enum StoreError {
     Database(rusqlite::Error),
     Serialization(serde_json::Error),
-    WorkspacePathInvalid(String),
-    WorkspaceDuplicate(String),
-    WorkspaceNotFound(String),
-    WorkspaceNotEmpty(String),
-    SessionNotFound(String),
-    InvalidTitle,
+    CorruptedData(String),
+    WorkspaceDuplicate(WorkspacePath),
+    WorkspaceNotFound(WorkspacePath),
+    WorkspaceNotEmpty(WorkspacePath),
+    SessionNotFound(SessionId),
 }
 
 impl fmt::Display for StoreError {
@@ -23,12 +25,19 @@ impl fmt::Display for StoreError {
         match self {
             Self::Database(error) => write!(formatter, "SQLite 错误: {error}"),
             Self::Serialization(error) => write!(formatter, "事件序列化错误: {error}"),
-            Self::WorkspacePathInvalid(path) => write!(formatter, "workspace 路径无效: {path}"),
-            Self::WorkspaceDuplicate(path) => write!(formatter, "workspace 已注册: {path}"),
-            Self::WorkspaceNotFound(path) => write!(formatter, "workspace 未注册: {path}"),
-            Self::WorkspaceNotEmpty(path) => write!(formatter, "workspace 仍有 session: {path}"),
-            Self::SessionNotFound(id) => write!(formatter, "session 不存在: {id}"),
-            Self::InvalidTitle => write!(formatter, "session 标题不能为空"),
+            Self::CorruptedData(detail) => {
+                write!(formatter, "数据库中的值不符合领域约束: {detail}")
+            }
+            Self::WorkspaceDuplicate(path) => {
+                write!(formatter, "workspace 已注册: {}", path.as_str())
+            }
+            Self::WorkspaceNotFound(path) => {
+                write!(formatter, "workspace 未注册: {}", path.as_str())
+            }
+            Self::WorkspaceNotEmpty(path) => {
+                write!(formatter, "workspace 仍有 session: {}", path.as_str())
+            }
+            Self::SessionNotFound(id) => write!(formatter, "session 不存在: {}", id.as_str()),
         }
     }
 }
@@ -62,19 +71,51 @@ impl ApiError {
             status,
         }
     }
+
+    /// 请求体无法解析为协议类型。
+    pub fn invalid_request(status: StatusCode, message: String) -> Self {
+        Self::new(ErrorCode::InvalidRequest, status, message)
+    }
+}
+
+impl From<WorkspacePathError> for ApiError {
+    fn from(error: WorkspacePathError) -> Self {
+        Self::new(
+            ErrorCode::WorkspacePathInvalid,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.to_string(),
+        )
+    }
+}
+
+impl From<SessionIdError> for ApiError {
+    fn from(error: SessionIdError) -> Self {
+        Self::new(
+            ErrorCode::SessionNotFound,
+            StatusCode::NOT_FOUND,
+            error.to_string(),
+        )
+    }
+}
+
+impl From<SessionTitleError> for ApiError {
+    fn from(error: SessionTitleError) -> Self {
+        Self::new(
+            ErrorCode::InvalidTitle,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.to_string(),
+        )
+    }
 }
 
 impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
         let (code, status) = match &error {
-            StoreError::Database(_) | StoreError::Serialization(_) => {
+            StoreError::Database(_)
+            | StoreError::Serialization(_)
+            | StoreError::CorruptedData(_) => {
                 (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR)
             }
-            StoreError::WorkspacePathInvalid(_) => (
-                ErrorCode::WorkspacePathInvalid,
-                StatusCode::UNPROCESSABLE_ENTITY,
-            ),
-            StoreError::InvalidTitle => (ErrorCode::InvalidTitle, StatusCode::UNPROCESSABLE_ENTITY),
             StoreError::WorkspaceDuplicate(_) => {
                 (ErrorCode::WorkspaceDuplicate, StatusCode::CONFLICT)
             }

@@ -188,4 +188,61 @@ describe('侧栏状态', () => {
     expect(sidebarWorkspaces(state)[0]?.sessions).toHaveLength(1);
     expect(sidebarWorkspaces(next)[0]?.sessions).toHaveLength(0);
   });
+  it('空 bootstrap 得到空侧栏与模型名', () => {
+    const state = createSidebarState(bootstrap([], []));
+
+    expect(state.modelName).toBe('gpt-5-codex');
+    expect(sidebarWorkspaces(state)).toEqual([]);
+  });
+
+  it('两个 workspace 的 session 事件互不干扰', () => {
+    const state = createSidebarState(
+      bootstrap(
+        [workspaceA, workspaceB],
+        [session('s-a1', '/work/a', 100), session('s-b1', '/work/b', 200)],
+      ),
+    );
+
+    const created = applyEvent(state, {
+      kind: 'session_created',
+      session: session('s-a2', '/work/a', 300),
+    });
+    const renamed = applyEvent(created, {
+      kind: 'session_renamed',
+      session: session('s-b1', '/work/b', 400, { title: 'B 的新标题', busy: true }),
+    });
+
+    expect(sidebarWorkspaces(renamed)).toEqual([
+      {
+        id: '/work/a',
+        path: '/work/a',
+        sessions: [
+          { id: toSessionId('s-a2'), title: '标题 s-a2', state: 'idle', queuedCount: 0 },
+          { id: toSessionId('s-a1'), title: '标题 s-a1', state: 'idle', queuedCount: 0 },
+        ],
+      },
+      {
+        id: '/work/b',
+        path: '/work/b',
+        sessions: [
+          { id: toSessionId('s-b1'), title: 'B 的新标题', state: 'running', queuedCount: 0 },
+        ],
+      },
+    ]);
+  });
+
+  it('重命名忙碌 session 保留活动 run 与队列长度', () => {
+    const state = createSidebarState(
+      bootstrap([workspaceA], [session('s-1', '/work/a', 100, { busy: true, queueLength: 2 })]),
+    );
+
+    const next = applyEvent(state, {
+      kind: 'session_renamed',
+      session: session('s-1', '/work/a', 200, { title: '重命名后', busy: true, queueLength: 2 }),
+    });
+
+    expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '重命名后', state: 'running', queuedCount: 2 },
+    ]);
+  });
 });

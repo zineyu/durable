@@ -7,37 +7,35 @@ import { sessionStateTone } from '../view/labels';
 import type { SessionSummary } from '../view/types';
 import type { SessionId } from '../view/ids';
 
+export type SessionItemView = 'default' | 'renaming' | 'deleting';
+
 export type SessionListItemProps = {
   session: SessionSummary;
   selected: boolean;
-  renaming?: boolean;
-  confirmDelete?: boolean;
+  view?: SessionItemView;
   onSelect?: (id: SessionId) => void;
   onRenameRequest?: (id: SessionId) => void;
   onRenameSubmit?: (id: SessionId, title: string) => void;
-  onRenameCancel?: () => void;
+  onEditCancel?: () => void;
   onDeleteRequest?: (id: SessionId) => void;
   onDeleteConfirm?: (id: SessionId) => void;
-  onDeleteCancel?: () => void;
   defaultMenuOpen?: boolean;
 };
 
 export function SessionListItem({
   session,
   selected,
-  renaming = false,
-  confirmDelete = false,
+  view = 'default',
   onSelect,
   onRenameRequest,
   onRenameSubmit,
-  onRenameCancel,
+  onEditCancel,
   onDeleteRequest,
   onDeleteConfirm,
-  onDeleteCancel,
   defaultMenuOpen = false,
 }: SessionListItemProps) {
   const [menuOpen, setMenuOpen] = useState(defaultMenuOpen);
-  const menuVisible = menuOpen || confirmDelete;
+  const menuVisible = menuOpen || view === 'deleting';
 
   const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
     if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
@@ -60,7 +58,7 @@ export function SessionListItem({
       }
     }
     if (event.key === 'Escape') {
-      onRenameCancel?.();
+      onEditCancel?.();
     }
   };
 
@@ -73,7 +71,7 @@ export function SessionListItem({
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
     >
-      {renaming ? (
+      {view === 'renaming' ? (
         <div className={styles.rename}>
           <StatusDot tone={sessionStateTone[session.state]} className={styles.dot} />
           <input
@@ -82,7 +80,7 @@ export function SessionListItem({
             aria-label="session 标题"
             autoFocus
             onKeyDown={handleRenameKeyDown}
-            onBlur={() => onRenameCancel?.()}
+            onBlur={() => onEditCancel?.()}
           />
         </div>
       ) : (
@@ -121,7 +119,7 @@ export function SessionListItem({
         />
         {menuVisible ? (
           <div className={styles.menuPanel}>
-            {confirmDelete ? (
+            {view === 'deleting' ? (
               <>
                 <IconButton
                   icon="trash"
@@ -134,7 +132,7 @@ export function SessionListItem({
                   icon="close"
                   label="取消删除"
                   size="md"
-                  onClick={() => onDeleteCancel?.()}
+                  onClick={() => onEditCancel?.()}
                 />
               </>
             ) : (

@@ -15,7 +15,13 @@ pub use config::{
     model_config_from_env, ConfigError, ModelConfig, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME,
 };
 pub use error::{ApiError, StoreError};
-pub use protocol::*;
+pub use protocol::{
+    BootstrapResponse, CreateSessionRequest, ErrorCode, ErrorResponse, FactEvent, HealthResponse,
+    HealthStatus, MessageNode, MessageRole, RegisterWorkspaceRequest, RemoveWorkspaceRequest,
+    RenameSessionRequest, SessionId, SessionIdError, SessionMetadata, SessionTitle,
+    SessionTitleError, SessionTree, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    DEFAULT_SESSION_TITLE,
+};
 pub use store::{Snapshot, Store};
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
@@ -52,7 +58,10 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     let config = ts_rs::Config::new().with_out_dir(directory);
     HealthResponse::export_all(&config)?;
     HealthStatus::export_all(&config)?;
+    WorkspacePath::export_all(&config)?;
     WorkspaceMetadata::export_all(&config)?;
+    SessionId::export_all(&config)?;
+    SessionTitle::export_all(&config)?;
     SessionMetadata::export_all(&config)?;
     BootstrapResponse::export_all(&config)?;
     MessageRole::export_all(&config)?;

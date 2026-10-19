@@ -42,7 +42,7 @@ export const Renaming: Story = {
     modelName,
     workspaces,
     selectedSessionId: toSessionId('s-2'),
-    renamingSessionId: toSessionId('s-2'),
+    editing: { sessionId: toSessionId('s-2'), view: 'renaming' },
   },
 };
 
@@ -51,6 +51,6 @@ export const DeleteConfirm: Story = {
     modelName,
     workspaces,
     selectedSessionId: toSessionId('s-2'),
-    pendingDeleteSessionId: toSessionId('s-2'),
+    editing: { sessionId: toSessionId('s-2'), view: 'deleting' },
   },
 };

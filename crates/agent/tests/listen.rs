@@ -1,13 +1,9 @@
-use std::process::Command;
+mod support;
 
 fn run_agent(listen: &str) -> std::process::Output {
     let directory = tempfile::tempdir().expect("创建临时目录");
-    Command::new(env!("CARGO_BIN_EXE_agent"))
-        .args(["--listen", listen, "--database"])
-        .arg(directory.path().join("agent.sqlite"))
-        .env(agent::MODEL_BASE_URL, "http://127.0.0.1:9/v1")
-        .env(agent::MODEL_API_KEY, "test-key")
-        .env(agent::MODEL_NAME, "test-model")
+    support::command(&directory.path().join("agent.sqlite"))
+        .args(["--listen", listen])
         .output()
         .expect("启动 agent 二进制")
 }

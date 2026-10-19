@@ -2,22 +2,26 @@ import { Button } from './Button';
 import { SessionListItem } from './SessionListItem';
 import { WorkspaceGroup } from './WorkspaceGroup';
 import styles from './Sidebar.module.css';
+import type { SessionItemView } from './SessionListItem';
 import type { SessionId } from '../view/ids';
 import type { WorkspaceSummary } from '../view/types';
+
+export type SessionEditing = {
+  sessionId: SessionId;
+  view: Exclude<SessionItemView, 'default'>;
+};
 
 export type SidebarProps = {
   modelName: string;
   workspaces: WorkspaceSummary[];
   selectedSessionId: SessionId | null;
-  renamingSessionId?: SessionId | null;
-  pendingDeleteSessionId?: SessionId | null;
+  editing?: SessionEditing | null;
   onSelectSession?: (id: SessionId) => void;
   onRenameRequest?: (id: SessionId) => void;
   onRenameSubmit?: (id: SessionId, title: string) => void;
-  onRenameCancel?: () => void;
+  onEditCancel?: () => void;
   onDeleteRequest?: (id: SessionId) => void;
   onDeleteConfirm?: (id: SessionId) => void;
-  onDeleteCancel?: () => void;
   onAddWorkspace?: () => void;
 };
 
@@ -25,15 +29,13 @@ export function Sidebar({
   modelName,
   workspaces,
   selectedSessionId,
-  renamingSessionId,
-  pendingDeleteSessionId,
+  editing,
   onSelectSession,
   onRenameRequest,
   onRenameSubmit,
-  onRenameCancel,
+  onEditCancel,
   onDeleteRequest,
   onDeleteConfirm,
-  onDeleteCancel,
   onAddWorkspace,
 }: SidebarProps) {
   return (
@@ -60,15 +62,13 @@ export function Sidebar({
                 key={session.id}
                 session={session}
                 selected={session.id === selectedSessionId}
-                renaming={session.id === renamingSessionId}
-                confirmDelete={session.id === pendingDeleteSessionId}
+                view={editing?.sessionId === session.id ? editing.view : 'default'}
                 {...(onSelectSession ? { onSelect: onSelectSession } : {})}
                 {...(onRenameRequest ? { onRenameRequest } : {})}
                 {...(onRenameSubmit ? { onRenameSubmit } : {})}
-                {...(onRenameCancel ? { onRenameCancel } : {})}
+                {...(onEditCancel ? { onEditCancel } : {})}
                 {...(onDeleteRequest ? { onDeleteRequest } : {})}
                 {...(onDeleteConfirm ? { onDeleteConfirm } : {})}
-                {...(onDeleteCancel ? { onDeleteCancel } : {})}
               />
             ))}
           </WorkspaceGroup>

@@ -19,4 +19,9 @@ describe('URL hash 中的 session', () => {
   it('写出 session id', () => {
     expect(writeSessionToHash(toSessionId('s-1'))).toBe('#session=s-1');
   });
+  it('写入后读回同一个 session id', () => {
+    const id = toSessionId('01a15243-d0a9-7574-8e5c-a86a35aceb6c');
+
+    expect(readSessionFromHash(writeSessionToHash(id))).toBe(id);
+  });
 });
