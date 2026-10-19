@@ -402,6 +402,27 @@ async fn runs_bash_in_requested_cwd() {
     assert!(content.ends_with("输出:\n子目录内容"), "{content}");
 }
 
+/// 规格 user story 29：cwd 越出 workspace 根时被拒绝。
+#[tokio::test]
+async fn rejects_bash_cwd_outside_workspace() {
+    let run = start(vec![
+        call("bash", r#"{"command":"pwd","cwd":"../.."}"#),
+        done(),
+    ])
+    .await;
+
+    assert!(
+        matches!(
+            run.outcome().await,
+            agent::ToolOutcome::Failed {
+                code: agent::ToolErrorCode::PathEscape,
+                ..
+            }
+        ),
+        "cwd 越出根必须被拒绝"
+    );
+}
+
 /// 规格 user story 29：输出超过上限时标注截断。
 #[tokio::test]
 async fn truncates_bash_output() {

@@ -68,3 +68,28 @@ export const Collapsed: Story = {
     durationLabel: '1.8s',
   },
 };
+
+export const BashNonZeroExit: Story = {
+  args: {
+    name: 'bash',
+    state: 'succeeded',
+    summary: 'cargo fmt --all --check',
+    input: '{"command": "cargo fmt --all --check"}',
+    result:
+      '退出码: 3\n耗时: 412 ms\n输出:\nDiff in /crates/agent/src/sse.rs:147:\n-            reason: ResyncReason::Lagged { skipped: 3 }',
+    durationLabel: '412ms',
+    defaultOpen: true,
+  },
+};
+
+export const BashTimeout: Story = {
+  args: {
+    name: 'bash',
+    state: 'failed',
+    summary: 'cargo test --workspace -- --nocapture',
+    input: '{"command": "cargo test --workspace -- --nocapture"}',
+    result: 'bash_timeout: 命令超过 120000 ms 未结束',
+    durationLabel: '120s',
+    defaultOpen: true,
+  },
+};

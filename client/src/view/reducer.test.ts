@@ -6,6 +6,7 @@ import type { MessageNode } from '../api/generated/MessageNode';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { StreamEvent } from '../api/generated/StreamEvent';
+import type { ToolCallRecord } from '../api/generated/ToolCallRecord';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId } from './ids';
 import {
@@ -434,6 +435,34 @@ describe('事件流的幂等与隔离', () => {
     });
 
     expect(transcriptNodes(replayed, 's-1')).toEqual(transcriptNodes(snapshot, 's-1'));
+  });
+});
+
+describe('工具调用', () => {
+  it('工具调用与结果随 assistant 消息进入 transcript', () => {
+    const record: ToolCallRecord = {
+      id: 'call_1',
+      name: 'bash',
+      arguments: '{"command":"cargo test"}',
+      outcome: { status: 'succeeded', content: '测试通过' },
+    };
+    let state = applyFact(withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]), {
+      kind: 'message_appended',
+      session: session('s-1', '/work/a', 101),
+      message: node(1, null, 'user', { text: '执行' }),
+    });
+    state = applyFact(state, {
+      kind: 'message_updated',
+      session: session('s-1', '/work/a', 102),
+      message: node(2, 1, 'assistant', { text: '完成', runId: 1, toolCalls: [record] }),
+    });
+    state = applyFact(state, {
+      kind: 'active_leaf_changed',
+      session: session('s-1', '/work/a', 103),
+      activeLeaf: 2,
+    });
+
+    expect(transcriptNodes(state, 's-1')[1]?.toolCalls).toEqual([record]);
   });
 });
 

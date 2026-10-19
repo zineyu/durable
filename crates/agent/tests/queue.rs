@@ -8,6 +8,31 @@ fn queue_texts(tree: &agent::SessionTree) -> Vec<&str> {
     tree.queue.iter().map(|item| item.text.as_str()).collect()
 }
 
+async fn busy_ids(harness: &Harness, sessions: &[agent::SessionMetadata]) -> Vec<agent::SessionId> {
+    let mut busy = Vec::new();
+    for session in sessions {
+        if harness.tree(&session.id).await.session.busy {
+            busy.push(session.id.clone());
+        }
+    }
+    busy
+}
+
+async fn wait_for_busy_count(
+    harness: &Harness,
+    sessions: &[agent::SessionMetadata],
+    count: usize,
+) -> Vec<agent::SessionId> {
+    for _ in 0..500 {
+        let busy = busy_ids(harness, sessions).await;
+        if busy.len() == count {
+            return busy;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("同时运行的 run 未达到 {count} 个")
+}
+
 /// 规格「调度与会话状态」：run 进行中提交的消息留在队列，不打断当前 run。
 #[tokio::test]
 async fn queues_messages_behind_running_run() {
@@ -210,6 +235,45 @@ async fn deletes_running_session_with_its_queue() {
         .await
         .expect("统计队列项");
     assert_eq!(remaining, 0, "session 删除后不保留队列项");
+}
+
+/// 规格「调度与会话状态」：全局并发槽位限制同时运行的 run，等待的 session 在槽位释放后执行。
+#[tokio::test]
+async fn enforces_global_concurrency_slots_across_sessions() {
+    let config = agent::EngineConfig {
+        max_concurrency: 2,
+        ..agent::EngineConfig::default()
+    };
+    let harness = Harness::start_with(config, vec![Script::Hang, Script::Hang, Script::Hang]).await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    let sessions = vec![
+        harness.created_session(&workspace.path).await,
+        harness.created_session(&workspace.path).await,
+        harness.created_session(&workspace.path).await,
+    ];
+    for session in &sessions {
+        harness.submit_message(&session.id, "运行").await;
+    }
+
+    let running = wait_for_busy_count(&harness, &sessions, 2).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        busy_ids(&harness, &sessions).await.len(),
+        2,
+        "第三个 run 不得越过槽位"
+    );
+
+    let waiting = sessions
+        .iter()
+        .find(|session| !running.contains(&session.id))
+        .expect("有等待槽位的 session");
+    let tree = harness.tree(&waiting.id).await;
+    assert!(!tree.session.busy);
+    assert_eq!(queue_texts(&tree), vec!["运行"], "等待的 run 留在队列");
+
+    let response = harness.cancel_run(&running[0]).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    harness.wait_busy(&waiting.id).await;
 }
 
 /// 规格「事实事件」：入队写入 `message_queued`，携带队列项与更新后的 session 元数据。

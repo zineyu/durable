@@ -42,6 +42,32 @@ export const Conversation: Story = {
   },
 };
 
+export const NestedBranches: Story = {
+  args: {
+    children: (
+      <>
+        <UserMessage
+          text="把 ui 的静态资源改为内嵌。"
+          branch={{ index: 2, total: 2, onPrev: () => undefined, onNext: () => undefined }}
+        />
+        <AssistantMessage
+          state="complete"
+          branch={{ index: 1, total: 2, onPrev: () => undefined, onNext: () => undefined }}
+        >
+          <p>已内嵌，接着补 SSE 反代测试。</p>
+        </AssistantMessage>
+        <UserMessage
+          text="再补一条回环地址的测试。"
+          branch={{ index: 2, total: 3, onPrev: () => undefined, onNext: () => undefined }}
+        />
+        <AssistantMessage state="complete">
+          <p>回环地址测试已加入。</p>
+        </AssistantMessage>
+      </>
+    ),
+  },
+};
+
 export const LongConversation: Story = {
   args: {
     children: (

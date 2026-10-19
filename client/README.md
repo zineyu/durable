@@ -12,7 +12,7 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 | `npm run build` | 构建到 `client/dist` |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm run test` | Vitest（设计 token 与交互状态检查） |
+| `npm run test` | Vitest（reducer、工具卡片、设计 token 与交互状态检查） |
 | `npm run storybook` | Storybook 开发服务器，端口 6006 |
 | `npm run build-storybook` | 构建静态 Storybook 到 `client/storybook-static` |
 | `npm run screenshots` | 从 `storybook-static` 生成截图 |
