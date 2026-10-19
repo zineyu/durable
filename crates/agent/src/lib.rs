@@ -39,7 +39,9 @@ pub use provider::{
     ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,
     ProviderError,
 };
-pub use tools::{NoTools, ToolBox, ToolCall, ToolContext};
+pub use tools::{
+    NoTools, ToolBox, ToolCall, ToolContext, ToolDefinition, ToolLimits, ToolRegistry,
+};
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
 

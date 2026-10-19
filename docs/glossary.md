@@ -4,6 +4,11 @@
 | --- | --- |
 | workspace | 注册到 agent 的目录。身份为规范化绝对路径。文件与 bash 操作的安全边界。 |
 | workspace root containment | 路径规范化后必须仍位于 workspace 根内。绝对路径、`..` 逃逸、符号链接逃逸均拒绝。 |
+| 工具定义 | 每轮模型请求携带的 function 声明：名称、说明与 JSON Schema 参数。 |
+| 工具失败 | 结构化的 `ToolOutcome::Failed`，含稳定错误码与说明。工具失败回传模型，run 继续。 |
+| 读取上限 | `read_file` 的字节上限，默认 256 KiB。超出是错误，不是截断。 |
+| 输出截断 | `bash` 输出超过上限（默认 64 KiB）时保留前段并在结果中标注。截断不是错误。 |
+| 进程组 | `bash` 子进程以自身 pid 作为进程组 id。超时或取消时杀掉整个进程组。 |
 | agent binary | Rust 进程。提供 HTTP API，执行 agent 循环、工具调用，持有 SQLite。 |
 | ui binary | Rust 进程。内嵌并托管 React 静态资源，把 `/api/*` 反代到 agent。 |
 | session | 绑定唯一 workspace 的对话单元。含消息树、队列、active leaf。 |

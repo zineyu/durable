@@ -16,6 +16,8 @@ pub enum ToolErrorCode {
     EditNotFound,
     EditNotUnique,
     BashTimeout,
+    IoError,
+    Cancelled,
 }
 
 /// 工具调用的结局。

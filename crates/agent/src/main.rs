@@ -38,7 +38,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         store,
         model_name,
         provider,
-        std::sync::Arc::new(agent::NoTools),
+        std::sync::Arc::new(agent::ToolRegistry::default()),
         engine,
     )
     .await?;

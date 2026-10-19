@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script};
+use support::{Harness, Script, ToolCallSpec};
 
 fn user_texts(tree: &agent::SessionTree) -> Vec<&str> {
     tree.nodes
@@ -77,52 +77,73 @@ async fn records_run_lifecycle_events_in_order() {
     );
 }
 
-/// 规格「模型调用」：多步工具调用按序执行，收集结果后再请求下一轮。
+/// 规格「模型调用」：同一轮多个工具调用按序执行，收集结果后再请求下一轮。
 #[tokio::test]
 async fn executes_tool_calls_in_order_and_continues() {
     let harness = Harness::start_with(
         agent::EngineConfig::default(),
         vec![
-            Script::ToolCall {
-                id: "call_1".into(),
-                name: "read_file".into(),
-                arguments: r#"{"path":"notes.txt"}"#.into(),
-            },
+            Script::ToolCalls(vec![
+                ToolCallSpec::new(
+                    "call_1",
+                    "write_file",
+                    r#"{"path":"notes.txt","content":"记录"}"#,
+                ),
+                ToolCallSpec::new("call_2", "read_file", r#"{"path":"notes.txt"}"#),
+            ]),
             Script::Text("完成".into()),
         ],
     )
     .await;
     let session = harness.session("workspace").await;
-    harness.submit_message(&session.id, "读取文件").await;
+    harness.submit_message(&session.id, "写入并读取").await;
     let tree = harness.wait_idle(&session.id).await;
 
     let assistant = &tree.nodes[1];
-    assert_eq!(assistant.tool_calls.len(), 1);
-    let call = &assistant.tool_calls[0];
-    assert_eq!(call.id, "call_1");
-    assert_eq!(call.name, "read_file");
+    assert_eq!(assistant.tool_calls.len(), 2);
+    assert_eq!(assistant.tool_calls[0].name, "write_file");
     assert_eq!(
-        call.outcome,
-        agent::ToolOutcome::Failed {
-            code: agent::ToolErrorCode::UnknownTool,
-            message: "未知工具: read_file".into(),
+        assistant.tool_calls[0].outcome,
+        agent::ToolOutcome::Succeeded {
+            content: "写入 6 字节: notes.txt".into(),
+        }
+    );
+    assert_eq!(assistant.tool_calls[1].name, "read_file");
+    assert_eq!(
+        assistant.tool_calls[1].outcome,
+        agent::ToolOutcome::Succeeded {
+            content: "1\t记录\n".into(),
         }
     );
     assert_eq!(assistant.text.as_str(), "完成");
     assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
+    assert_eq!(
+        std::fs::read_to_string(harness.workspace_path("workspace").join("notes.txt"))
+            .expect("工具写入文件"),
+        "记录"
+    );
 
     let requests = harness.provider.requests();
     assert_eq!(requests.len(), 2, "每个生成步一次模型请求");
+    let tools = requests[0]["tools"].as_array().expect("请求携带工具定义");
+    let names: Vec<&str> = tools
+        .iter()
+        .map(|tool| tool["function"]["name"].as_str().expect("工具定义有名称"))
+        .collect();
+    assert_eq!(names, vec!["read_file", "write_file", "edit_file", "bash"]);
+
     let messages = requests[1]["messages"]
         .as_array()
         .expect("第二轮请求含 messages");
-    assert!(messages.iter().any(|message| {
-        message["role"] == "tool"
-            && message["tool_call_id"] == "call_1"
-            && message["content"]
-                .as_str()
-                .is_some_and(|content| content.contains("unknown_tool"))
-    }));
+    let results: Vec<&serde_json::Value> = messages
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .collect();
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0]["tool_call_id"], "call_1");
+    assert_eq!(results[0]["content"], "写入 6 字节: notes.txt");
+    assert_eq!(results[1]["tool_call_id"], "call_2");
+    assert_eq!(results[1]["content"], "1\t记录\n");
 }
 
 /// 规格 user story 15 与「调度与会话状态」：同一 session 的队列按 FIFO 执行。

@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use futures_util::{StreamExt, stream::BoxStream};
 
 use crate::config::ModelConfig;
+use crate::tools::ToolDefinition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -104,7 +105,11 @@ pub type ChatStream = BoxStream<'static, Result<ChatChunk, ProviderError>>;
 /// 发起一轮带工具定义的流式请求。
 #[async_trait]
 pub trait ModelProvider: Send + Sync {
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> Result<ChatStream, ProviderError>;
+    async fn stream_chat(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ChatStream, ProviderError>;
 }
 
 /// OpenAI 兼容的 `/chat/completions` 流式客户端。
@@ -132,12 +137,20 @@ impl OpenAiProvider {
 
 #[async_trait]
 impl ModelProvider for OpenAiProvider {
-    async fn stream_chat(&self, messages: Vec<ChatMessage>) -> Result<ChatStream, ProviderError> {
-        let body = serde_json::json!({
+    async fn stream_chat(
+        &self,
+        messages: Vec<ChatMessage>,
+        tools: Vec<ToolDefinition>,
+    ) -> Result<ChatStream, ProviderError> {
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages.iter().map(ChatMessage::to_json).collect::<Vec<_>>(),
             "stream": true,
         });
+        if !tools.is_empty() {
+            body["tools"] =
+                serde_json::Value::Array(tools.iter().map(ToolDefinition::to_json).collect());
+        }
         let url = format!("{}/chat/completions", self.base_url);
         let response = self
             .client

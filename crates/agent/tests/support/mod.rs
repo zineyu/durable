@@ -16,7 +16,8 @@ use tempfile::TempDir;
 
 pub mod provider;
 
-pub use provider::{Script, ScriptedProvider};
+#[allow(unused_imports)]
+pub use provider::{Script, ScriptedProvider, ToolCallSpec};
 
 /// 模型配置的测试取值，用 `Command::envs` 应用到 std 或 tokio 的命令。
 pub fn model_environment() -> [(&'static str, &'static str); 3] {
@@ -80,6 +81,7 @@ impl TestAgent {
         database: &Path,
         model: &str,
         provider: Arc<dyn agent::ModelProvider>,
+        tools: Arc<dyn agent::ToolBox>,
         config: agent::EngineConfig,
     ) -> TestAgent {
         let store = agent::Store::open(database).await.expect("打开 SQLite");
@@ -87,15 +89,9 @@ impl TestAgent {
             .await
             .expect("绑定回环端口");
         let address = listener.local_addr().expect("读取本地地址");
-        let state = agent::AgentState::start(
-            store,
-            model.to_owned(),
-            provider,
-            Arc::new(agent::NoTools),
-            config,
-        )
-        .await
-        .expect("启动 agent 状态");
+        let state = agent::AgentState::start(store, model.to_owned(), provider, tools, config)
+            .await
+            .expect("启动 agent 状态");
         let handle = tokio::spawn(async move {
             agent::serve(listener, state).await.expect("agent 服务运行");
         });
@@ -121,6 +117,7 @@ pub struct Harness {
     pub database: PathBuf,
     pub provider: ScriptedProvider,
     pub config: agent::EngineConfig,
+    pub limits: agent::ToolLimits,
     agent: TestAgent,
     pub client: reqwest::Client,
 }
@@ -131,10 +128,18 @@ impl Harness {
     }
 
     pub async fn start_with(config: agent::EngineConfig, scripts: Vec<Script>) -> Harness {
+        Harness::start_with_limits(config, scripts, agent::ToolLimits::default()).await
+    }
+
+    pub async fn start_with_limits(
+        config: agent::EngineConfig,
+        scripts: Vec<Script>,
+        limits: agent::ToolLimits,
+    ) -> Harness {
         let directory = tempfile::tempdir().expect("创建临时目录");
         let database = directory.path().join("agent.sqlite");
         let provider = ScriptedProvider::start(scripts).await;
-        Harness::open(directory, database, provider, config).await
+        Harness::open(directory, database, provider, config, limits).await
     }
 
     async fn open(
@@ -142,6 +147,7 @@ impl Harness {
         database: PathBuf,
         provider: ScriptedProvider,
         config: agent::EngineConfig,
+        limits: agent::ToolLimits,
     ) -> Harness {
         let model = agent::ModelConfig {
             base_url: provider.base_url(),
@@ -149,12 +155,14 @@ impl Harness {
             model_name: "test-model".to_owned(),
         };
         let runtime = Arc::new(agent::OpenAiProvider::new(&model));
-        let agent = TestAgent::start(&database, "test-model", runtime, config).await;
+        let tools = Arc::new(agent::ToolRegistry::new(limits));
+        let agent = TestAgent::start(&database, "test-model", runtime, tools, config).await;
         Harness {
             directory,
             database,
             provider,
             config,
+            limits,
             agent,
             client: reqwest::Client::new(),
         }
@@ -166,19 +174,24 @@ impl Harness {
             database,
             provider,
             config,
+            limits,
             agent,
             ..
         } = self;
         agent.shutdown().await;
-        Harness::open(directory, database, provider, config).await
+        Harness::open(directory, database, provider, config, limits).await
     }
 
     pub fn url(&self, path: &str) -> String {
         self.agent.url(path)
     }
 
+    pub fn workspace_path(&self, name: &str) -> PathBuf {
+        self.directory.path().join(name)
+    }
+
     pub fn workspace(&self, name: &str) -> PathBuf {
-        let path = self.directory.path().join(name);
+        let path = self.workspace_path(name);
         std::fs::create_dir(&path).expect("创建 workspace 目录");
         path
     }

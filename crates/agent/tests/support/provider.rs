@@ -26,12 +26,32 @@ pub enum Script {
         name: String,
         arguments: String,
     },
+    /// 同一条 assistant 消息返回多个工具调用。
+    ToolCalls(Vec<ToolCallSpec>),
     /// 先流式返回文本，再保持连接不结束，用于观察运行中的 run。
     PartialThenHang(String),
     /// 返回非成功状态。
     Fail(u16),
     /// 永不响应，用于观察运行中的 run。
     Hang,
+}
+
+/// 脚本化的工具调用。
+#[derive(Debug, Clone)]
+pub struct ToolCallSpec {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+impl ToolCallSpec {
+    pub fn new(id: &str, name: &str, arguments: &str) -> Self {
+        Self {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            arguments: arguments.to_owned(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -137,23 +157,51 @@ fn sse_body(script: &Script) -> String {
             name,
             arguments,
         } => {
-            body.push_str(&format!(
-                "data: {}\n\n",
-                json!({ "choices": [{ "delta": { "tool_calls": [{
-                    "index": 0, "id": id, "type": "function",
-                    "function": { "name": name, "arguments": "" }
-                }] } }] })
-            ));
-            body.push_str(&format!(
-                "data: {}\n\n",
-                json!({ "choices": [{ "delta": { "tool_calls": [{
-                    "index": 0, "function": { "arguments": arguments }
-                }] } }] })
-            ));
-            body.push_str("data: [DONE]\n\n");
+            body.push_str(&tool_call_events(&[ToolCallSpec {
+                id: id.clone(),
+                name: name.clone(),
+                arguments: arguments.clone(),
+            }]));
+        }
+        Script::ToolCalls(calls) => {
+            body.push_str(&tool_call_events(calls));
         }
         Script::Fail(_) | Script::Hang | Script::PartialThenHang(_) => {}
     }
+    body
+}
+
+fn tool_call_events(calls: &[ToolCallSpec]) -> String {
+    let mut body = String::new();
+    let headers: Vec<Value> = calls
+        .iter()
+        .enumerate()
+        .map(|(index, call)| {
+            json!({
+                "index": index, "id": call.id, "type": "function",
+                "function": { "name": call.name, "arguments": "" }
+            })
+        })
+        .collect();
+    body.push_str(&format!(
+        "data: {}\n\n",
+        json!({ "choices": [{ "delta": { "tool_calls": headers } }] })
+    ));
+    let fragments: Vec<Value> = calls
+        .iter()
+        .enumerate()
+        .map(|(index, call)| {
+            json!({
+                "index": index,
+                "function": { "arguments": call.arguments }
+            })
+        })
+        .collect();
+    body.push_str(&format!(
+        "data: {}\n\n",
+        json!({ "choices": [{ "delta": { "tool_calls": fragments } }] })
+    ));
+    body.push_str("data: [DONE]\n\n");
     body
 }
 

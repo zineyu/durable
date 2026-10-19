@@ -210,7 +210,7 @@ impl RunEngine {
             let stream = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => return cancelled(text, records),
-                result = self.provider.stream_chat(messages) => result,
+                result = self.provider.stream_chat(messages, self.tools.definitions()) => result,
             };
             let mut stream = match stream {
                 Ok(stream) => stream,
