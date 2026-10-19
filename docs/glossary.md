@@ -14,6 +14,9 @@
 | transcript | root 到 active leaf 的路径。即发给模型的上下文。 |
 | branch | 共享同一父节点的兄弟消息构成的替代历史。 |
 | fact event | 持久化到 SQLite 的领域事件。token 增量不属于 fact event。 |
+| durable 内核 | `crates/core`（包名 `durable`）中的领域与持久化层。持有单一写入线、领域类型与存储。 |
+| 写入线 | 串行化写入的互斥边界。读-改-写与一次原子提交都在同一条写入线内完成。 |
+| changeset | 一次提交登记的变更集合，顺序即意图，在单条存储事务内整体生效。 |
 | delta | 流式 token 增量。仅经 SSE 实时传输，不落库。 |
 | queue item | 等待执行的用户消息。session 级 FIFO，持久化。 |
 | bootstrap | 客户端启动时获取的元数据快照与事件游标。 |

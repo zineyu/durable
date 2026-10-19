@@ -68,7 +68,7 @@ pub struct TestAgent {
 
 impl TestAgent {
     pub async fn start(database: &Path, model: &str) -> TestAgent {
-        let store = agent::Store::open(database).expect("打开 SQLite");
+        let store = agent::Store::open(database).await.expect("打开 SQLite");
         let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .expect("绑定回环端口");

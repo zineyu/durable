@@ -3,4 +3,7 @@ import type { SessionId } from "./SessionId";
 import type { SessionTitle } from "./SessionTitle";
 import type { WorkspacePath } from "./WorkspacePath";
 
+/**
+ * 对外暴露的 session 元数据。
+ */
 export type SessionMetadata = { id: SessionId, workspace: WorkspacePath, title: SessionTitle, busy: boolean, queueLength: number, updatedAt: number, };

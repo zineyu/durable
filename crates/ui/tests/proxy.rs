@@ -2,7 +2,9 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 async fn start_agent() -> (tempfile::TempDir, SocketAddr) {
     let directory = tempfile::tempdir().expect("创建临时目录");
-    let store = agent::Store::open(&directory.path().join("agent.sqlite")).expect("打开 SQLite");
+    let store = agent::Store::open(&directory.path().join("agent.sqlite"))
+        .await
+        .expect("打开 SQLite");
     let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await
         .expect("绑定 agent 端口");

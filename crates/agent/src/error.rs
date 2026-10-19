@@ -1,60 +1,11 @@
-use std::fmt;
-
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
-
-use crate::protocol::{
-    ErrorCode, ErrorResponse, SessionId, SessionIdError, SessionTitleError, WorkspacePath,
-    WorkspacePathError,
+use durable::{
+    MessageTextError, SessionIdError, SessionTitleError, StoreError, WorkspacePathError,
 };
 
-#[derive(Debug)]
-pub enum StoreError {
-    Database(rusqlite::Error),
-    Serialization(serde_json::Error),
-    CorruptedData(String),
-    WorkspaceDuplicate(WorkspacePath),
-    WorkspaceNotFound(WorkspacePath),
-    WorkspaceNotEmpty(WorkspacePath),
-    SessionNotFound(SessionId),
-}
-
-impl fmt::Display for StoreError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Database(error) => write!(formatter, "SQLite 错误: {error}"),
-            Self::Serialization(error) => write!(formatter, "事件序列化错误: {error}"),
-            Self::CorruptedData(detail) => {
-                write!(formatter, "数据库中的值不符合领域约束: {detail}")
-            }
-            Self::WorkspaceDuplicate(path) => {
-                write!(formatter, "workspace 已注册: {}", path.as_str())
-            }
-            Self::WorkspaceNotFound(path) => {
-                write!(formatter, "workspace 未注册: {}", path.as_str())
-            }
-            Self::WorkspaceNotEmpty(path) => {
-                write!(formatter, "workspace 仍有 session: {}", path.as_str())
-            }
-            Self::SessionNotFound(id) => write!(formatter, "session 不存在: {}", id.as_str()),
-        }
-    }
-}
-
-impl std::error::Error for StoreError {}
-
-impl From<rusqlite::Error> for StoreError {
-    fn from(error: rusqlite::Error) -> Self {
-        Self::Database(error)
-    }
-}
-
-impl From<serde_json::Error> for StoreError {
-    fn from(error: serde_json::Error) -> Self {
-        Self::Serialization(error)
-    }
-}
+use crate::protocol::{ErrorCode, ErrorResponse};
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -108,10 +59,21 @@ impl From<SessionTitleError> for ApiError {
     }
 }
 
+impl From<MessageTextError> for ApiError {
+    fn from(error: MessageTextError) -> Self {
+        Self::new(
+            ErrorCode::InvalidMessage,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.to_string(),
+        )
+    }
+}
+
 impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
         let (code, status) = match &error {
             StoreError::Database(_)
+            | StoreError::Migration(_)
             | StoreError::Serialization(_)
             | StoreError::CorruptedData(_) => {
                 (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR)

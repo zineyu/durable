@@ -1,4 +1,4 @@
-use std::env::{var, VarError};
+use std::env::{VarError, var};
 use std::fmt;
 
 pub const MODEL_BASE_URL: &str = "DURABLE_MODEL_BASE_URL";

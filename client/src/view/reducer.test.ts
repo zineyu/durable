@@ -231,8 +231,7 @@ describe('侧栏状态', () => {
     ]);
   });
 
-  it('重命名忙碌 session 保留活动 run 与队列长度', () => {
-    const state = createSidebarState(
+  it('重命名忙碌 session 保留活动 run 与队列长度', () => {    const state = createSidebarState(
       bootstrap([workspaceA], [session('s-1', '/work/a', 100, { busy: true, queueLength: 2 })]),
     );
 
@@ -243,6 +242,26 @@ describe('侧栏状态', () => {
 
     expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
       { id: toSessionId('s-1'), title: '重命名后', state: 'running', queuedCount: 2 },
+    ]);
+  });
+
+  it('追加消息后按更新时间把 session 置顶', () => {
+    const state = createSidebarState(
+      bootstrap(
+        [workspaceA],
+        [session('s-1', '/work/a', 100), session('s-2', '/work/a', 200)],
+      ),
+    );
+
+    const next = applyEvent(state, {
+      kind: 'message_appended',
+      session: session('s-1', '/work/a', 300),
+      message: { id: 3, parentId: null, role: 'user', text: '新消息', createdAt: 300 },
+    });
+
+    expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0 },
+      { id: toSessionId('s-2'), title: '标题 s-2', state: 'idle', queuedCount: 0 },
     ]);
   });
 });

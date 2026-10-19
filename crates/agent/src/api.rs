@@ -2,19 +2,19 @@ use std::sync::Arc;
 
 use axum::extract::rejection::{JsonRejection, PathRejection};
 use axum::extract::{FromRequest, FromRequestParts, Path, Request, State};
-use axum::http::request::Parts;
 use axum::http::StatusCode;
+use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use durable::{MessageNode, MessageText, SessionId, SessionTitle, WorkspacePath};
 use serde::de::DeserializeOwned;
 
+use crate::Store;
 use crate::error::ApiError;
 use crate::protocol::{
     BootstrapResponse, CreateSessionRequest, HealthResponse, HealthStatus,
-    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SessionId,
-    SessionMetadata, SessionTitle, SessionTree, WorkspaceMetadata, WorkspacePath,
+    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest,
 };
-use crate::store::Store;
 
 /// 请求体；反序列化失败时返回协议错误信封而非纯文本。
 struct JsonBody<T>(T);
@@ -91,6 +91,7 @@ pub fn router(state: AgentState) -> Router {
         .route("/api/sessions/{id}/tree", get(session_tree))
         .route("/api/sessions/{id}/rename", post(rename_session))
         .route("/api/sessions/{id}/delete", post(delete_session))
+        .route("/api/sessions/{id}/messages", post(submit_message))
         .with_state(state)
 }
 
@@ -107,7 +108,7 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn bootstrap(State(state): State<AgentState>) -> Result<Json<BootstrapResponse>, ApiError> {
-    let snapshot = state.store().snapshot()?;
+    let snapshot = state.store().bootstrap().await?;
     Ok(Json(BootstrapResponse {
         model: state.model_name().to_owned(),
         max_event_id: snapshot.max_event_id,
@@ -119,9 +120,9 @@ async fn bootstrap(State(state): State<AgentState>) -> Result<Json<BootstrapResp
 async fn register_workspace(
     State(state): State<AgentState>,
     JsonBody(request): JsonBody<RegisterWorkspaceRequest>,
-) -> Result<(StatusCode, Json<WorkspaceMetadata>), ApiError> {
+) -> Result<(StatusCode, Json<durable::WorkspaceMetadata>), ApiError> {
     let path = WorkspacePath::resolve(&request.path)?;
-    let workspace = state.store().register_workspace(&path)?;
+    let workspace = state.store().register_workspace(&path).await?;
     Ok((StatusCode::CREATED, Json(workspace)))
 }
 
@@ -130,20 +131,20 @@ async fn remove_workspace(
     JsonBody(request): JsonBody<RemoveWorkspaceRequest>,
 ) -> Result<StatusCode, ApiError> {
     let path = WorkspacePath::parse(&request.path)?;
-    state.store().remove_workspace(&path)?;
+    state.store().remove_workspace(&path).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn create_session(
     State(state): State<AgentState>,
     JsonBody(request): JsonBody<CreateSessionRequest>,
-) -> Result<(StatusCode, Json<SessionMetadata>), ApiError> {
+) -> Result<(StatusCode, Json<durable::SessionMetadata>), ApiError> {
     let workspace = WorkspacePath::resolve(&request.workspace)?;
     let title = match request.title {
         Some(raw) => SessionTitle::parse(&raw)?,
         None => SessionTitle::default(),
     };
-    let session = state.store().create_session(&workspace, title)?;
+    let session = state.store().create_session(&workspace, title).await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
 
@@ -151,26 +152,34 @@ async fn rename_session(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
     JsonBody(request): JsonBody<RenameSessionRequest>,
-) -> Result<Json<SessionMetadata>, ApiError> {
+) -> Result<Json<durable::SessionMetadata>, ApiError> {
     let title = SessionTitle::parse(&request.title)?;
-    Ok(Json(state.store().rename_session(&id, &title)?))
+    Ok(Json(state.store().rename_session(&id, &title).await?))
 }
 
 async fn delete_session(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
 ) -> Result<StatusCode, ApiError> {
-    state.store().delete_session(&id)?;
+    state.store().delete_session(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn session_tree(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
-) -> Result<Json<SessionTree>, ApiError> {
-    Ok(Json(SessionTree {
-        session: state.store().session(&id)?,
-        active_leaf: None,
-        nodes: Vec::new(),
-    }))
+) -> Result<Json<durable::SessionTree>, ApiError> {
+    Ok(Json(state.store().session_tree(&id).await?))
+}
+
+async fn submit_message(
+    State(state): State<AgentState>,
+    SessionPath(id): SessionPath,
+    JsonBody(request): JsonBody<SubmitMessageRequest>,
+) -> Result<(StatusCode, Json<MessageNode>), ApiError> {
+    let text = MessageText::parse(&request.text)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(state.store().admit_message(&id, text).await?),
+    ))
 }

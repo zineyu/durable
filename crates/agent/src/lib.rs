@@ -4,25 +4,31 @@ use std::path::Path;
 
 use ts_rs::TS;
 
+pub mod protocol;
+
 mod api;
 mod config;
 mod error;
-mod protocol;
-mod store;
 
-pub use api::{router, serve, AgentState};
+pub use api::{AgentState, router, serve};
 pub use config::{
-    model_config_from_env, ConfigError, ModelConfig, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME,
+    ConfigError, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME, ModelConfig, model_config_from_env,
 };
-pub use error::{ApiError, StoreError};
+pub use durable::{
+    DEFAULT_SESSION_TITLE, FactEvent, MessageId, MessageIdError, MessageNode, MessageRole,
+    MessageRoleError, MessageText, MessageTextError, SessionId, SessionIdError, SessionMetadata,
+    SessionRecord, SessionTitle, SessionTitleError, SessionTree, SqliteStorage, StoreError,
+    WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+};
+pub use error::ApiError;
 pub use protocol::{
-    BootstrapResponse, CreateSessionRequest, ErrorCode, ErrorResponse, FactEvent, HealthResponse,
-    HealthStatus, MessageId, MessageIdError, MessageNode, MessageRole, RegisterWorkspaceRequest,
-    RemoveWorkspaceRequest, RenameSessionRequest, SessionId, SessionIdError, SessionMetadata,
-    SessionTitle, SessionTitleError, SessionTree, WorkspaceMetadata, WorkspacePath,
-    WorkspacePathError, DEFAULT_SESSION_TITLE,
+    BootstrapResponse, CreateSessionRequest, ErrorCode, ErrorResponse, HealthResponse,
+    HealthStatus, RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest,
+    SubmitMessageRequest,
 };
-pub use store::{Snapshot, Store};
+
+/// agent 使用的 store：SQLite 持久化。
+pub type Store = durable::Store<SqliteStorage>;
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
 
@@ -65,6 +71,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     SessionMetadata::export_all(&config)?;
     BootstrapResponse::export_all(&config)?;
     MessageRole::export_all(&config)?;
+    MessageText::export_all(&config)?;
     MessageNode::export_all(&config)?;
     SessionTree::export_all(&config)?;
     FactEvent::export_all(&config)?;
@@ -74,5 +81,6 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     RemoveWorkspaceRequest::export_all(&config)?;
     CreateSessionRequest::export_all(&config)?;
     RenameSessionRequest::export_all(&config)?;
+    SubmitMessageRequest::export_all(&config)?;
     Ok(())
 }

@@ -11,7 +11,8 @@
 
 | 路径 | 职责 |
 | --- | --- |
-| `crates/agent` | agent 二进制；协议类型与 `ts-rs` 导出在此 |
+| `crates/core` | 领域与持久化内核（包名 `durable`）；领域类型、`ts-rs` 派生、单一写入线与 SQLite 存储 |
+| `crates/agent` | agent 二进制；HTTP/SSE 协议与 `ts-rs` 导出入口 |
 | `crates/ui` | ui 二进制；编译期内嵌 `client/dist` |
 | `client` | React + Vite + TypeScript 客户端 |
 | `docs` | 规格、ADR、术语表 |

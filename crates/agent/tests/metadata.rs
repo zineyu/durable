@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::{Response, StatusCode};
+use sqlx::{ConnectOptions, Row};
 use tempfile::TempDir;
 
 mod support;
@@ -145,26 +146,43 @@ fn missing_id() -> agent::SessionId {
     agent::SessionId::parse("missing").expect("合法 session id")
 }
 
-fn recorded_event_ids(database: &Path) -> Vec<i64> {
-    let connection = rusqlite::Connection::open(database).expect("打开 SQLite");
-    let mut statement = connection
-        .prepare("SELECT id FROM event ORDER BY id")
-        .expect("准备事件查询");
-    let rows = statement
-        .query_map([], |row| row.get::<_, i64>(0))
-        .expect("查询事件");
-    rows.map(|row| row.expect("读取事件 id")).collect()
+async fn connect(database: &Path) -> sqlx::SqliteConnection {
+    sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(database)
+        .busy_timeout(Duration::from_secs(5))
+        .connect()
+        .await
+        .expect("打开 SQLite")
 }
 
-fn recorded_events(database: &Path) -> Vec<agent::FactEvent> {
-    let connection = rusqlite::Connection::open(database).expect("打开 SQLite");
-    let mut statement = connection
-        .prepare("SELECT event FROM event ORDER BY id")
-        .expect("准备事件查询");
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))
+async fn recorded_event_ids(database: &Path) -> Vec<i64> {
+    sqlx::query_scalar("SELECT id FROM event ORDER BY id")
+        .fetch_all(&mut connect(database).await)
+        .await
+        .expect("查询事件 id")
+}
+
+async fn recorded_events(database: &Path) -> Vec<agent::FactEvent> {
+    let payloads: Vec<String> = sqlx::query_scalar("SELECT event FROM event ORDER BY id")
+        .fetch_all(&mut connect(database).await)
+        .await
         .expect("查询事件");
-    rows.map(|row| serde_json::from_str(&row.expect("读取事件")).expect("解析事件"))
+    payloads
+        .iter()
+        .map(|payload| serde_json::from_str(payload).expect("解析事件"))
+        .collect()
+}
+
+async fn recorded_event_kinds(database: &Path) -> Vec<String> {
+    recorded_event_rows(database)
+        .await
+        .into_iter()
+        .map(|(_, _, _, payload)| {
+            serde_json::from_str::<serde_json::Value>(&payload).expect("解析事件负载")["kind"]
+                .as_str()
+                .expect("事件负载有 kind")
+                .to_owned()
+        })
         .collect()
 }
 
@@ -176,17 +194,21 @@ async fn error_envelope(response: Response) -> agent::ErrorResponse {
     response.json().await.expect("解析错误响应")
 }
 
-fn recorded_event_rows(database: &Path) -> Vec<(i64, Option<String>, i64, String)> {
-    let connection = rusqlite::Connection::open(database).expect("打开 SQLite");
-    let mut statement = connection
-        .prepare("SELECT id, session_id, created_at, event FROM event ORDER BY id")
-        .expect("准备事件查询");
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+async fn recorded_event_rows(database: &Path) -> Vec<(i64, Option<String>, i64, String)> {
+    sqlx::query("SELECT id, session_id, created_at, event FROM event ORDER BY id")
+        .fetch_all(&mut connect(database).await)
+        .await
+        .expect("查询事件")
+        .iter()
+        .map(|row| {
+            (
+                row.get::<i64, _>(0),
+                row.get::<Option<String>, _>(1),
+                row.get::<i64, _>(2),
+                row.get::<String, _>(3),
+            )
         })
-        .expect("查询事件");
-    rows.map(|row| row.expect("读取事件行")).collect()
+        .collect()
 }
 
 #[tokio::test]
@@ -337,7 +359,7 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
     assert_eq!(tree.session, renamed);
 
     assert_eq!(
-        recorded_events(&harness.database),
+        recorded_events(&harness.database).await,
         vec![
             agent::FactEvent::WorkspaceRegistered {
                 workspace: workspace.clone(),
@@ -360,7 +382,7 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
     );
 
     assert_eq!(
-        recorded_events(&harness.database),
+        recorded_events(&harness.database).await,
         vec![
             agent::FactEvent::WorkspaceRegistered {
                 workspace: workspace.clone(),
@@ -498,7 +520,7 @@ async fn records_workspace_removal_as_fact_event() {
     );
 
     assert_eq!(
-        recorded_events(&harness.database),
+        recorded_events(&harness.database).await,
         vec![
             agent::FactEvent::WorkspaceRegistered {
                 workspace: workspace.clone(),
@@ -513,6 +535,7 @@ async fn records_workspace_removal_as_fact_event() {
     assert_eq!(
         bootstrap.max_event_id,
         *recorded_event_ids(&harness.database)
+            .await
             .last()
             .expect("有事件"),
         "bootstrap 的最大事件 id 等于事件表最大值"
@@ -589,7 +612,7 @@ async fn keeps_event_ids_monotonic_and_deletion_after_restart() {
     );
     let before = harness.bootstrap().await;
 
-    let events = recorded_events(&harness.database);
+    let events = recorded_events(&harness.database).await;
     assert!(
         !events.contains(&agent::FactEvent::SessionCreated {
             session: deleted.clone(),
@@ -617,7 +640,7 @@ async fn keeps_event_ids_monotonic_and_deletion_after_restart() {
 
     let (_, second) = harness.registered_workspace("second").await;
     let bumped = harness.bootstrap().await;
-    let ids = recorded_event_ids(&harness.database);
+    let ids = recorded_event_ids(&harness.database).await;
     assert!(
         ids.windows(2).all(|pair| pair[0] < pair[1]),
         "事件 id 严格递增: {ids:?}"
@@ -849,7 +872,7 @@ async fn persists_fact_event_envelope_fields() {
     let (_, workspace) = harness.registered_workspace("workspace").await;
     let session = harness.created_session(&workspace.path).await;
 
-    let rows = recorded_event_rows(&harness.database);
+    let rows = recorded_event_rows(&harness.database).await;
     assert_eq!(rows.len(), 2);
 
     let mut previous_id = 0;
@@ -866,7 +889,7 @@ async fn persists_fact_event_envelope_fields() {
     }
 
     assert_eq!(
-        recorded_events(&harness.database),
+        recorded_events(&harness.database).await,
         vec![
             agent::FactEvent::WorkspaceRegistered { workspace },
             agent::FactEvent::SessionCreated { session },
@@ -930,14 +953,16 @@ async fn reports_corrupted_stored_metadata_as_internal_error() {
     let harness = Harness::start().await;
     let (_, workspace) = harness.registered_workspace("workspace").await;
     {
-        let connection = rusqlite::Connection::open(&harness.database).expect("打开 SQLite");
-        connection
-            .execute(
-                "INSERT INTO session (id, workspace, title, created_at, updated_at)
-                 VALUES (?1, ?2, '', 0, 0)",
-                rusqlite::params!["corrupted", workspace.path.as_str()],
-            )
-            .expect("写入空标题的 session 行");
+        let mut connection = connect(&harness.database).await;
+        sqlx::query(
+            "INSERT INTO session (id, workspace, title, created_at, updated_at)
+             VALUES (?1, ?2, '', 0, 0)",
+        )
+        .bind("corrupted")
+        .bind(workspace.path.as_str())
+        .execute(&mut connection)
+        .await
+        .expect("写入空标题的 session 行");
     }
 
     let response = harness
@@ -1076,17 +1101,6 @@ async fn removing_workspace_with_relative_path_is_invalid() {
 #[tokio::test]
 async fn persists_event_kind_wire_names() {
     let harness = Harness::start().await;
-    let read_kinds = || {
-        recorded_event_rows(&harness.database)
-            .into_iter()
-            .map(|(_, _, _, payload)| {
-                serde_json::from_str::<serde_json::Value>(&payload).expect("解析事件负载")["kind"]
-                    .as_str()
-                    .expect("事件负载有 kind")
-                    .to_owned()
-            })
-            .collect::<Vec<_>>()
-    };
 
     let (_, workspace) = harness.registered_workspace("workspace").await;
     let session = harness.created_session(&workspace.path).await;
@@ -1095,7 +1109,7 @@ async fn persists_event_kind_wire_names() {
         StatusCode::OK
     );
     assert_eq!(
-        read_kinds(),
+        recorded_event_kinds(&harness.database).await,
         vec!["workspace_registered", "session_created", "session_renamed"]
     );
 
@@ -1108,7 +1122,7 @@ async fn persists_event_kind_wire_names() {
         StatusCode::NO_CONTENT
     );
     assert_eq!(
-        read_kinds(),
+        recorded_event_kinds(&harness.database).await,
         vec![
             "workspace_registered",
             "session_deleted",
@@ -1123,14 +1137,17 @@ async fn reports_corrupted_stored_session_id_as_internal_error() {
     let harness = Harness::start().await;
     let (_, workspace) = harness.registered_workspace("workspace").await;
     {
-        let connection = rusqlite::Connection::open(&harness.database).expect("打开 SQLite");
-        connection
-            .execute(
-                "INSERT INTO session (id, workspace, title, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, 0, 0)",
-                rusqlite::params!["   ", workspace.path.as_str(), "标题"],
-            )
-            .expect("写入空 id 的 session 行");
+        let mut connection = connect(&harness.database).await;
+        sqlx::query(
+            "INSERT INTO session (id, workspace, title, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 0, 0)",
+        )
+        .bind("   ")
+        .bind(workspace.path.as_str())
+        .bind("标题")
+        .execute(&mut connection)
+        .await
+        .expect("写入空 id 的 session 行");
     }
 
     let response = harness

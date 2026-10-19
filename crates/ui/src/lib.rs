@@ -1,12 +1,12 @@
 use std::fmt;
 use std::net::SocketAddr;
 
+use axum::Router;
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::{header, HeaderValue, StatusCode, Uri};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::any;
-use axum::Router;
 use futures_util::TryStreamExt;
 use rust_embed::Embed;
 

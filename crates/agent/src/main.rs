@@ -29,8 +29,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let model = agent::model_config_from_env()?;
     let address = agent::parse_listen_address(&arguments.listen)?;
     let workspaces = resolve_workspaces(&arguments.workspaces)?;
-    let store = agent::Store::open(&arguments.database)?;
-    store.register_initial_workspaces(&workspaces)?;
+    let store = agent::Store::open(&arguments.database).await?;
+    store.register_initial_workspaces(&workspaces).await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     let bound = listener.local_addr()?;
     println!("agent listening on http://{bound}");

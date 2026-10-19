@@ -36,6 +36,7 @@ export function applyEvent(state: SidebarState, event: FactEvent): SidebarState 
       };
     case 'session_created':
     case 'session_renamed':
+    case 'message_appended':
       return { ...state, sessions: upsertSession(state.sessions, event.session) };
     case 'session_deleted':
       return {
