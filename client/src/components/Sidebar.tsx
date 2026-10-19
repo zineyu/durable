@@ -3,7 +3,7 @@ import { SessionListItem } from './SessionListItem';
 import { WorkspaceGroup } from './WorkspaceGroup';
 import styles from './Sidebar.module.css';
 import type { SessionItemView } from './SessionListItem';
-import type { SessionId } from '../view/ids';
+import type { SessionId, WorkspacePath } from '../view/ids';
 import type { WorkspaceSummary } from '../view/types';
 
 export type SessionEditing = {
@@ -22,6 +22,7 @@ export type SidebarProps = {
   onEditCancel?: () => void;
   onDeleteRequest?: (id: SessionId) => void;
   onDeleteConfirm?: (id: SessionId) => void;
+  onCreateSession?: (path: WorkspacePath) => void;
   onAddWorkspace?: () => void;
 };
 
@@ -36,6 +37,7 @@ export function Sidebar({
   onEditCancel,
   onDeleteRequest,
   onDeleteConfirm,
+  onCreateSession,
   onAddWorkspace,
 }: SidebarProps) {
   return (
@@ -53,6 +55,7 @@ export function Sidebar({
             key={workspace.id}
             path={workspace.path}
             sessionCount={workspace.sessions.length}
+            {...(onCreateSession ? { onCreateSession: () => onCreateSession(workspace.path) } : {})}
           >
             {workspace.sessions.length === 0 ? (
               <p className={styles.emptySessions}>暂无 session</p>

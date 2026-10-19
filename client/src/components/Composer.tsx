@@ -2,13 +2,22 @@ import { IconButton } from './IconButton';
 import styles from './Composer.module.css';
 
 export type ComposerProps = {
-  draft?: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSend?: () => void;
+  onCancel?: () => void;
   disabled?: boolean;
   busy?: boolean;
-  onSend?: () => void;
 };
 
-export function Composer({ draft = '', disabled = false, busy = false, onSend }: ComposerProps) {
+export function Composer({
+  value,
+  onChange,
+  onSend,
+  onCancel,
+  disabled = false,
+  busy = false,
+}: ComposerProps) {
   return (
     <form
       className={styles.composer}
@@ -19,21 +28,33 @@ export function Composer({ draft = '', disabled = false, busy = false, onSend }:
     >
       <textarea
         className={styles.input}
-        defaultValue={draft}
+        value={value}
         placeholder={busy ? '当前 run 结束后执行队列中的消息' : '描述要完成的任务'}
         rows={3}
         disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            onSend?.();
+          }
+        }}
       />
       <div className={styles.actions}>
         <span className={styles.hint}>Enter 发送 · Shift+Enter 换行</span>
-        <IconButton
-          icon="send"
-          label="发送"
-          tone="primary"
-          size="lg"
-          type="submit"
-          disabled={disabled || busy}
-        />
+        <span className={styles.buttons}>
+          {onCancel !== undefined ? (
+            <IconButton icon="stop" label="取消" tone="danger" size="lg" onClick={onCancel} />
+          ) : null}
+          <IconButton
+            icon="send"
+            label="发送"
+            tone="primary"
+            size="lg"
+            type="submit"
+            disabled={disabled || value.trim().length === 0}
+          />
+        </span>
       </div>
     </form>
   );

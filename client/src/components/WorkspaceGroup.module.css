@@ -7,8 +7,15 @@
 .header {
   display: flex;
   align-items: center;
+  gap: var(--space-0-5);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
   gap: var(--space-1-5);
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   height: var(--control-height-xs);
   padding: 0 var(--space-2);
   background: transparent;
@@ -17,11 +24,11 @@
   text-align: left;
 }
 
-.header:hover {
+.toggle:hover {
   background: var(--color-surface-hover);
 }
 
-.header:active {
+.toggle:active {
   background: var(--color-surface-active);
 }
 

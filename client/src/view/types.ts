@@ -31,3 +31,10 @@ export type QueueItem = {
   id: QueueItemId;
   text: string;
 };
+
+export type BranchControl = {
+  index: number;
+  total: number;
+  onPrev?: () => void;
+  onNext?: () => void;
+};

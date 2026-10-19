@@ -63,3 +63,16 @@ export const FailedWithBranches: Story = {
     branch: { index: 1, total: 3 },
   },
 };
+
+export const Retryable: Story = {
+  args: { state: 'complete', children: body, onRetry: () => undefined },
+};
+
+export const WithBranchesAndRetry: Story = {
+  args: {
+    state: 'complete',
+    children: body,
+    branch: { index: 2, total: 3, onPrev: () => undefined, onNext: () => undefined },
+    onRetry: () => undefined,
+  },
+};

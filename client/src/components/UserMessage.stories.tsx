@@ -25,3 +25,10 @@ export const Multiline: Story = {
     text: '补一个 health 端点的回环地址测试。\n测试需要覆盖：非回环地址被拒绝、无效地址被拒绝。',
   },
 };
+
+export const WithBranches: Story = {
+  args: {
+    text: '把 ui 的静态资源改为内嵌。',
+    branch: { index: 2, total: 3, onPrev: () => undefined, onNext: () => undefined },
+  },
+};

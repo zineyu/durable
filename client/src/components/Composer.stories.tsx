@@ -11,16 +11,21 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const Idle: Story = { args: {} };
+export const Idle: Story = { args: { value: '', onChange: () => undefined } };
 
 export const Draft: Story = {
-  args: { draft: '把 health 端点补一个回环地址测试。' },
+  args: { value: '把 health 端点补一个回环地址测试。', onChange: () => undefined },
 };
 
 export const Busy: Story = {
-  args: { busy: true, draft: '队列中的下一条消息' },
+  args: {
+    value: '队列中的下一条消息',
+    onChange: () => undefined,
+    busy: true,
+    onCancel: () => undefined,
+  },
 };
 
 export const Disabled: Story = {
-  args: { disabled: true },
+  args: { value: '', onChange: () => undefined, disabled: true },
 };

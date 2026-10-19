@@ -52,7 +52,12 @@ export const Running: Story = {
         </AssistantMessage>
       </Transcript>
       <QueueStrip items={queueItems} />
-      <Composer busy draft="把 health 端点补一个回环地址测试。" />
+      <Composer
+        busy
+        value="把 health 端点补一个回环地址测试。"
+        onChange={() => undefined}
+        onCancel={() => undefined}
+      />
     </AppShell>
   ),
 };
@@ -73,7 +78,7 @@ export const Idle: Story = {
           <CodeBlock code="cargo run -p agent --bin export-types" language="bash" />
         </AssistantMessage>
       </Transcript>
-      <Composer />
+      <Composer value="" onChange={() => undefined} />
     </AppShell>
   ),
 };
@@ -101,7 +106,7 @@ export const Failed: Story = {
         </AssistantMessage>
       </Transcript>
       <QueueStrip items={queueItems} />
-      <Composer disabled />
+      <Composer value="" onChange={() => undefined} disabled />
     </AppShell>
   ),
 };
@@ -122,7 +127,7 @@ export const NoSession: Story = {
           <p>从左侧选择 session，或者注册新的 workspace 后创建 session。</p>
         </AssistantMessage>
       </Transcript>
-      <Composer disabled />
+      <Composer value="" onChange={() => undefined} disabled />
     </AppShell>
   ),
 };
