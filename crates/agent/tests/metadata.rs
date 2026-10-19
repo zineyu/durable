@@ -790,6 +790,44 @@ async fn empty_bootstrap_reports_no_metadata_and_zero_events() {
     assert!(bootstrap.sessions.is_empty());
 }
 
+/// 规格「协议」：session tree 快照携带水位，从该游标回放的是快照之后的事件。
+#[tokio::test]
+async fn session_tree_reports_watermark_and_replays_events_after_it() {
+    let harness = Harness::start().await;
+    let (_, workspace) = harness.registered_workspace("workspace").await;
+    let session = harness.created_session(&workspace.path).await;
+
+    let tree = harness.tree(&session.id).await;
+    let watermark = tree.max_event_id;
+    assert_eq!(
+        watermark,
+        harness.bootstrap().await.max_event_id,
+        "水位等于快照读取时的最大事件 id"
+    );
+
+    let response = harness.rename_session(&session.id, "新标题").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let renamed = harness.tree(&session.id).await;
+    assert_eq!(
+        renamed.max_event_id,
+        *recorded_event_ids(&harness.database)
+            .await
+            .last()
+            .expect("有事件")
+    );
+    assert!(renamed.max_event_id > watermark);
+
+    let mut events = harness.subscribe(watermark).await;
+    let replayed = tokio::time::timeout(Duration::from_secs(5), events.next())
+        .await
+        .expect("等待回放事件")
+        .expect("事件流未结束");
+    match replayed {
+        agent::StreamEvent::Fact { id, .. } => assert_eq!(id, renamed.max_event_id),
+        other => panic!("回放段只含事实事件: {other:?}"),
+    }
+}
+
 /// 规格 user story 1 与「持久化」：重复注册在重启后仍被拒绝，且不写事件。
 #[tokio::test]
 async fn duplicate_workspace_registration_survives_restart() {

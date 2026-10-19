@@ -4,59 +4,63 @@ import type { StreamEvent } from './generated/StreamEvent';
 export type EventStreamHandlers = {
   onEvent: (event: StreamEvent) => void;
   onState: (state: ConnectionState) => void;
+  onDisconnect: () => void;
 };
 
 export type EventStream = {
+  resume: (after: number) => void;
   close: () => void;
 };
 
-const RECONNECT_DELAY_MS = 1000;
-
-/// 订阅全局事件流；断线后用最后应用的事件 id 续传。
+/// 订阅全局事件流。连接中断或 server 要求 resync 时通知调用方；
+/// 调用方刷新快照后调用 `resume` 从给定游标重开。
 export function openEventStream(after: number, handlers: EventStreamHandlers): EventStream {
-  let cursor = after;
   let source: EventSource | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
-  function connect() {
+  function connect(cursor: number) {
     if (closed) {
       return;
     }
-    source = new EventSource(`/api/events?after=${cursor}`);
-    source.onopen = () => handlers.onState('connected');
-    source.onmessage = (message) => {
+    const stream = new EventSource(`/api/events?after=${cursor}`);
+    source = stream;
+    stream.onopen = () => handlers.onState('connected');
+    stream.onmessage = (message) => {
       const data: unknown = JSON.parse(message.data);
       const event = data as StreamEvent;
-      if (event.type === 'fact' && event.id > cursor) {
-        cursor = event.id;
-      }
       handlers.onEvent(event);
+      if (event.type === 'resync') {
+        disconnect();
+      }
     };
-    source.onerror = () => {
-      handlers.onState('reconnecting');
-      source?.close();
-      source = null;
-      schedule();
-    };
+    stream.onerror = () => disconnect();
   }
 
-  function schedule() {
-    if (closed) {
+  function stop() {
+    const stream = source;
+    source = null;
+    stream?.close();
+  }
+
+  function disconnect() {
+    if (source === null) {
       return;
     }
-    timer = setTimeout(connect, RECONNECT_DELAY_MS);
+    stop();
+    handlers.onState('reconnecting');
+    handlers.onDisconnect();
   }
 
-  connect();
+  connect(after);
 
   return {
+    resume: (cursor) => {
+      stop();
+      connect(cursor);
+    },
     close: () => {
       closed = true;
-      if (timer !== null) {
-        clearTimeout(timer);
-      }
-      source?.close();
+      stop();
     },
   };
 }

@@ -7,4 +7,8 @@ import type { SessionMetadata } from "./SessionMetadata";
 /**
  * 单个 session 的消息树快照。
  */
-export type SessionTree = { session: SessionMetadata, activeLeaf: number | null, nodes: Array<MessageNode>, queue: Array<QueueItem>, runs: Array<RunRecord>, };
+export type SessionTree = { session: SessionMetadata, 
+/**
+ * 快照读取时刻的全局最大事实事件 id；快照包含该 id 及之前的全部事实。
+ */
+maxEventId: number, activeLeaf: number | null, nodes: Array<MessageNode>, queue: Array<QueueItem>, runs: Array<RunRecord>, };

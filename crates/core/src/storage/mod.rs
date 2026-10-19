@@ -23,4 +23,6 @@ pub struct SessionSnapshot {
     pub messages: Vec<Message>,
     pub queue: Vec<QueueItem>,
     pub runs: Vec<RunRecord>,
+    /// 快照读取事务开始时的全局最大事实事件 id。
+    pub max_event_id: i64,
 }

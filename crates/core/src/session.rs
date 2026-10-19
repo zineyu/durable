@@ -63,6 +63,9 @@ pub(crate) fn derive_title(text: &MessageText) -> SessionTitle {
 #[serde(rename_all = "camelCase")]
 pub struct SessionTree {
     pub session: SessionMetadata,
+    /// 快照读取时刻的全局最大事实事件 id；快照包含该 id 及之前的全部事实。
+    #[ts(type = "number")]
+    pub max_event_id: i64,
     #[ts(type = "number | null")]
     pub active_leaf: Option<MessageId>,
     pub nodes: Vec<MessageNode>,

@@ -28,7 +28,8 @@ export type ClientState = {
   sessions: SessionMetadata[];
   trees: Record<string, SessionTreeState>;
   connection: ConnectionState;
-  lastEventId: number;
+  /// 已应用的最大事实事件 id；`null` 表示尚未装配快照基线。
+  lastEventId: number | null;
   error: ClientError | null;
 };
 
@@ -47,9 +48,15 @@ export const initialClientState: ClientState = {
   sessions: [],
   trees: {},
   connection: 'reconnecting',
-  lastEventId: 0,
+  lastEventId: null,
   error: null,
 };
+
+/// 应用快照后的游标。尚无基线时取快照水位；已有基线时回退到较老水位，
+/// 使事件流用 `after` 重放快照未覆盖的尾部。
+export function snapshotCursor(cursor: number | null, watermark: number): number {
+  return cursor === null ? watermark : Math.min(cursor, watermark);
+}
 
 export function reduce(state: ClientState, action: ClientAction): ClientState {
   switch (action.type) {
@@ -59,7 +66,7 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
         modelName: action.bootstrap.model,
         workspaces: action.bootstrap.workspaces,
         sessions: action.bootstrap.sessions,
-        lastEventId: Math.max(state.lastEventId, action.bootstrap.maxEventId),
+        lastEventId: snapshotCursor(state.lastEventId, action.bootstrap.maxEventId),
       };
     case 'stream':
       return applyStreamEvent(state, action.event);
@@ -83,13 +90,15 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
 export function applyStreamEvent(state: ClientState, event: StreamEvent): ClientState {
   switch (event.type) {
     case 'fact': {
-      if (event.id <= state.lastEventId) {
+      if (state.lastEventId !== null && event.id <= state.lastEventId) {
         return state;
       }
       return applyFactEvent({ ...state, lastEventId: event.id }, event.event);
     }
     case 'delta':
       return applyDelta(state, event.sessionId, event.messageId, event.text);
+    case 'resync':
+      return state;
     default: {
       const unhandled: never = event;
       throw new Error(`未处理的事件: ${JSON.stringify(unhandled)}`);
@@ -162,6 +171,7 @@ export function applyDelta(
 export function loadSessionTree(state: ClientState, tree: SessionTree): ClientState {
   return {
     ...state,
+    lastEventId: snapshotCursor(state.lastEventId, tree.maxEventId),
     sessions: upsertSession(state.sessions, tree.session),
     trees: {
       ...state.trees,

@@ -27,6 +27,24 @@ pub enum StreamEvent {
         #[ts(type = "number")]
         timestamp: i64,
     },
+    Resync {
+        reason: ResyncReason,
+    },
+}
+
+/// 服务端要求客户端重连并刷新快照的原因。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ResyncReason {
+    /// 订阅者落后超出总线容量；`skipped` 是跳过的事件数。
+    Lagged {
+        #[ts(type = "number")]
+        skipped: u64,
+    },
 }
 
 /// 进程内事件总线。事实事件在提交成功后发布；增量不落库。

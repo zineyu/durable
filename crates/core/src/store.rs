@@ -809,6 +809,7 @@ fn snapshot_into_tree(snapshot: crate::storage::SessionSnapshot) -> SessionTree 
         session: snapshot
             .session
             .metadata(snapshot.queue_length, snapshot.busy),
+        max_event_id: snapshot.max_event_id,
         active_leaf: snapshot.session.active_leaf,
         nodes: snapshot
             .messages

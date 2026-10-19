@@ -47,6 +47,9 @@ impl SqliteStorage {
 
     pub async fn snapshot(&self) -> Result<Snapshot, StoreError> {
         let mut transaction = self.pool.begin().await?;
+        let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
+            .fetch_one(&mut *transaction)
+            .await?;
         let workspaces = sqlx::query(
             "SELECT path, registered_at FROM workspace ORDER BY registered_at ASC, path ASC",
         )
@@ -66,9 +69,6 @@ impl SqliteStorage {
         .iter()
         .map(parse_session_metadata)
         .collect::<Result<Vec<_>, _>>()?;
-        let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
-            .fetch_one(&mut *transaction)
-            .await?;
         transaction.commit().await?;
         Ok(Snapshot {
             workspaces,
@@ -127,6 +127,9 @@ impl SqliteStorage {
         id: &SessionId,
     ) -> Result<Option<SessionSnapshot>, StoreError> {
         let mut transaction = self.pool.begin().await?;
+        let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
+            .fetch_one(&mut *transaction)
+            .await?;
         let row = sqlx::query(
             "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf,
                     (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
@@ -180,6 +183,7 @@ impl SqliteStorage {
             messages,
             queue,
             runs,
+            max_event_id,
         }))
     }
 

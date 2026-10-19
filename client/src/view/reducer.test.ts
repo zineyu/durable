@@ -185,6 +185,7 @@ describe('侧栏状态', () => {
 
   it('移除队列项后减少队列长度与队列视图', () => {
     const state = loadSessionTree(withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]), {
+      maxEventId: 7,
       session: session('s-1', '/work/a', 100, { queueLength: 1 }),
       activeLeaf: null,
       nodes: [],
@@ -201,6 +202,7 @@ describe('侧栏状态', () => {
 describe('transcript 推导', () => {
   const base = (nodes: MessageNode[], activeLeaf: number | null): ClientState =>
     loadSessionTree(withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]), {
+      maxEventId: 7,
       session: session('s-1', '/work/a', 100),
       activeLeaf,
       nodes,
@@ -267,6 +269,7 @@ describe('transcript 推导', () => {
 describe('流式增量与 run 状态', () => {
   const withAssistant = (): ClientState =>
     loadSessionTree(withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]), {
+      maxEventId: 7,
       session: session('s-1', '/work/a', 100),
       activeLeaf: 2,
       nodes: [node(1, null, 'user', { text: '问' }), node(2, 1, 'assistant', { runId: 1 })],
@@ -330,6 +333,7 @@ describe('流式增量与 run 状态', () => {
 describe('事件流的幂等与隔离', () => {
   it('重复事件被忽略', () => {
     const state = loadSessionTree(withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]), {
+      maxEventId: 7,
       session: session('s-1', '/work/a', 100),
       activeLeaf: 1,
       nodes: [node(1, null, 'user', { text: '一' })],
@@ -375,6 +379,7 @@ describe('事件流的幂等与隔离', () => {
     );
     const withTrees = loadSessionTree(
       loadSessionTree(state, {
+        maxEventId: 7,
         session: session('s-1', '/work/a', 100),
         activeLeaf: 2,
         nodes: [node(1, null, 'user', { text: 'A 问' }), node(2, 1, 'assistant', { runId: 1 })],
@@ -382,6 +387,7 @@ describe('事件流的幂等与隔离', () => {
         runs: [],
       }),
       {
+        maxEventId: 7,
         session: session('s-2', '/work/a', 100),
         activeLeaf: 5,
         nodes: [node(5, null, 'assistant', { runId: 1 })],
@@ -416,6 +422,7 @@ describe('事件流的幂等与隔离', () => {
     });
 
     const snapshot = loadSessionTree(base, {
+      maxEventId: 7,
       session: session('s-1', '/work/a', 130),
       activeLeaf: 2,
       nodes: [
@@ -427,6 +434,92 @@ describe('事件流的幂等与隔离', () => {
     });
 
     expect(transcriptNodes(replayed, 's-1')).toEqual(transcriptNodes(snapshot, 's-1'));
+  });
+});
+
+describe('快照水位与回放恢复', () => {
+  const question = node(1, null, 'user', { text: '问' });
+  const answer = node(2, 1, 'assistant', { text: '答', runId: 1 });
+
+  const appended = (id: number, message: MessageNode): StreamEvent =>
+    fact(id, {
+      kind: 'message_appended',
+      session: session('s-1', '/work/a', id),
+      message,
+    });
+
+  const leaf = (id: number): StreamEvent =>
+    fact(id, {
+      kind: 'active_leaf_changed',
+      session: session('s-1', '/work/a', id),
+      activeLeaf: 2,
+    });
+
+  const snapshot = (maxEventId: number, activeLeaf: number | null) => ({
+    maxEventId,
+    session: session('s-1', '/work/a', maxEventId),
+    activeLeaf,
+    nodes: [question, answer],
+    queue: [],
+    runs: [],
+  });
+
+  it('tree 快照把游标回退到水位，重放尾部后等于从零构建', () => {
+    const base = withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]);
+
+    let live = applied(base, appended(101, question));
+    live = applied(live, appended(102, answer));
+    live = applied(live, leaf(103));
+    expect(live.lastEventId).toBe(103);
+
+    const landed = loadSessionTree(live, snapshot(102, null));
+    expect(landed.lastEventId).toBe(102);
+
+    const restored = applied(landed, leaf(103));
+    const fromScratch = applied(loadSessionTree(base, snapshot(102, null)), leaf(103));
+
+    expect(restored.trees['s-1']).toEqual(fromScratch.trees['s-1']);
+    expect(transcriptNodes(restored, 's-1')).toEqual(transcriptNodes(fromScratch, 's-1'));
+  });
+
+  it('tree 快照水位高于游标时不推进游标', () => {
+    const base = withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]);
+    const live = applied(
+      base,
+      fact(101, {
+        kind: 'session_renamed',
+        session: session('s-1', '/work/a', 101, { title: '新' }),
+      }),
+    );
+
+    const landed = loadSessionTree(live, snapshot(200, null));
+    expect(landed.lastEventId).toBe(101);
+  });
+
+  it('一个 session 的快照回退游标后重放另一 session 的事件不改变其树', () => {
+    const base = withBootstrap(
+      [workspaceA],
+      [session('s-1', '/work/a', 100), session('s-2', '/work/a', 100)],
+    );
+    const event = fact(101, {
+      kind: 'message_appended',
+      session: session('s-2', '/work/a', 101),
+      message: node(7, null, 'user', { text: 'B' }),
+    });
+    const live = applied(base, event);
+    const other = live.trees['s-2'];
+
+    const landed = loadSessionTree(live, snapshot(100, null));
+    expect(landed.lastEventId).toBe(100);
+
+    const replayed = applied(landed, event);
+    expect(replayed.trees['s-2']).toEqual(other);
+  });
+
+  it('resync 事件只提示重连，不改变视图状态', () => {
+    const state = withBootstrap([workspaceA], [session('s-1', '/work/a', 100)]);
+    const after = applied(state, { type: 'resync', reason: { kind: 'lagged', skipped: 3 } });
+    expect(after).toBe(state);
   });
 });
 

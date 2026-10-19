@@ -29,6 +29,6 @@ pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTree};
 pub use storage::Snapshot;
 pub use store::{RunStart, Store};
-pub use stream::{EventBus, StreamEvent};
+pub use stream::{EventBus, ResyncReason, StreamEvent};
 pub use tool::{ToolCallRecord, ToolErrorCode, ToolOutcome};
 pub use workspace::WorkspaceMetadata;

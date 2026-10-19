@@ -389,6 +389,7 @@ async fn streams_deltas_and_facts_over_sse() {
                     break;
                 }
             }
+            agent::StreamEvent::Resync { .. } => unreachable!("未落后时不应要求重连"),
         }
     }
 

@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from './api/client';
 import type { ApiFailure, ApiResult } from './api/client';
 import { openEventStream } from './api/events';
 import type { EventStream } from './api/events';
+import type { BootstrapResponse } from './api/generated/BootstrapResponse';
 import type { MessageNode } from './api/generated/MessageNode';
+import type { SessionTree } from './api/generated/SessionTree';
 import { AppShell } from './components/AppShell';
 import { AssistantContent } from './components/AssistantContent';
 import { AssistantMessage } from './components/AssistantMessage';
@@ -27,6 +29,7 @@ import {
   reduce,
   sessionQueue,
   sidebarWorkspaces,
+  snapshotCursor,
   transcriptNodes,
 } from './view/reducer';
 import { readSessionFromHash, writeSessionToHash } from './view/session-hash';
@@ -36,6 +39,8 @@ type DialogState =
   | { kind: 'edit'; sessionId: string; messageId: number; text: string }
   | { kind: 'retry'; sessionId: string; messageId: number }
   | { kind: 'register-workspace'; path: string };
+
+const RECONNECT_DELAY_MS = 1000;
 
 function sessionStateOf(busy: boolean, queueLength: number): SessionState {
   if (busy) {
@@ -69,6 +74,28 @@ export function App() {
     [report],
   );
 
+  const streamRef = useRef<EventStream | null>(null);
+  const cursorRef = useRef<number | null>(null);
+  const selectedRef = useRef<SessionId | null>(selectedSessionId);
+
+  useEffect(() => {
+    selectedRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+
+  const applyBootstrap = useCallback((bootstrap: BootstrapResponse): number => {
+    const cursor = snapshotCursor(cursorRef.current, bootstrap.maxEventId);
+    cursorRef.current = cursor;
+    dispatch({ type: 'bootstrap', bootstrap });
+    return cursor;
+  }, []);
+
+  const applyTree = useCallback((tree: SessionTree): number => {
+    const cursor = snapshotCursor(cursorRef.current, tree.maxEventId);
+    cursorRef.current = cursor;
+    dispatch({ type: 'tree', tree });
+    return cursor;
+  }, []);
+
   useEffect(() => {
     const handleHashChange = () => {
       setSelectedSessionId(readSessionFromHash(window.location.hash));
@@ -79,7 +106,65 @@ export function App() {
 
   useEffect(() => {
     let active = true;
-    let stream: EventStream | null = null;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+
+    const delay = (milliseconds: number) =>
+      new Promise<void>((resolve) => {
+        retry = setTimeout(resolve, milliseconds);
+      });
+
+    const refresh = async (): Promise<number | null> => {
+      const outcome = await api.bootstrap();
+      if (!active) {
+        return null;
+      }
+      if (!outcome.ok) {
+        report(outcome.error);
+        return null;
+      }
+      applyBootstrap(outcome.value);
+      const sessionId = selectedRef.current;
+      if (sessionId !== null) {
+        const tree = await api.sessionTree(sessionId);
+        if (!active) {
+          return null;
+        }
+        if (!tree.ok) {
+          report(tree.error);
+          return null;
+        }
+        applyTree(tree.value);
+      }
+      return cursorRef.current;
+    };
+
+    const reconnect = async () => {
+      for (;;) {
+        const cursor = await refresh();
+        if (!active) {
+          return;
+        }
+        if (cursor !== null) {
+          streamRef.current?.resume(cursor);
+          return;
+        }
+        await delay(RECONNECT_DELAY_MS);
+        if (!active) {
+          return;
+        }
+      }
+    };
+
+    const connect = (cursor: number) => {
+      streamRef.current = openEventStream(cursor, {
+        onEvent: (event) => dispatch({ type: 'stream', event }),
+        onState: (connection) => dispatch({ type: 'connection', connection }),
+        onDisconnect: () => {
+          void reconnect();
+        },
+      });
+    };
+
     void (async () => {
       const outcome = await api.bootstrap();
       if (!active) {
@@ -90,17 +175,18 @@ export function App() {
         dispatch({ type: 'connection', connection: 'disconnected' });
         return;
       }
-      dispatch({ type: 'bootstrap', bootstrap: outcome.value });
-      stream = openEventStream(outcome.value.maxEventId, {
-        onEvent: (event) => dispatch({ type: 'stream', event }),
-        onState: (connection) => dispatch({ type: 'connection', connection }),
-      });
+      connect(applyBootstrap(outcome.value));
     })();
+
     return () => {
       active = false;
-      stream?.close();
+      if (retry !== null) {
+        clearTimeout(retry);
+      }
+      streamRef.current?.close();
+      streamRef.current = null;
     };
-  }, [report]);
+  }, [report, applyBootstrap, applyTree]);
 
   const session =
     selectedSessionId === null
@@ -123,12 +209,16 @@ export function App() {
         report(outcome.error);
         return;
       }
-      dispatch({ type: 'tree', tree: outcome.value });
+      const previous = cursorRef.current;
+      const cursor = applyTree(outcome.value);
+      if (previous !== null && cursor < previous) {
+        streamRef.current?.resume(cursor);
+      }
     })();
     return () => {
       active = false;
     };
-  }, [selectedSessionId, sessionExists, report]);
+  }, [selectedSessionId, sessionExists, report, applyTree]);
 
   const selectSession = useCallback((id: SessionId) => {
     window.location.hash = writeSessionToHash(id);
