@@ -1,8 +1,10 @@
 use crate::event::FactEvent;
-use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
-use crate::message::Message;
+use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
+use crate::message::{Message, MessageContent};
 use crate::queue::QueueItem;
+use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
+use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
 /// 一次原子提交的全部变更。字段私有，只能经下面的方法逐个登记，保证顺序与意图明确。
@@ -58,6 +60,42 @@ impl Changeset {
         self.push(Change::InsertQueueItem { session, item });
     }
 
+    pub fn delete_queue_item(&mut self, session: SessionId, item: QueueItemId) {
+        self.push(Change::DeleteQueueItem { session, item });
+    }
+
+    pub fn update_message(
+        &mut self,
+        id: MessageId,
+        text: MessageContent,
+        tool_calls: Vec<ToolCallRecord>,
+    ) {
+        self.push(Change::UpdateMessage {
+            id,
+            text,
+            tool_calls,
+        });
+    }
+
+    pub fn insert_run(&mut self, run: RunRecord) {
+        self.push(Change::InsertRun(run));
+    }
+
+    pub fn update_run(
+        &mut self,
+        id: RunId,
+        status: RunStatus,
+        failure: Option<RunFailure>,
+        updated_at: i64,
+    ) {
+        self.push(Change::UpdateRun {
+            id,
+            status,
+            failure,
+            updated_at,
+        });
+    }
+
     pub fn append_event(&mut self, event: FactEvent, created_at: i64) {
         self.push(Change::AppendEvent { event, created_at });
     }
@@ -88,6 +126,22 @@ pub(crate) enum Change {
     InsertQueueItem {
         session: SessionId,
         item: QueueItem,
+    },
+    DeleteQueueItem {
+        session: SessionId,
+        item: QueueItemId,
+    },
+    UpdateMessage {
+        id: MessageId,
+        text: MessageContent,
+        tool_calls: Vec<ToolCallRecord>,
+    },
+    InsertRun(RunRecord),
+    UpdateRun {
+        id: RunId,
+        status: RunStatus,
+        failure: Option<RunFailure>,
+        updated_at: i64,
     },
     AppendEvent {
         event: FactEvent,

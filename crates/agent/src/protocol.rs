@@ -34,6 +34,7 @@ pub enum ErrorCode {
     WorkspaceNotFound,
     WorkspaceNotEmpty,
     SessionNotFound,
+    QueueItemNotFound,
     InvalidTitle,
     InvalidMessage,
     InvalidRequest,

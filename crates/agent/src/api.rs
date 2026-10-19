@@ -6,15 +6,22 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use durable::{MessageText, QueueItem, SessionId, SessionTitle, WorkspacePath};
+use durable::{
+    EventBus, MessageText, QueueItem, QueueItemId, SessionId, SessionTitle, Store, StoreError,
+    WorkspacePath,
+};
 use serde::de::DeserializeOwned;
 
-use crate::Store;
+use crate::config::EngineConfig;
+use crate::engine::RunEngine;
 use crate::error::ApiError;
 use crate::protocol::{
     BootstrapResponse, CreateSessionRequest, HealthResponse, HealthStatus,
     RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest,
 };
+use crate::provider::ModelProvider;
+use crate::sse;
+use crate::tools::ToolBox;
 
 /// 请求体；反序列化失败时返回协议错误信封而非纯文本。
 struct JsonBody<T>(T);
@@ -56,23 +63,69 @@ where
     }
 }
 
+/// `{id}/queue/{item}` 路径参数。
+struct QueueItemPath {
+    session: SessionId,
+    item: QueueItemId,
+}
+
+impl<S> FromRequestParts<S> for QueueItemPath
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let Path((session, item)) = Path::<(String, i64)>::from_request_parts(parts, state)
+            .await
+            .map_err(|rejection: PathRejection| {
+                ApiError::invalid_request(rejection.status(), rejection.body_text())
+            })?;
+        Ok(Self {
+            session: SessionId::parse(&session)?,
+            item: QueueItemId::parse(item)?,
+        })
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentState {
     store: Arc<Store>,
+    engine: Arc<RunEngine>,
     model_name: Arc<str>,
 }
 
 impl AgentState {
-    /// 组装 agent 状态：SQLite 存储与当前模型名。
-    pub fn new(store: Store, model_name: String) -> Self {
-        Self {
-            store: Arc::new(store),
+    /// 组装 agent 状态并执行启动恢复。
+    ///
+    /// 失败：恢复中断的 run 时存储读取或写入失败。
+    pub async fn start(
+        store: Store,
+        model_name: String,
+        provider: Arc<dyn ModelProvider>,
+        tools: Arc<dyn ToolBox>,
+        config: EngineConfig,
+    ) -> Result<Self, StoreError> {
+        let store = Arc::new(store);
+        let engine = RunEngine::new(Arc::clone(&store), provider, tools, config);
+        engine.recover().await?;
+        Ok(Self {
+            store,
+            engine,
             model_name: Arc::from(model_name.as_str()),
-        }
+        })
     }
 
     pub fn store(&self) -> &Store {
         &self.store
+    }
+
+    pub fn engine(&self) -> &Arc<RunEngine> {
+        &self.engine
+    }
+
+    pub fn events(&self) -> &EventBus {
+        self.store.events()
     }
 
     pub fn model_name(&self) -> &str {
@@ -85,6 +138,7 @@ pub fn router(state: AgentState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/bootstrap", get(bootstrap))
+        .route("/api/events", get(sse::events))
         .route("/api/workspaces", post(register_workspace))
         .route("/api/workspaces/remove", post(remove_workspace))
         .route("/api/sessions", post(create_session))
@@ -92,6 +146,11 @@ pub fn router(state: AgentState) -> Router {
         .route("/api/sessions/{id}/rename", post(rename_session))
         .route("/api/sessions/{id}/delete", post(delete_session))
         .route("/api/sessions/{id}/messages", post(submit_message))
+        .route("/api/sessions/{id}/cancel", post(cancel_run))
+        .route(
+            "/api/sessions/{id}/queue/{item}/remove",
+            post(remove_queue_item),
+        )
         .with_state(state)
 }
 
@@ -161,6 +220,7 @@ async fn delete_session(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
 ) -> Result<StatusCode, ApiError> {
+    state.engine().cancel(&id).await;
     state.store().delete_session(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -178,8 +238,24 @@ async fn submit_message(
     JsonBody(request): JsonBody<SubmitMessageRequest>,
 ) -> Result<(StatusCode, Json<QueueItem>), ApiError> {
     let text = MessageText::parse(&request.text)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(state.store().enqueue_message(&id, text).await?),
-    ))
+    let item = state.store().enqueue_message(&id, text).await?;
+    state.engine().notify_session(id);
+    Ok((StatusCode::CREATED, Json(item)))
+}
+
+async fn cancel_run(
+    State(state): State<AgentState>,
+    SessionPath(id): SessionPath,
+) -> Result<StatusCode, ApiError> {
+    state.store().session_record(&id).await?;
+    state.engine().cancel(&id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn remove_queue_item(
+    State(state): State<AgentState>,
+    QueueItemPath { session, item }: QueueItemPath,
+) -> Result<StatusCode, ApiError> {
+    state.store().remove_queue_item(&session, item).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -37,7 +37,10 @@ export function applyEvent(state: SidebarState, event: FactEvent): SidebarState 
     case 'session_created':
     case 'session_renamed':
     case 'message_appended':
+    case 'message_updated':
     case 'message_queued':
+    case 'run_started':
+    case 'run_finished':
       return { ...state, sessions: upsertSession(state.sessions, event.session) };
     case 'queue_item_removed':
       return {

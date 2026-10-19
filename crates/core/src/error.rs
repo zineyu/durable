@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::id::{SessionId, WorkspacePath};
+use crate::id::{QueueItemId, SessionId, WorkspacePath};
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -22,4 +22,6 @@ pub enum StoreError {
     WorkspaceNotEmpty(WorkspacePath),
     #[error("session 不存在: {}", .0.as_str())]
     SessionNotFound(SessionId),
+    #[error("队列项不存在: {}", .1.get())]
+    QueueItemNotFound(SessionId, QueueItemId),
 }

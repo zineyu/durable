@@ -1,0 +1,387 @@
+use std::time::Duration;
+
+use reqwest::StatusCode;
+
+mod support;
+
+use support::{Harness, Script};
+
+fn user_texts(tree: &agent::SessionTree) -> Vec<&str> {
+    tree.nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::User)
+        .map(|node| node.text.as_str())
+        .collect()
+}
+
+/// 规格 user story 8：assistant 文本流式落库，run 结束后内容一致。
+#[tokio::test]
+async fn streams_assistant_text_and_finishes_run() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Text("你好，世界".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    let response = harness.submit_message(&session.id, "打个招呼").await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let tree = harness.wait_idle(&session.id).await;
+    assert!(!tree.session.busy);
+    assert!(tree.queue.is_empty());
+    assert_eq!(tree.nodes.len(), 2);
+    let user = &tree.nodes[0];
+    let assistant = &tree.nodes[1];
+    assert_eq!(user.role, agent::MessageRole::User);
+    assert_eq!(user.text.as_str(), "打个招呼");
+    assert_eq!(user.parent_id, None);
+    assert_eq!(assistant.role, agent::MessageRole::Assistant);
+    assert_eq!(assistant.text.as_str(), "你好，世界");
+    assert_eq!(assistant.parent_id, Some(user.id));
+    assert_eq!(tree.active_leaf, Some(assistant.id));
+
+    assert_eq!(tree.runs.len(), 1);
+    let run = &tree.runs[0];
+    assert_eq!(run.status, agent::RunStatus::Succeeded);
+    assert_eq!(run.failure, None);
+    assert_eq!(user.run_id, Some(run.id));
+    assert_eq!(assistant.run_id, Some(run.id));
+}
+
+/// 规格「事实事件」：run 开始与结束的事实事件顺序稳定。
+#[tokio::test]
+async fn records_run_lifecycle_events_in_order() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Text("完成".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    harness.submit_message(&session.id, "执行").await;
+    harness.wait_idle(&session.id).await;
+
+    assert_eq!(
+        support::recorded_event_kinds(&harness.database).await,
+        vec![
+            "workspace_registered",
+            "session_created",
+            "message_queued",
+            "message_appended",
+            "message_appended",
+            "queue_item_removed",
+            "run_started",
+            "message_updated",
+            "run_finished",
+        ]
+    );
+}
+
+/// 规格「模型调用」：多步工具调用按序执行，收集结果后再请求下一轮。
+#[tokio::test]
+async fn executes_tool_calls_in_order_and_continues() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![
+            Script::ToolCall {
+                id: "call_1".into(),
+                name: "read_file".into(),
+                arguments: r#"{"path":"notes.txt"}"#.into(),
+            },
+            Script::Text("完成".into()),
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    harness.submit_message(&session.id, "读取文件").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let assistant = &tree.nodes[1];
+    assert_eq!(assistant.tool_calls.len(), 1);
+    let call = &assistant.tool_calls[0];
+    assert_eq!(call.id, "call_1");
+    assert_eq!(call.name, "read_file");
+    assert_eq!(
+        call.outcome,
+        agent::ToolOutcome::Failed {
+            code: agent::ToolErrorCode::UnknownTool,
+            message: "未知工具: read_file".into(),
+        }
+    );
+    assert_eq!(assistant.text.as_str(), "完成");
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
+
+    let requests = harness.provider.requests();
+    assert_eq!(requests.len(), 2, "每个生成步一次模型请求");
+    let messages = requests[1]["messages"]
+        .as_array()
+        .expect("第二轮请求含 messages");
+    assert!(messages.iter().any(|message| {
+        message["role"] == "tool"
+            && message["tool_call_id"] == "call_1"
+            && message["content"]
+                .as_str()
+                .is_some_and(|content| content.contains("unknown_tool"))
+    }));
+}
+
+/// 规格 user story 15 与「调度与会话状态」：同一 session 的队列按 FIFO 执行。
+#[tokio::test]
+async fn executes_queued_messages_in_fifo_order() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![
+            Script::Text("A".into()),
+            Script::Text("B".into()),
+            Script::Text("C".into()),
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    for text in ["一", "二", "三"] {
+        assert_eq!(
+            harness.submit_message(&session.id, text).await.status(),
+            StatusCode::CREATED
+        );
+    }
+    let tree = harness.wait_idle(&session.id).await;
+
+    assert_eq!(user_texts(&tree), vec!["一", "二", "三"]);
+    let assistant_texts: Vec<&str> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::Assistant)
+        .map(|node| node.text.as_str())
+        .collect();
+    assert_eq!(assistant_texts, vec!["A", "B", "C"]);
+    assert_eq!(tree.runs.len(), 3);
+    assert!(
+        tree.runs
+            .iter()
+            .all(|run| run.status == agent::RunStatus::Succeeded)
+    );
+}
+
+/// 规格 user story 11：删除尚未开始的队列项后该项不再执行。
+#[tokio::test]
+async fn removes_pending_queue_item_before_execution() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Hang, Script::Text("B".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "一").await;
+    let second: agent::QueueItem = harness
+        .submit_message(&session.id, "二")
+        .await
+        .json()
+        .await
+        .expect("解析队列项");
+    let third: agent::QueueItem = harness
+        .submit_message(&session.id, "三")
+        .await
+        .json()
+        .await
+        .expect("解析队列项");
+
+    let running = harness.wait_busy(&session.id).await;
+    assert_eq!(
+        running.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
+        vec![second.id, third.id]
+    );
+
+    let response = harness.remove_queue_item(&session.id, third.id).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let response = harness.cancel_run(&session.id).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let tree = harness.wait_idle(&session.id).await;
+    assert_eq!(user_texts(&tree), vec!["一", "二"]);
+    assert_eq!(tree.queue.len(), 0);
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Cancelled);
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
+}
+
+/// 规格 user story 10：取消保留已收到的部分 assistant 文本，队列继续。
+#[tokio::test]
+async fn cancels_running_run_and_keeps_partial_text() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![
+            Script::PartialThenHang("部分输出".into()),
+            Script::Text("下一项".into()),
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "开始").await;
+    harness.submit_message(&session.id, "队列中的消息").await;
+    harness
+        .wait_for_tree(&session.id, |tree| {
+            tree.nodes.iter().any(|node| {
+                node.role == agent::MessageRole::Assistant && !node.text.as_str().is_empty()
+            })
+        })
+        .await;
+
+    let response = harness.cancel_run(&session.id).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let tree = harness.wait_idle(&session.id).await;
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Cancelled);
+    assert_eq!(tree.runs[0].failure, None);
+    assert_eq!(tree.nodes[1].text.as_str(), "部分输出");
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
+    assert_eq!(tree.nodes[3].text.as_str(), "下一项");
+}
+
+/// 规格「模型调用」：上下文超限以对应错误码结束 run，且不发出模型请求。
+#[tokio::test]
+async fn fails_run_when_context_limit_is_exceeded() {
+    let config = agent::EngineConfig {
+        context_char_limit: 20,
+        ..agent::EngineConfig::default()
+    };
+    let harness = Harness::start_with(config, vec![Script::Text("不会用到".into())]).await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "你好").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let run = &tree.runs[0];
+    assert_eq!(run.status, agent::RunStatus::Failed);
+    let failure = run.failure.as_ref().expect("失败原因");
+    assert_eq!(failure.code, agent::RunFailureCode::ContextLimitExceeded);
+    assert!(harness.provider.requests().is_empty());
+}
+
+/// 规格「模型调用」：步数超限以对应错误码结束 run。
+#[tokio::test]
+async fn fails_run_when_step_limit_is_exceeded() {
+    let config = agent::EngineConfig {
+        max_steps: 2,
+        ..agent::EngineConfig::default()
+    };
+    let harness = Harness::start_with(
+        config,
+        vec![
+            Script::ToolCall {
+                id: "call_1".into(),
+                name: "bash".into(),
+                arguments: "{}".into(),
+            },
+            Script::ToolCall {
+                id: "call_2".into(),
+                name: "bash".into(),
+                arguments: "{}".into(),
+            },
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "重复调用").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let run = &tree.runs[0];
+    assert_eq!(run.status, agent::RunStatus::Failed);
+    let failure = run.failure.as_ref().expect("失败原因");
+    assert_eq!(failure.code, agent::RunFailureCode::StepLimitExceeded);
+    assert_eq!(harness.provider.requests().len(), 2);
+}
+
+/// 规格「模型调用」：模型上游错误终止当前 run，队列继续。
+#[tokio::test]
+async fn fails_run_on_model_upstream_error_and_continues_queue() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Fail(500), Script::Text("恢复".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "第一项").await;
+    harness.submit_message(&session.id, "第二项").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let failure = tree.runs[0].failure.as_ref().expect("失败原因");
+    assert_eq!(failure.code, agent::RunFailureCode::ModelUpstream);
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Failed);
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
+    assert_eq!(tree.nodes[3].text.as_str(), "恢复");
+}
+
+/// 规格「调度与会话状态」：重启把仍为 running 的 run 标记为 failed（进程中断）。
+#[tokio::test]
+async fn marks_interrupted_run_as_failed_after_restart() {
+    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
+    let session = harness.session("workspace").await;
+    harness.submit_message(&session.id, "长时间运行").await;
+    harness.wait_busy(&session.id).await;
+
+    let harness = harness.restart().await;
+    let tree = harness.tree(&session.id).await;
+
+    assert!(!tree.session.busy);
+    let run = tree.runs.last().expect("有 run 记录");
+    assert_eq!(run.status, agent::RunStatus::Failed);
+    let failure = run.failure.as_ref().expect("失败原因");
+    assert_eq!(failure.code, agent::RunFailureCode::Interrupted);
+    assert_eq!(tree.queue.len(), 0, "队列在 run 开始时已消费");
+}
+
+/// 规格「协议」：单一全局 SSE 流同时输送 token 增量与事实事件。
+#[tokio::test]
+async fn streams_deltas_and_facts_over_sse() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Text("流式输出".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    let cursor = harness.bootstrap().await.max_event_id;
+    let mut events = harness.subscribe(cursor).await;
+
+    harness.submit_message(&session.id, "开始").await;
+
+    let mut deltas = String::new();
+    let mut kinds = Vec::new();
+    loop {
+        let event = tokio::time::timeout(Duration::from_secs(10), events.next())
+            .await
+            .expect("等待 SSE 事件")
+            .expect("事件流未结束");
+        match event {
+            agent::StreamEvent::Delta { text, .. } => deltas.push_str(&text),
+            agent::StreamEvent::Fact { event, id, .. } => {
+                assert!(id > cursor, "实时事件 id 必须大于游标");
+                let kind = serde_json::to_value(&event).expect("事件可序列化")["kind"]
+                    .as_str()
+                    .expect("事件有 kind")
+                    .to_owned();
+                kinds.push(kind);
+                if matches!(event, agent::FactEvent::RunFinished { .. }) {
+                    break;
+                }
+            }
+        }
+    }
+
+    assert_eq!(deltas, "流式输出");
+    assert_eq!(
+        kinds,
+        vec![
+            "message_queued",
+            "message_appended",
+            "message_appended",
+            "queue_item_removed",
+            "run_started",
+            "message_updated",
+            "run_finished",
+        ]
+    );
+}

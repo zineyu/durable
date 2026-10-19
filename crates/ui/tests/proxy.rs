@@ -1,21 +1,32 @@
 use std::net::{Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 
 async fn start_agent() -> (tempfile::TempDir, SocketAddr) {
     let directory = tempfile::tempdir().expect("创建临时目录");
     let store = agent::Store::open(&directory.path().join("agent.sqlite"))
         .await
         .expect("打开 SQLite");
+    let model = agent::ModelConfig {
+        base_url: "http://127.0.0.1:9/v1".to_owned(),
+        api_key: "test-key".to_owned(),
+        model_name: "test-model".to_owned(),
+    };
+    let provider = Arc::new(agent::OpenAiProvider::new(&model));
+    let state = agent::AgentState::start(
+        store,
+        "test-model".to_owned(),
+        provider,
+        Arc::new(agent::NoTools),
+        agent::EngineConfig::default(),
+    )
+    .await
+    .expect("启动 agent 状态");
     let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await
         .expect("绑定 agent 端口");
     let address = listener.local_addr().expect("读取 agent 地址");
     tokio::spawn(async move {
-        agent::serve(
-            listener,
-            agent::AgentState::new(store, "test-model".to_owned()),
-        )
-        .await
-        .expect("agent 服务运行");
+        agent::serve(listener, state).await.expect("agent 服务运行");
     });
     (directory, address)
 }

@@ -2,6 +2,7 @@ pub mod sqlite;
 
 use crate::message::Message;
 use crate::queue::QueueItem;
+use crate::run::RunRecord;
 use crate::session::{SessionMetadata, SessionRecord};
 use crate::workspace::WorkspaceMetadata;
 
@@ -17,7 +18,9 @@ pub struct Snapshot {
 #[derive(Debug, Clone)]
 pub struct SessionSnapshot {
     pub session: SessionRecord,
+    pub busy: bool,
     pub queue_length: u32,
     pub messages: Vec<Message>,
     pub queue: Vec<QueueItem>,
+    pub runs: Vec<RunRecord>,
 }

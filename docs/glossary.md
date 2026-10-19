@@ -8,6 +8,8 @@
 | ui binary | Rust 进程。内嵌并托管 React 静态资源，把 `/api/*` 反代到 agent。 |
 | session | 绑定唯一 workspace 的对话单元。含消息树、队列、active leaf。 |
 | run | 一次用户消息触发的执行。从发起模型请求开始，到 assistant 不再请求工具结束。 |
+| run 状态 | `running`、`succeeded`、`failed`、`cancelled`。排队中的 run 由队列项表示。 |
+| run 失败类别 | `model_upstream`、`context_limit_exceeded`、`step_limit_exceeded`、`interrupted`。 |
 | step | run 内的一次模型请求及其工具调用。 |
 | message tree | session 内消息节点构成的树。节点含 id、parent_id、role、内容、run 元数据。 |
 | active leaf | session 当前选中的叶子节点。 |
@@ -21,6 +23,12 @@
 | queue item | 等待执行的用户消息。session 级 FIFO，持久化。 |
 | 入队 | 把用户消息写入 session 的 FIFO 队列。此阶段不创建消息节点，不移动 active leaf。 |
 | 自动标题 | 首条用户消息的首行前 50 个字符决定的 session 标题。重命名后不再自动更新。 |
+| 并发槽位 | 全局同时执行的 run 数量上限。默认 4，可配置。 |
+| 部分输出 | run 进行中已收到的 assistant 文本。节流落库，未落库部分只经事件流传输。 |
+| 事件信封 | 事件流中的一条消息。含全局事件 id、session id、时间戳与负载。delta 不带事件 id。 |
+| 事件游标 | 客户端最后应用的事实事件 id。重连时用作 `after` 参数。 |
+| 回放 | 按事件 id 升序重新发送游标之后的事实事件。 |
+| 取消信号 | 中止在途模型请求与工具执行的显式信号。取消后 run 以 `cancelled` 结束并保留部分输出。 |
 | bootstrap | 客户端启动时获取的元数据快照与事件游标。 |
 | scripted provider | 测试用本地 OpenAI 兼容 SSE 服务。按脚本返回响应，不替换被测代码。 |
 | seam | 规格定义的公开测试边界。 |

@@ -4,6 +4,7 @@ use ts_rs::TS;
 use crate::id::{QueueItemId, SessionId, WorkspacePath};
 use crate::message::MessageNode;
 use crate::queue::QueueItem;
+use crate::run::RunRecord;
 use crate::session::SessionMetadata;
 use crate::workspace::WorkspaceMetadata;
 
@@ -34,6 +35,10 @@ pub enum FactEvent {
         session: SessionMetadata,
         message: MessageNode,
     },
+    MessageUpdated {
+        session: SessionMetadata,
+        message: MessageNode,
+    },
     MessageQueued {
         session: SessionMetadata,
         item: QueueItem,
@@ -42,6 +47,14 @@ pub enum FactEvent {
         session_id: SessionId,
         #[ts(type = "number")]
         item_id: QueueItemId,
+    },
+    RunStarted {
+        session: SessionMetadata,
+        run: RunRecord,
+    },
+    RunFinished {
+        session: SessionMetadata,
+        run: RunRecord,
     },
 }
 
@@ -53,10 +66,21 @@ impl FactEvent {
             Self::SessionCreated { session }
             | Self::SessionRenamed { session }
             | Self::MessageAppended { session, .. }
-            | Self::MessageQueued { session, .. } => Some(&session.id),
+            | Self::MessageUpdated { session, .. }
+            | Self::MessageQueued { session, .. }
+            | Self::RunStarted { session, .. }
+            | Self::RunFinished { session, .. } => Some(&session.id),
             Self::SessionDeleted { session_id } | Self::QueueItemRemoved { session_id, .. } => {
                 Some(session_id)
             }
         }
     }
+}
+
+/// 已提交的事实事件，携带存储分配的全局事件 id。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedEvent {
+    pub id: i64,
+    pub event: FactEvent,
+    pub created_at: i64,
 }

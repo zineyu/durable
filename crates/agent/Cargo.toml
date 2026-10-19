@@ -4,9 +4,13 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+async-stream = "0.3.6"
+async-trait = "0.1.89"
 axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 durable = { path = "../core" }
+futures-util = "0.3.34"
+reqwest = { version = "0.13.5", features = ["json", "stream"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

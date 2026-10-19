@@ -4,6 +4,7 @@ use ts_rs::TS;
 use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{MessageNode, MessageText};
 use crate::queue::QueueItem;
+use crate::run::RunRecord;
 
 /// 自动标题取首行前多少个字符。
 const AUTO_TITLE_LIMIT: usize = 50;
@@ -34,12 +35,12 @@ pub struct SessionRecord {
 }
 
 impl SessionRecord {
-    pub fn metadata(&self, queue_length: u32) -> SessionMetadata {
+    pub fn metadata(&self, queue_length: u32, busy: bool) -> SessionMetadata {
         SessionMetadata {
             id: self.id.clone(),
             workspace: self.workspace.clone(),
             title: self.title.clone(),
-            busy: false,
+            busy,
             queue_length,
             updated_at: self.updated_at,
         }
@@ -66,4 +67,5 @@ pub struct SessionTree {
     pub active_leaf: Option<MessageId>,
     pub nodes: Vec<MessageNode>,
     pub queue: Vec<QueueItem>,
+    pub runs: Vec<RunRecord>,
 }

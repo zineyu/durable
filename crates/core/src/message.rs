@@ -3,7 +3,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::id::{MessageId, SessionId, deserialize_validated};
+use crate::id::{MessageId, RunId, SessionId, deserialize_validated};
+use crate::tool::ToolCallRecord;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -43,7 +44,7 @@ impl fmt::Display for MessageRoleError {
 
 impl std::error::Error for MessageRoleError {}
 
-/// 用户消息正文。保留原始内容，只要求去掉空白后非空。
+/// 用户输入正文。保留原始内容，只要求去掉空白后非空。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 pub struct MessageText(String);
 
@@ -76,6 +77,24 @@ impl std::error::Error for MessageTextError {}
 
 deserialize_validated!(MessageText);
 
+/// 消息节点正文。用户消息经 [`MessageText`] 校验；assistant 消息可以为空（只请求工具时）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct MessageContent(String);
+
+impl MessageContent {
+    pub fn new(raw: impl Into<String>) -> Self {
+        Self(raw.into())
+    }
+
+    pub fn empty() -> Self {
+        Self(String::new())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// 消息树节点，同时是协议中的消息形状。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -85,7 +104,10 @@ pub struct MessageNode {
     #[ts(type = "number | null")]
     pub parent_id: Option<MessageId>,
     pub role: MessageRole,
-    pub text: MessageText,
+    pub text: MessageContent,
+    #[ts(type = "number | null")]
+    pub run_id: Option<RunId>,
+    pub tool_calls: Vec<ToolCallRecord>,
     #[ts(type = "number")]
     pub created_at: i64,
 }

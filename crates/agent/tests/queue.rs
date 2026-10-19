@@ -2,102 +2,110 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, connect, error_code, recorded_event_kinds};
-
-async fn tree(harness: &Harness, id: &agent::SessionId) -> agent::SessionTree {
-    harness
-        .session_tree(id)
-        .await
-        .json()
-        .await
-        .expect("解析消息树")
-}
+use support::{Harness, Script, connect, error_code, recorded_events};
 
 fn queue_texts(tree: &agent::SessionTree) -> Vec<&str> {
     tree.queue.iter().map(|item| item.text.as_str()).collect()
 }
 
-/// 规格「调度与会话状态」：入队只写队列，不创建消息节点，不移动 active leaf。
+/// 规格「调度与会话状态」：run 进行中提交的消息留在队列，不打断当前 run。
 #[tokio::test]
-async fn enqueues_message_without_creating_tree_node() {
-    let harness = Harness::start().await;
+async fn queues_messages_behind_running_run() {
+    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
     let session = harness.session("workspace").await;
 
-    let response = harness.submit_message(&session.id, "检查仓库状态").await;
+    let response = harness.submit_message(&session.id, "第一条").await;
     assert_eq!(response.status(), StatusCode::CREATED);
-    let item: agent::QueueItem = response.json().await.expect("解析队列项");
-    assert!(item.id.get() > 0);
-    assert_eq!(item.text.as_str(), "检查仓库状态");
-    assert!(item.created_at > 0);
+    let second = harness
+        .submit_message(&session.id, "第二条")
+        .await
+        .json::<agent::QueueItem>()
+        .await
+        .expect("解析队列项");
+    let third = harness
+        .submit_message(&session.id, "第三条")
+        .await
+        .json::<agent::QueueItem>()
+        .await
+        .expect("解析队列项");
 
-    let tree = tree(&harness, &session.id).await;
-    assert_eq!(tree.active_leaf, None);
-    assert!(tree.nodes.is_empty(), "入队不创建消息节点");
-    assert_eq!(tree.queue, vec![item.clone()]);
-    assert_eq!(tree.session.queue_length, 1);
-    assert!(!tree.session.busy, "run 切片前 session 不进入忙碌状态");
-    assert_eq!(tree.session.updated_at, item.created_at);
-}
-
-/// 规格 user story 7：session 内队列按 FIFO 执行，id 升序即入队顺序。
-#[tokio::test]
-async fn keeps_queue_in_fifo_order() {
-    let harness = Harness::start().await;
-    let session = harness.session("workspace").await;
-
-    let mut items = Vec::new();
-    for text in ["第一条", "第二条", "第三条"] {
-        let response = harness.submit_message(&session.id, text).await;
-        assert_eq!(response.status(), StatusCode::CREATED);
-        items.push(
-            response
-                .json::<agent::QueueItem>()
-                .await
-                .expect("解析队列项"),
-        );
-    }
-
-    assert!(items[0].id < items[1].id && items[1].id < items[2].id);
-    let tree = tree(&harness, &session.id).await;
-    assert_eq!(tree.queue, items);
-    assert_eq!(queue_texts(&tree), vec!["第一条", "第二条", "第三条"]);
-    assert_eq!(tree.session.queue_length, 3);
+    let running = harness.wait_busy(&session.id).await;
+    assert_eq!(running.queue, vec![second.clone(), third.clone()]);
+    assert_eq!(running.session.queue_length, 2);
+    assert_eq!(queue_texts(&running), vec!["第二条", "第三条"]);
 
     let bootstrap = harness.bootstrap().await;
-    assert_eq!(bootstrap.sessions[0].queue_length, 3);
+    assert_eq!(bootstrap.sessions[0].queue_length, 2);
+    assert!(bootstrap.sessions[0].busy);
+
+    harness.cancel_run(&session.id).await;
+    harness.wait_idle(&session.id).await;
 }
 
-/// 规格「持久化」：重启后队列、顺序与队列长度保持，分配器继续递增。
+/// 规格 user story 15：同一 session 的消息按 FIFO 顺序执行。
 #[tokio::test]
-async fn restores_queue_after_restart() {
-    let harness = Harness::start().await;
+async fn executes_queued_messages_in_fifo_order() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![
+            Script::Text("A".into()),
+            Script::Text("B".into()),
+            Script::Text("C".into()),
+        ],
+    )
+    .await;
     let session = harness.session("workspace").await;
-    let mut items = Vec::new();
-    for text in ["重启前 A", "重启前 B"] {
-        let response = harness.submit_message(&session.id, text).await;
-        items.push(
-            response
-                .json::<agent::QueueItem>()
-                .await
-                .expect("解析队列项"),
+
+    for text in ["第一条", "第二条", "第三条"] {
+        assert_eq!(
+            harness.submit_message(&session.id, text).await.status(),
+            StatusCode::CREATED
         );
     }
 
-    let harness = harness.restart().await;
-    let restored = tree(&harness, &session.id).await;
-    assert_eq!(restored.queue, items);
-    assert_eq!(restored.session.queue_length, 2);
-    assert!(restored.nodes.is_empty());
-    assert_eq!(restored.active_leaf, None);
+    let tree = harness.wait_idle(&session.id).await;
+    let users: Vec<&str> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::User)
+        .map(|node| node.text.as_str())
+        .collect();
+    assert_eq!(users, vec!["第一条", "第二条", "第三条"]);
+    assert!(tree.queue.is_empty());
+    assert_eq!(tree.session.queue_length, 0);
+}
 
-    let next: agent::QueueItem = harness
-        .submit_message(&session.id, "重启后的消息")
-        .await
-        .json()
-        .await
-        .expect("解析新队列项");
-    assert!(next.id > items[1].id, "队列项 id 分配器从存储恢复且不复用");
-    assert_eq!(tree(&harness, &session.id).await.session.queue_length, 3);
+/// 规格「持久化」：重启后队列继续执行，中断的 run 标记为 failed。
+#[tokio::test]
+async fn continues_queue_after_restart() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::Hang, Script::Text("B 完成".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "重启前 A").await;
+    harness.submit_message(&session.id, "重启前 B").await;
+    harness.wait_busy(&session.id).await;
+
+    let harness = harness.restart().await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Failed);
+    assert_eq!(
+        tree.runs[0].failure.as_ref().expect("失败原因").code,
+        agent::RunFailureCode::Interrupted
+    );
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
+    let users: Vec<&str> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::User)
+        .map(|node| node.text.as_str())
+        .collect();
+    assert_eq!(users, vec!["重启前 A", "重启前 B"]);
+    assert_eq!(tree.nodes[3].text.as_str(), "B 完成");
 }
 
 /// 规格 user story 4：首条用户消息决定标题，后续消息不再改变。
@@ -108,12 +116,12 @@ async fn derives_auto_title_from_first_message() {
     assert_eq!(session.title.as_str(), agent::DEFAULT_SESSION_TITLE);
 
     harness.submit_message(&session.id, "第一行\n第二行").await;
-    let titled = tree(&harness, &session.id).await;
+    let titled = harness.tree(&session.id).await;
     assert_eq!(titled.session.title.as_str(), "第一行");
 
     harness.submit_message(&session.id, "另一条消息").await;
     assert_eq!(
-        tree(&harness, &session.id).await.session.title.as_str(),
+        harness.tree(&session.id).await.session.title.as_str(),
         "第一行",
         "第二条消息不改变自动标题"
     );
@@ -129,7 +137,7 @@ async fn truncates_auto_title_to_fifty_characters() {
     harness.submit_message(&session.id, &long).await;
 
     assert_eq!(
-        tree(&harness, &session.id).await.session.title.as_str(),
+        harness.tree(&session.id).await.session.title.as_str(),
         "字".repeat(50)
     );
 }
@@ -145,9 +153,8 @@ async fn keeps_renamed_title_before_first_message() {
 
     harness.submit_message(&session.id, "首条消息").await;
 
-    let tree = tree(&harness, &session.id).await;
+    let tree = harness.tree(&session.id).await;
     assert_eq!(tree.session.title.as_str(), "自定义标题");
-    assert_eq!(tree.session.queue_length, 1);
 }
 
 /// 规格「边界解析」：空白正文不入队，也不改变标题与队列。
@@ -162,7 +169,7 @@ async fn rejects_blank_message_text() {
         assert_eq!(error_code(response).await, agent::ErrorCode::InvalidMessage);
     }
 
-    let tree = tree(&harness, &session.id).await;
+    let tree = harness.tree(&session.id).await;
     assert!(tree.queue.is_empty());
     assert_eq!(tree.session.queue_length, 0);
     assert_eq!(tree.session.title.as_str(), agent::DEFAULT_SESSION_TITLE);
@@ -183,12 +190,14 @@ async fn rejects_message_for_missing_session() {
     );
 }
 
-/// 规格「删除 session」：队列随 session 一并删除。
+/// 规格 user story 5：删除运行中的 session 先取消 run，并丢弃队列。
 #[tokio::test]
-async fn deletes_queue_with_session() {
-    let harness = Harness::start().await;
+async fn deletes_running_session_with_its_queue() {
+    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
     let session = harness.session("workspace").await;
-    harness.submit_message(&session.id, "待删除").await;
+    harness.submit_message(&session.id, "运行中").await;
+    harness.submit_message(&session.id, "排队中").await;
+    harness.wait_busy(&session.id).await;
 
     let response = harness.delete_session(&session.id).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -206,7 +215,7 @@ async fn deletes_queue_with_session() {
 /// 规格「事实事件」：入队写入 `message_queued`，携带队列项与更新后的 session 元数据。
 #[tokio::test]
 async fn records_message_queued_event() {
-    let harness = Harness::start().await;
+    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
     let session = harness.session("workspace").await;
     let item: agent::QueueItem = harness
         .submit_message(&session.id, "记录事件")
@@ -215,32 +224,26 @@ async fn records_message_queued_event() {
         .await
         .expect("解析队列项");
 
-    let payloads: Vec<String> = sqlx::query_scalar("SELECT event FROM event ORDER BY id")
-        .fetch_all(&mut connect(&harness.database).await)
+    let event = recorded_events(&harness.database)
         .await
-        .expect("查询事件");
-    let event: agent::FactEvent =
-        serde_json::from_str(payloads.last().expect("有事件")).expect("解析事件");
+        .into_iter()
+        .find(|event| matches!(event, agent::FactEvent::MessageQueued { .. }))
+        .expect("记录了入队事件");
     let agent::FactEvent::MessageQueued {
         session: recorded,
         item: queued,
     } = event
     else {
-        panic!("最后一条事件是 message_queued");
+        panic!("事件是 message_queued");
     };
     assert_eq!(queued, item);
     assert_eq!(recorded.id, session.id);
-    assert_eq!(recorded.queue_length, 1);
     assert_eq!(recorded.title.as_str(), "记录事件");
     assert_eq!(recorded.updated_at, item.created_at);
 
-    assert_eq!(
-        recorded_event_kinds(&harness.database)
-            .await
-            .last()
-            .map(String::as_str),
-        Some("message_queued")
-    );
+    harness.wait_busy(&session.id).await;
+    harness.cancel_run(&session.id).await;
+    harness.wait_idle(&session.id).await;
 }
 
 /// 队列项 id 与消息 id 共享全局分配语义：跨 session 单调递增。
@@ -264,13 +267,21 @@ async fn allocates_queue_item_ids_across_sessions() {
         .expect("解析队列项");
 
     assert!(second.id > first.id, "队列项 id 全局递增");
-    assert_eq!(tree(&harness, &second_session.id).await.queue, vec![second]);
 }
 
-/// ADR 0012「单一写入线」：并发入队被串行化，队列顺序与 id 顺序一致。
+/// ADR 0012「单一写入线」：并发入队被串行化，执行顺序与分配 id 顺序一致。
 #[tokio::test]
 async fn serializes_concurrent_submissions_into_fifo_order() {
-    let harness = Harness::start().await;
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![
+            Script::Text("A".into()),
+            Script::Text("B".into()),
+            Script::Text("C".into()),
+            Script::Text("D".into()),
+        ],
+    )
+    .await;
     let session = harness.session("workspace").await;
 
     let responses = tokio::join!(
@@ -295,9 +306,18 @@ async fn serializes_concurrent_submissions_into_fifo_order() {
     ids.dedup();
     assert_eq!(ids.len(), 4, "每次入队分配独立的队列项 id");
 
-    let tree = tree(&harness, &session.id).await;
-    assert_eq!(tree.queue, items);
-    assert_eq!(tree.session.queue_length, 4);
+    let expected: Vec<String> = items
+        .iter()
+        .map(|item| item.text.as_str().to_owned())
+        .collect();
+    let tree = harness.wait_idle(&session.id).await;
+    let users: Vec<String> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::User)
+        .map(|node| node.text.as_str().to_owned())
+        .collect();
+    assert_eq!(users, expected, "执行顺序等于队列项 id 顺序");
 }
 
 /// 分配器独立于队列行：删除 session 不回收已分配的队列项 id。

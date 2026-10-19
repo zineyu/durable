@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { BootstrapResponse } from '../api/generated/BootstrapResponse';
 import type { FactEvent } from '../api/generated/FactEvent';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
+import type { RunRecord } from '../api/generated/RunRecord';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId } from './ids';
 import { applyEvent, createSidebarState, sidebarWorkspaces } from './reducer';
@@ -257,7 +258,7 @@ describe('侧栏状态', () => {
     const next = applyEvent(state, {
       kind: 'message_appended',
       session: session('s-1', '/work/a', 300),
-      message: { id: 3, parentId: null, role: 'user', text: '新消息', createdAt: 300 },
+      message: { id: 3, parentId: null, role: 'user', text: '新消息', runId: null, toolCalls: [], createdAt: 300 },
     });
 
     expect(sidebarWorkspaces(next)[0]?.sessions).toEqual([
@@ -304,6 +305,36 @@ describe('侧栏状态', () => {
       itemId: 4,
     });
     expect(sidebarWorkspaces(emptied)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0 },
+    ]);
+  });
+
+  it('run 事件用事件携带的 session 元数据更新忙碌状态', () => {
+    const state = createSidebarState(bootstrap([workspaceA], [session('s-1', '/work/a', 100)]));
+    const run: RunRecord = {
+      id: 1,
+      sessionId: 's-1',
+      status: 'running',
+      failure: null,
+      createdAt: 200,
+      updatedAt: 200,
+    };
+
+    const running = applyEvent(state, {
+      kind: 'run_started',
+      session: session('s-1', '/work/a', 200, { busy: true }),
+      run,
+    });
+    expect(sidebarWorkspaces(running)[0]?.sessions).toEqual([
+      { id: toSessionId('s-1'), title: '标题 s-1', state: 'running', queuedCount: 0 },
+    ]);
+
+    const finished = applyEvent(running, {
+      kind: 'run_finished',
+      session: session('s-1', '/work/a', 300),
+      run: { ...run, status: 'succeeded', updatedAt: 300 },
+    });
+    expect(sidebarWorkspaces(finished)[0]?.sessions).toEqual([
       { id: toSessionId('s-1'), title: '标题 s-1', state: 'idle', queuedCount: 0 },
     ]);
   });

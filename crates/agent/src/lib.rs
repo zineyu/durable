@@ -7,25 +7,39 @@ use ts_rs::TS;
 pub mod protocol;
 
 mod api;
+mod cancel;
 mod config;
+mod engine;
 mod error;
+mod provider;
+mod sse;
+mod tools;
 
 pub use api::{AgentState, router, serve};
+pub use cancel::Cancellation;
 pub use config::{
-    ConfigError, MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME, ModelConfig, model_config_from_env,
+    CONTEXT_CHAR_LIMIT, ConfigError, EngineConfig, MAX_CONCURRENCY, MAX_STEPS, MODEL_API_KEY,
+    MODEL_BASE_URL, MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
 };
 pub use durable::{
-    DEFAULT_SESSION_TITLE, FactEvent, MessageId, MessageNode, MessageRole, MessageText,
-    MessageTextError, QueueItem, QueueItemId, SessionId, SessionIdError, SessionMetadata,
-    SessionTitle, SessionTitleError, SessionTree, Store, StoreError, WorkspaceMetadata,
-    WorkspacePath, WorkspacePathError,
+    DEFAULT_SESSION_TITLE, FactEvent, MessageContent, MessageId, MessageNode, MessageRole,
+    MessageText, MessageTextError, QueueItem, QueueItemId, RunFailure, RunFailureCode, RunId,
+    RunRecord, RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle,
+    SessionTitleError, SessionTree, Store, StoreError, StreamEvent, ToolCallRecord, ToolErrorCode,
+    ToolOutcome, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
+pub use engine::RunEngine;
 pub use error::ApiError;
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, ErrorCode, ErrorResponse, HealthResponse,
     HealthStatus, RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest,
     SubmitMessageRequest,
 };
+pub use provider::{
+    ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,
+    ProviderError,
+};
+pub use tools::{NoTools, ToolBox, ToolCall, ToolContext};
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
 
@@ -69,10 +83,19 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     BootstrapResponse::export_all(&config)?;
     MessageRole::export_all(&config)?;
     MessageText::export_all(&config)?;
+    MessageContent::export_all(&config)?;
     MessageNode::export_all(&config)?;
-    SessionTree::export_all(&config)?;
+    ToolCallRecord::export_all(&config)?;
+    ToolOutcome::export_all(&config)?;
+    ToolErrorCode::export_all(&config)?;
     QueueItem::export_all(&config)?;
+    RunStatus::export_all(&config)?;
+    RunFailureCode::export_all(&config)?;
+    RunFailure::export_all(&config)?;
+    RunRecord::export_all(&config)?;
+    SessionTree::export_all(&config)?;
     FactEvent::export_all(&config)?;
+    StreamEvent::export_all(&config)?;
     ErrorCode::export_all(&config)?;
     ErrorResponse::export_all(&config)?;
     RegisterWorkspaceRequest::export_all(&config)?;

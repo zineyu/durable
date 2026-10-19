@@ -27,14 +27,25 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = Arguments::parse();
     let model = agent::model_config_from_env()?;
+    let engine = agent::engine_config_from_env()?;
     let address = agent::parse_listen_address(&arguments.listen)?;
     let workspaces = resolve_workspaces(&arguments.workspaces)?;
     let store = agent::Store::open(&arguments.database).await?;
     store.register_initial_workspaces(&workspaces).await?;
+    let provider = std::sync::Arc::new(agent::OpenAiProvider::new(&model));
+    let model_name = model.model_name.clone();
+    let state = agent::AgentState::start(
+        store,
+        model_name,
+        provider,
+        std::sync::Arc::new(agent::NoTools),
+        engine,
+    )
+    .await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     let bound = listener.local_addr()?;
     println!("agent listening on http://{bound}");
-    agent::serve(listener, agent::AgentState::new(store, model.model_name)).await?;
+    agent::serve(listener, state).await?;
     Ok(())
 }
 

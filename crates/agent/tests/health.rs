@@ -1,12 +1,12 @@
 mod support;
 
+use support::Harness;
+
 #[tokio::test]
 async fn health_endpoint_reports_ok() {
-    let directory = tempfile::tempdir().expect("创建临时目录");
-    let agent =
-        support::TestAgent::start(&directory.path().join("agent.sqlite"), "test-model").await;
+    let harness = Harness::start().await;
 
-    let response = reqwest::get(agent.url("/api/health"))
+    let response = reqwest::get(harness.url("/api/health"))
         .await
         .expect("请求 health 端点");
     assert_eq!(response.status(), reqwest::StatusCode::OK);

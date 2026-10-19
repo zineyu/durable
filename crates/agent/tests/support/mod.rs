@@ -7,11 +7,16 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::{Response, StatusCode};
 use sqlx::{ConnectOptions, Row};
 use tempfile::TempDir;
+
+pub mod provider;
+
+pub use provider::{Script, ScriptedProvider};
 
 /// 模型配置的测试取值，用 `Command::envs` 应用到 std 或 tokio 的命令。
 pub fn model_environment() -> [(&'static str, &'static str); 3] {
@@ -71,17 +76,28 @@ pub struct TestAgent {
 }
 
 impl TestAgent {
-    pub async fn start(database: &Path, model: &str) -> TestAgent {
+    pub async fn start(
+        database: &Path,
+        model: &str,
+        provider: Arc<dyn agent::ModelProvider>,
+        config: agent::EngineConfig,
+    ) -> TestAgent {
         let store = agent::Store::open(database).await.expect("打开 SQLite");
         let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .expect("绑定回环端口");
         let address = listener.local_addr().expect("读取本地地址");
-        let model = model.to_owned();
+        let state = agent::AgentState::start(
+            store,
+            model.to_owned(),
+            provider,
+            Arc::new(agent::NoTools),
+            config,
+        )
+        .await
+        .expect("启动 agent 状态");
         let handle = tokio::spawn(async move {
-            agent::serve(listener, agent::AgentState::new(store, model))
-                .await
-                .expect("agent 服务运行");
+            agent::serve(listener, state).await.expect("agent 服务运行");
         });
         TestAgent {
             base_url: format!("http://{address}"),
@@ -99,26 +115,46 @@ impl TestAgent {
     }
 }
 
-/// 临时目录中的 agent 与可复用的 HTTP 客户端。
+/// 临时目录中的 agent、脚本化 provider 与可复用的 HTTP 客户端。
 pub struct Harness {
     pub directory: TempDir,
     pub database: PathBuf,
+    pub provider: ScriptedProvider,
+    pub config: agent::EngineConfig,
     agent: TestAgent,
     pub client: reqwest::Client,
 }
 
 impl Harness {
     pub async fn start() -> Harness {
-        let directory = tempfile::tempdir().expect("创建临时目录");
-        let database = directory.path().join("agent.sqlite");
-        Harness::open(directory, database).await
+        Harness::start_with(agent::EngineConfig::default(), Vec::new()).await
     }
 
-    async fn open(directory: TempDir, database: PathBuf) -> Harness {
-        let agent = TestAgent::start(&database, "test-model").await;
+    pub async fn start_with(config: agent::EngineConfig, scripts: Vec<Script>) -> Harness {
+        let directory = tempfile::tempdir().expect("创建临时目录");
+        let database = directory.path().join("agent.sqlite");
+        let provider = ScriptedProvider::start(scripts).await;
+        Harness::open(directory, database, provider, config).await
+    }
+
+    async fn open(
+        directory: TempDir,
+        database: PathBuf,
+        provider: ScriptedProvider,
+        config: agent::EngineConfig,
+    ) -> Harness {
+        let model = agent::ModelConfig {
+            base_url: provider.base_url(),
+            api_key: "test-key".to_owned(),
+            model_name: "test-model".to_owned(),
+        };
+        let runtime = Arc::new(agent::OpenAiProvider::new(&model));
+        let agent = TestAgent::start(&database, "test-model", runtime, config).await;
         Harness {
             directory,
             database,
+            provider,
+            config,
             agent,
             client: reqwest::Client::new(),
         }
@@ -128,11 +164,13 @@ impl Harness {
         let Harness {
             directory,
             database,
+            provider,
+            config,
             agent,
             ..
         } = self;
         agent.shutdown().await;
-        Harness::open(directory, database).await
+        Harness::open(directory, database, provider, config).await
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -216,6 +254,14 @@ impl Harness {
             .expect("读取消息树")
     }
 
+    pub async fn tree(&self, id: &agent::SessionId) -> agent::SessionTree {
+        self.session_tree(id)
+            .await
+            .json()
+            .await
+            .expect("解析消息树")
+    }
+
     pub async fn submit_message(&self, id: &agent::SessionId, text: &str) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/messages", id.as_str())))
@@ -223,6 +269,84 @@ impl Harness {
             .send()
             .await
             .expect("提交消息")
+    }
+
+    pub async fn cancel_run(&self, id: &agent::SessionId) -> Response {
+        self.client
+            .post(self.url(&format!("/api/sessions/{}/cancel", id.as_str())))
+            .send()
+            .await
+            .expect("取消 run")
+    }
+
+    pub async fn remove_queue_item(
+        &self,
+        id: &agent::SessionId,
+        item: agent::QueueItemId,
+    ) -> Response {
+        self.client
+            .post(self.url(&format!(
+                "/api/sessions/{}/queue/{}/remove",
+                id.as_str(),
+                item.get()
+            )))
+            .send()
+            .await
+            .expect("删除队列项")
+    }
+
+    /// 轮询直到该 session 不再忙碌且队列为空。
+    pub async fn wait_idle(&self, id: &agent::SessionId) -> agent::SessionTree {
+        for _ in 0..500 {
+            let tree = self.tree(id).await;
+            if !tree.session.busy && tree.queue.is_empty() {
+                return tree;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("run 未在预期时间内结束");
+    }
+
+    /// 轮询直到该 session 进入忙碌状态。
+    pub async fn wait_busy(&self, id: &agent::SessionId) -> agent::SessionTree {
+        for _ in 0..500 {
+            let tree = self.tree(id).await;
+            if tree.session.busy {
+                return tree;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("run 未在预期时间内开始");
+    }
+
+    /// 轮询直到消息树满足条件。
+    pub async fn wait_for_tree(
+        &self,
+        id: &agent::SessionId,
+        ready: impl Fn(&agent::SessionTree) -> bool,
+    ) -> agent::SessionTree {
+        for _ in 0..500 {
+            let tree = self.tree(id).await;
+            if ready(&tree) {
+                return tree;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("消息树未在预期时间内满足条件");
+    }
+
+    /// 订阅全局事件流。`after` 为 0 时回放全部历史事件。
+    pub async fn subscribe(&self, after: i64) -> EventStream {
+        let response = self
+            .client
+            .get(self.url(&format!("/api/events?after={after}")))
+            .send()
+            .await
+            .expect("订阅事件流");
+        EventStream {
+            response,
+            buffer: Vec::new(),
+        }
     }
 
     pub async fn registered_workspace(&self, name: &str) -> (PathBuf, agent::WorkspaceMetadata) {
@@ -250,6 +374,33 @@ impl Harness {
     pub async fn session(&self, name: &str) -> agent::SessionMetadata {
         let (_, workspace) = self.registered_workspace(name).await;
         self.created_session(&workspace.path).await
+    }
+}
+
+/// 已订阅的事件流，按 SSE `data:` 行产出协议事件。
+pub struct EventStream {
+    response: reqwest::Response,
+    buffer: Vec<u8>,
+}
+
+impl EventStream {
+    pub async fn next(&mut self) -> Option<agent::StreamEvent> {
+        loop {
+            if let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
+                let line: Vec<u8> = self.buffer.drain(..=position).collect();
+                let line = String::from_utf8(line).expect("事件行是 UTF-8");
+                let Some(data) = line.trim_end().strip_prefix("data:") else {
+                    continue;
+                };
+                let data = data.trim();
+                if data.is_empty() {
+                    continue;
+                }
+                return Some(serde_json::from_str(data).expect("解析事件"));
+            }
+            let chunk = self.response.chunk().await.expect("读取事件流")?;
+            self.buffer.extend_from_slice(&chunk);
+        }
     }
 }
 
