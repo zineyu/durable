@@ -285,6 +285,31 @@ describe('流式增量与 run 状态', () => {
     expect(state.trees['s-1']?.nodes[1]?.text).toBe('你好');
   });
 
+  it('工具调用事实事件在 run 进行中追加到 assistant 节点', () => {
+    const record: ToolCallRecord = {
+      id: 'call_1',
+      name: 'read_file',
+      arguments: '{"path":"devenv.nix"}',
+      outcome: { status: 'succeeded', content: 'scripts.build.exec = "durable-build"' },
+    };
+    let state = withAssistant();
+    state = applyFact(state, {
+      kind: 'tool_call_recorded',
+      session: session('s-1', '/work/a', 200, { busy: true }),
+      message: 2,
+      toolCall: record,
+    });
+    expect(state.trees['s-1']?.nodes[1]?.toolCalls).toEqual([record]);
+
+    state = applyFact(state, {
+      kind: 'tool_call_recorded',
+      session: session('s-1', '/work/a', 200, { busy: true }),
+      message: 2,
+      toolCall: record,
+    });
+    expect(state.trees['s-1']?.nodes[1]?.toolCalls).toEqual([record]);
+  });
+
   it('run 结束事件以完整文本覆盖增量', () => {
     let state = withAssistant();
     state = applyDelta(state, 's-1', 2, '部分');

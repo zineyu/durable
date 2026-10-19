@@ -662,6 +662,42 @@ impl Store {
         Ok(())
     }
 
+    /// 记录一次已完成的工具调用：把记录追加到 assistant 节点，并写入事实事件。
+    ///
+    /// 失败：session 或消息不存在。
+    /// 副作用：更新消息节点的工具调用；写入 `tool_call_recorded` 事件。
+    pub async fn record_tool_call(
+        &self,
+        session: &SessionId,
+        message_id: MessageId,
+        call: ToolCallRecord,
+    ) -> Result<(), StoreError> {
+        let _line = self.line.lock().await;
+        let record = self.find_session(session).await?;
+        let pending = self.storage.queue_length(session).await?;
+        let metadata = record.metadata(pending, true);
+        let stored = self
+            .storage
+            .message(session, message_id)
+            .await?
+            .ok_or_else(|| StoreError::MessageNotFound(session.clone(), message_id))?;
+        let Message { node, .. } = stored;
+        let mut tool_calls = node.tool_calls;
+        tool_calls.push(call.clone());
+        let mut changes = Changeset::new();
+        changes.update_message(message_id, node.text, tool_calls);
+        changes.append_event(
+            FactEvent::ToolCallRecorded {
+                session: metadata,
+                message: message_id,
+                tool_call: call,
+            },
+            now_millis(),
+        );
+        self.commit(&changes).await?;
+        Ok(())
+    }
+
     /// 结束 run：写终态、assistant 终文本与 active leaf，并写入事实事件。
     ///
     /// 失败：session 或 run 不存在。

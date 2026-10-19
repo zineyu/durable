@@ -6,6 +6,7 @@ use crate::message::MessageNode;
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::session::SessionMetadata;
+use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
 /// 持久化到 SQLite 的领域事实事件。
@@ -38,6 +39,12 @@ pub enum FactEvent {
     MessageUpdated {
         session: SessionMetadata,
         message: MessageNode,
+    },
+    ToolCallRecorded {
+        session: SessionMetadata,
+        #[ts(type = "number")]
+        message: MessageId,
+        tool_call: ToolCallRecord,
     },
     ActiveLeafChanged {
         session: SessionMetadata,
@@ -72,6 +79,7 @@ impl FactEvent {
             | Self::SessionRenamed { session }
             | Self::MessageAppended { session, .. }
             | Self::MessageUpdated { session, .. }
+            | Self::ToolCallRecorded { session, .. }
             | Self::ActiveLeafChanged { session, .. }
             | Self::MessageQueued { session, .. }
             | Self::RunStarted { session, .. }

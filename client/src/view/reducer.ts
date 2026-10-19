@@ -6,6 +6,7 @@ import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTree } from '../api/generated/SessionTree';
 import type { StreamEvent } from '../api/generated/StreamEvent';
+import type { ToolCallRecord } from '../api/generated/ToolCallRecord';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
 import type { ConnectionState, MessageState, SessionSummary, WorkspaceSummary } from './types';
@@ -120,6 +121,11 @@ export function applyFactEvent(state: ClientState, event: FactEvent): ClientStat
       return withSession(state, event.session, (tree) => ({
         ...tree,
         nodes: upsertNode(tree.nodes, event.message),
+      }));
+    case 'tool_call_recorded':
+      return withSession(state, event.session, (tree) => ({
+        ...tree,
+        nodes: appendToolCall(tree.nodes, event.message, event.toolCall),
       }));
     case 'active_leaf_changed':
       return withSession(state, event.session, (tree) => ({
@@ -384,6 +390,19 @@ function upsertNode(nodes: MessageNode[], incoming: MessageNode): MessageNode[] 
     return [...nodes, incoming];
   }
   return nodes.map((node) => (node.id === incoming.id ? incoming : node));
+}
+
+/// 追加已完成的工具调用；同一调用重复到达时保持原状态。
+function appendToolCall(
+  nodes: MessageNode[],
+  messageId: number,
+  record: ToolCallRecord,
+): MessageNode[] {
+  return nodes.map((node) =>
+    node.id === messageId && !node.toolCalls.some((call) => call.id === record.id)
+      ? { ...node, toolCalls: [...node.toolCalls, record] }
+      : node,
+  );
 }
 
 function appendQueue(queue: QueueItem[], incoming: QueueItem): QueueItem[] {

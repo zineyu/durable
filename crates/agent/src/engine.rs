@@ -322,14 +322,15 @@ impl RunEngine {
                     }
                     outcome = self.tools.execute(&call, &context) => outcome,
                 };
-                records.push(ToolCallRecord {
+                let record = ToolCallRecord {
                     id: call.id,
                     name: call.name,
                     arguments: call.arguments,
                     outcome,
-                });
+                };
+                self.record_tool_call(&session, assistant_id, &record).await;
+                records.push(record);
             }
-            self.flush(assistant_id, &text, &records).await;
         }
         failed(
             RunFailureCode::StepLimitExceeded,
@@ -351,6 +352,21 @@ impl RunEngine {
             .await
         {
             eprintln!("写入部分输出失败: {error}");
+        }
+    }
+
+    async fn record_tool_call(
+        &self,
+        session: &SessionId,
+        assistant_id: durable::MessageId,
+        call: &ToolCallRecord,
+    ) {
+        if let Err(error) = self
+            .store
+            .record_tool_call(session, assistant_id, call.clone())
+            .await
+        {
+            eprintln!("写入工具调用失败: {error}");
         }
     }
 }

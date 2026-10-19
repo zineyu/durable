@@ -25,6 +25,7 @@
 | 重试 assistant | 以目标 assistant 的父用户节点为锚新建 run，产生同父的 assistant 兄弟节点，不重复用户消息。 |
 | 切换 active leaf | 把 active leaf 移到目标子树中最近创建的叶子。只修改 active leaf，并写入 `active_leaf_changed` 事实事件。 |
 | fact event | 持久化到 SQLite 的领域事件。token 增量不属于 fact event。 |
+| 工具调用事实 | 每次工具执行完成后追加到 assistant 节点并以 `tool_call_recorded` 广播的记录。不含 assistant 文本。 |
 | durable 内核 | `crates/core`（包名 `durable`）中的领域与持久化层。持有单一写入线、领域类型与存储。 |
 | 写入线 | 串行化写入的互斥边界。读-改-写与一次原子提交都在同一条写入线内完成。 |
 | changeset | 一次提交登记的变更集合，顺序即意图，在单条存储事务内整体生效。 |
