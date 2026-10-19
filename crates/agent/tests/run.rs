@@ -326,6 +326,54 @@ async fn broadcasts_facts_to_every_subscriber() {
     }
 }
 
+/// 规格 user story 12：工具失败以结构化结果回传模型，run 继续。
+#[tokio::test]
+async fn passes_tool_failure_to_model_and_continues() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![
+            Script::ToolCall {
+                id: "call_1".into(),
+                name: "read_file".into(),
+                arguments: r#"{"path":"absent.txt"}"#.into(),
+            },
+            Script::Text("已记录失败".into()),
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    harness
+        .submit_message(&session.id, "读取不存在的文件")
+        .await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let assistant = &tree.nodes[1];
+    assert_eq!(
+        assistant.tool_calls[0].outcome,
+        agent::ToolOutcome::Failed {
+            code: agent::ToolErrorCode::FileNotFound,
+            message: "文件不存在: absent.txt".into(),
+        }
+    );
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
+    assert_eq!(assistant.text.as_str(), "已记录失败");
+
+    let requests = harness.provider.requests();
+    assert_eq!(requests.len(), 2, "失败后继续请求下一轮");
+    let messages = requests[1]["messages"]
+        .as_array()
+        .expect("第二轮请求含 messages");
+    let result = messages
+        .iter()
+        .find(|message| message["role"] == "tool")
+        .expect("工具结果以 tool 消息回传");
+    assert_eq!(result["tool_call_id"], "call_1");
+    assert_eq!(
+        result["content"],
+        r#"{"error":"file_not_found","message":"文件不存在: absent.txt"}"#
+    );
+}
+
 /// 规格「事实事件」与 user story 9：工具调用在 run 结束前就以事实事件广播。
 #[tokio::test]
 async fn broadcasts_tool_call_fact_while_run_is_running() {
