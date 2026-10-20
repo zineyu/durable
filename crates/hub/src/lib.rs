@@ -3,24 +3,27 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Path as UrlPath, Request, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
-use durable::{NodeName, Store};
+use durable::{NodeMetadata, NodeName, Store};
+use futures_util::TryStreamExt;
 use rust_embed::Embed;
 use serde::de::DeserializeOwned;
 use ts_rs::TS;
 
 mod error;
+mod node_probe;
 mod protocol;
 
 pub use error::ApiError;
 pub use protocol::{
     HUB_PROTOCOL_VERSION, HubBootstrap, HubErrorCode, HubErrorResponse, HubHealth, HubStatus,
-    NodeSnapshot, NodeStatus, RegisterNodeRequest,
+    NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION, RegisterNodeRequest,
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
@@ -32,6 +35,7 @@ struct Assets;
 #[derive(Clone)]
 struct HubState {
     store: Arc<Store>,
+    client: reqwest::Client,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,12 +66,17 @@ pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError>
 }
 
 pub fn router(store: Arc<Store>) -> Router {
-    let state = HubState { store };
+    let state = HubState {
+        store,
+        client: reqwest::Client::new(),
+    };
     Router::new()
         .route("/api/health", get(health))
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/nodes", post(register_node))
         .route("/api/nodes/{name}", delete(remove_node))
+        .route("/api/n/{node}", any(forward_node))
+        .route("/api/n/{node}/{*rest}", any(forward_node))
         .fallback(static_asset)
         .with_state(state)
 }
@@ -101,12 +110,11 @@ async fn health() -> Json<HubHealth> {
 
 async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, ApiError> {
     let nodes = state.store.nodes().await?;
-    Ok(Json(HubBootstrap {
-        nodes: nodes
-            .into_iter()
-            .map(|node| NodeSnapshot::unattached(node, None))
-            .collect(),
-    }))
+    let mut snapshots = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        snapshots.push(node_probe::inspect(&state.client, node).await);
+    }
+    Ok(Json(HubBootstrap { nodes: snapshots }))
 }
 
 async fn register_node(
@@ -122,10 +130,8 @@ async fn register_node(
         ));
     }
     let node = state.store.register_node(name, url.to_owned()).await?;
-    Ok((
-        StatusCode::CREATED,
-        Json(NodeSnapshot::unattached(node, None)),
-    ))
+    let snapshot = node_probe::inspect(&state.client, node).await;
+    Ok((StatusCode::CREATED, Json(snapshot)))
 }
 
 async fn remove_node(
@@ -135,6 +141,84 @@ async fn remove_node(
     let name = NodeName::parse(&name)?;
     state.store.remove_node(&name).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 节点作用域请求：剥掉 `/api/n/<node>` 前缀后原样转发，含 SSE 流式响应。
+async fn forward_node(
+    State(state): State<HubState>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let uri = request.uri().clone();
+    let (raw_name, rest) = split_node_path(uri.path())?;
+    let name = NodeName::parse(raw_name)?;
+    let node = lookup(&state, &name).await?;
+    let base = node_probe::base_url(&node);
+    if let Err(error) = node_probe::check_status(&state.client, &base).await {
+        return Err(ApiError::node_unavailable(error.detail().to_owned()));
+    }
+
+    let target = format!("{base}/api{rest}{}", query_suffix(uri.query()));
+
+    let method = request.method().clone();
+    let headers = request.headers().clone();
+    let body = reqwest::Body::wrap_stream(
+        request
+            .into_body()
+            .into_data_stream()
+            .map_err(std::io::Error::other),
+    );
+
+    let mut upstream = state.client.request(method, target);
+    for (name, value) in headers.iter() {
+        if is_hop_by_hop(name.as_str()) || name == header::HOST {
+            continue;
+        }
+        upstream = upstream.header(name, value);
+    }
+
+    let response = upstream
+        .body(body)
+        .send()
+        .await
+        .map_err(|error| ApiError::node_unavailable(format!("连接节点失败: {error}")))?;
+
+    let status = response.status();
+    let response_headers = response.headers().clone();
+    let stream = response.bytes_stream().map_err(std::io::Error::other);
+
+    let mut builder = Response::builder().status(status);
+    for (name, value) in response_headers.iter() {
+        if is_hop_by_hop(name.as_str()) {
+            continue;
+        }
+        builder = builder.header(name, value);
+    }
+
+    builder
+        .body(Body::from_stream(stream))
+        .map_err(|error| ApiError::node_unavailable(format!("构造转发响应失败: {error}")))
+}
+
+fn split_node_path(path: &str) -> Result<(&str, &str), ApiError> {
+    let remainder = path
+        .strip_prefix("/api/n/")
+        .ok_or_else(|| ApiError::unknown_node(format!("不是节点作用域路径: {path}")))?;
+    match remainder.find('/') {
+        Some(index) => Ok((&remainder[..index], &remainder[index..])),
+        None => Ok((remainder, "")),
+    }
+}
+
+async fn lookup(state: &HubState, name: &NodeName) -> Result<NodeMetadata, ApiError> {
+    state
+        .store
+        .node(name)
+        .await?
+        .ok_or_else(|| ApiError::unknown_node(format!("节点不存在: {name}")))
+}
+
+fn query_suffix(query: Option<&str>) -> String {
+    query.map(|query| format!("?{query}")).unwrap_or_default()
 }
 
 /// 请求体；反序列化失败时返回协议错误信封而非纯文本。
@@ -177,4 +261,18 @@ fn asset_response(path: &str, data: Vec<u8>) -> Response {
     let content_type = HeaderValue::from_str(mime.as_ref())
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     ([(header::CONTENT_TYPE, content_type)], data).into_response()
+}
+
+fn is_hop_by_hop(name: &str) -> bool {
+    matches!(
+        name,
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
 }

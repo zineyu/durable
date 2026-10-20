@@ -139,6 +139,13 @@ impl Store {
         self.commit(&changes).await.map(|_| ())
     }
 
+    /// 节点表中的单个节点。
+    ///
+    /// 失败：数据库读取失败或存储值不符合领域约束。
+    pub async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
+        self.storage.node(name).await
+    }
+
     /// 节点表中的全部节点，按注册顺序排列。
     ///
     /// 失败：数据库读取失败或存储值不符合领域约束。

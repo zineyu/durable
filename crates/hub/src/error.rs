@@ -25,6 +25,20 @@ impl ApiError {
     pub fn invalid_request(status: StatusCode, message: String) -> Self {
         Self::new(HubErrorCode::InvalidRequest, status, message)
     }
+
+    /// 节点名不在节点表中。
+    pub fn unknown_node(message: String) -> Self {
+        Self::new(HubErrorCode::UnknownNode, StatusCode::NOT_FOUND, message)
+    }
+
+    /// 节点不可达、协议版本不符，或转发失败。
+    pub fn node_unavailable(message: String) -> Self {
+        Self::new(
+            HubErrorCode::NodeUnavailable,
+            StatusCode::SERVICE_UNAVAILABLE,
+            message,
+        )
+    }
 }
 
 impl From<NodeNameError> for ApiError {

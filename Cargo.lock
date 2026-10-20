@@ -958,8 +958,10 @@ version = "0.1.0"
 dependencies = [
  "agent",
  "axum",
+ "bytes",
  "clap",
  "durable",
+ "futures-util",
  "mime_guess",
  "reqwest",
  "rust-embed",
