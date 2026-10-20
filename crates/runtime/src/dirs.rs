@@ -5,7 +5,7 @@
 //! `LOCALAPPDATA`。环境变量经 [`Env`] 注入，因此解析结果可测试。
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -19,6 +19,11 @@ pub struct AppDirs {
     pub logs: PathBuf,
 }
 
+/// 目录解析读取的环境变量名。空值按未设置处理。
+///
+/// 测试用它清除进程环境，使期望值可从同一个 `Env` 推导。
+pub const VARIABLES: [&str; 4] = ["HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "LOCALAPPDATA"];
+
 /// 目录解析读取的环境变量。空值按未设置处理。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Env {
@@ -31,11 +36,12 @@ pub struct Env {
 impl Env {
     /// 读取当前进程的环境。
     pub fn from_process() -> Self {
+        let [home, xdg_data_home, xdg_state_home, local_app_data] = VARIABLES.map(read);
         Self {
-            home: read("HOME"),
-            xdg_data_home: read("XDG_DATA_HOME"),
-            xdg_state_home: read("XDG_STATE_HOME"),
-            local_app_data: read("LOCALAPPDATA"),
+            home,
+            xdg_data_home,
+            xdg_state_home,
+            local_app_data,
         }
     }
 }
@@ -59,6 +65,43 @@ pub enum DirError {
 /// 失败：所需的基础环境变量缺失。
 pub fn app_dirs() -> Result<AppDirs, DirError> {
     resolve(&Env::from_process())
+}
+
+/// 启动路径：数据库文件与日志目录。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartupPaths {
+    pub database: PathBuf,
+    pub log_directory: PathBuf,
+}
+
+/// 解析启动路径：显式参数优先，缺省项落在标准目录。
+///
+/// `database_file` 是数据库在数据目录下的文件名。只在确有缺省项时读取进程环境，
+/// 因此同时给出两个路径时不需要基础环境变量。
+///
+/// 失败：缺省项需要标准目录，而所需的基础环境变量缺失。
+pub fn startup_paths(
+    database: Option<&Path>,
+    log_directory: Option<&Path>,
+    database_file: &str,
+) -> Result<StartupPaths, DirError> {
+    if let (Some(database), Some(log_directory)) = (database, log_directory) {
+        return Ok(StartupPaths {
+            database: database.to_path_buf(),
+            log_directory: log_directory.to_path_buf(),
+        });
+    }
+    let dirs = app_dirs()?;
+    Ok(StartupPaths {
+        database: match database {
+            Some(path) => path.to_path_buf(),
+            None => dirs.data.join(database_file),
+        },
+        log_directory: match log_directory {
+            Some(path) => path.to_path_buf(),
+            None => dirs.logs,
+        },
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -184,6 +227,16 @@ mod tests {
 
     #[cfg(not(any(target_os = "macos", windows)))]
     #[test]
+    fn unix_fails_when_only_data_home_is_set() {
+        let env = Env {
+            xdg_data_home: Some(PathBuf::from("/xdg/data")),
+            ..Env::default()
+        };
+        assert_eq!(resolve(&env), Err(DirError::MissingHome));
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    #[test]
     fn unix_accepts_xdg_variables_without_home() {
         let env = Env {
             xdg_data_home: Some(PathBuf::from("/xdg/data")),
@@ -193,6 +246,18 @@ mod tests {
         let dirs = resolve(&env).expect("解析目录");
         assert_eq!(dirs.data, PathBuf::from("/xdg/data/durable"));
         assert_eq!(dirs.logs, PathBuf::from("/xdg/state/durable/log"));
+    }
+
+    #[test]
+    fn explicit_startup_paths_skip_environment() {
+        let paths = startup_paths(
+            Some(Path::new("/data/agent.sqlite")),
+            Some(Path::new("/logs")),
+            "agent.sqlite",
+        )
+        .expect("显式路径不依赖环境变量");
+        assert_eq!(paths.database, PathBuf::from("/data/agent.sqlite"));
+        assert_eq!(paths.log_directory, PathBuf::from("/logs"));
     }
 
     #[cfg(windows)]

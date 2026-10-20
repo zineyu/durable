@@ -58,18 +58,15 @@ async fn main() -> ExitCode {
 
 fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>> {
     let address = agent::parse_listen_address(&arguments.listen)?;
-    let database = match &arguments.database {
-        Some(path) => path.clone(),
-        None => dirs::app_dirs()?.data.join(agent::DEFAULT_DATABASE_FILE),
-    };
-    let log_directory = match &arguments.log_dir {
-        Some(path) => path.clone(),
-        None => dirs::app_dirs()?.logs,
-    };
+    let paths = dirs::startup_paths(
+        arguments.database.as_deref(),
+        arguments.log_dir.as_deref(),
+        agent::DEFAULT_DATABASE_FILE,
+    )?;
     Ok(Prepared {
         address,
-        database,
-        log: LogConfig::new(log_directory, agent::LOG_FILE_PREFIX),
+        database: paths.database,
+        log: LogConfig::new(paths.log_directory, agent::LOG_FILE_PREFIX),
     })
 }
 
