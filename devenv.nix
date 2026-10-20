@@ -19,6 +19,12 @@
     cargo build --workspace
   '';
 
+  scripts.durable-e2e.exec = ''
+    set -e
+    durable-build
+    cd client && npx playwright test
+  '';
+
   scripts.durable-test.exec = ''
     set -e
     cd client && npm run lint && npm run typecheck && npm run test && cd ..

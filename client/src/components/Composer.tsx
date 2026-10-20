@@ -28,6 +28,7 @@ export function Composer({
     >
       <textarea
         className={styles.input}
+        aria-label="消息"
         value={value}
         placeholder={busy ? '当前 run 结束后执行队列中的消息' : '描述要完成的任务'}
         rows={3}

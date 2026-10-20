@@ -13,6 +13,7 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test` | Vitest（reducer、工具卡片、设计 token 与交互状态检查） |
+| `npm run test:e2e` | Playwright 端到端测试（真实 agent、hub 与浏览器） |
 | `npm run storybook` | Storybook 开发服务器，端口 6006 |
 | `npm run build-storybook` | 构建静态 Storybook 到 `client/storybook-static` |
 | `npm run screenshots` | 从 `storybook-static` 生成截图 |
@@ -24,6 +25,21 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 ```
 devenv shell -- durable-build
 ```
+
+## 端到端测试
+
+```
+devenv shell -- durable-build
+devenv shell -- bash -c 'cd client && npx playwright install chromium'
+devenv shell -- bash -c 'cd client && npm run test:e2e'
+```
+
+- `e2e/` 下的用例独享一套栈：脚本化 OpenAI 兼容 SSE 服务、真实 `agent`、真实 `hub`、临时 SQLite 与临时 workspace。
+- 断言只用用户可见文本与可访问名称；前置数据经 `hub` 的 HTTP API 准备。
+- 模型回答由 `e2e/support/model-server.ts` 的脚本队列决定。`hold` 脚本先流式返回文本再挂起，用于观察运行中的 run，测试调用 `release()` 收尾。
+- 每个测试使用随机端口与临时目录，可并行执行。
+- 失败时 `test-results/` 保存截图、trace 与页面快照；`npx playwright show-trace <trace.zip>` 可回放。
+- 决策见 `../docs/adr/0025-browser-e2e.md`。
 
 ## Storybook
 
