@@ -1,4 +1,6 @@
 > 主 issue: #1
+>
+> 多节点 hub 的增补与修订见 `docs/specs/multi-node-hub.md`。
 
 # 规格：Rust + React 的最小 C/S 架构 coding agent
 
@@ -10,7 +12,7 @@
 
 ## 目标
 
-- 本机单用户运行，两个二进制可独立启动与重启。
+- 本机单用户运行；`agent` 与 `hub` 两个二进制可独立启动与重启。
 - 多 workspace 注册；多 session 并发；session 内持久 FIFO 队列。
 - 工具：`read_file`、`write_file`、`edit_file`、`bash`。工具自动执行，路径限定在 session 所属 workspace 根内。
 - 流式输出经单一 SSE 流送达所有标签页；断线按游标续传。
@@ -21,7 +23,7 @@
 
 ## 非目标
 
-- 远程部署、多用户、鉴权、TLS 终止。
+- 多用户与用户身份、鉴权、TLS 终止。跨机器访问由多节点 hub 承载，见 `docs/specs/multi-node-hub.md`。
 - 容器或沙箱隔离、命令白名单、网络限制、工具审批。
 - `list_dir` 工具；目录探查由 `bash` 完成。
 - diff 渲染、语法高亮、图片或文件附件、语音输入。
@@ -53,7 +55,7 @@
 11. 作为用户，我可以删除尚未开始的队列项；已开始的 run 只能取消，不能删除。
 12. 作为用户，当工具执行失败（文件不存在、编辑不唯一、非零退出、超时）时，错误作为工具结果回传模型，run 继续。
 13. 作为用户，当模型请求失败、超出上下文上限或超出步数上限时，run 以明确错误结束，队列继续；UI 显示错误类别与说明。
-14. 作为用户，我可以同时运行多个 session 的 run。全局并发槽位默认 4；超出时排队等待，不报错。
+14. 作为用户，我可以同时运行多个 session 的 run，没有并发上限。session 内仍按 FIFO 串行。
 15. 作为用户，我在同一个 session 的上一个 run 未结束时提交新消息，消息进入队列，不打断当前 run。
 
 ### 分支历史
@@ -93,10 +95,10 @@
 
 ### 进程与部署
 
-- 两个 Rust 二进制：`agent` 与 `ui`。两者默认只监听 `127.0.0.1`。
+- 两个 Rust 二进制：`agent` 与 `hub`（原 `ui`）。两者默认只监听 `127.0.0.1`。
 - `agent` 只提供 HTTP API，不托管前端资源。启动参数包含监听地址、SQLite 路径、可重复的初始 workspace 路径。模型配置经环境变量提供。
-- `ui` 内嵌构建后的 React 静态资源并托管；把 `/api/*` 原样反代到 agent，包含 SSE：不缓冲、不聚合、不修改事件流。启动参数包含监听地址、agent 地址。
-- 浏览器始终同源访问 `ui`，不需要 CORS。鉴权、TLS、远程绑定不在本规格内。
+- `hub` 内嵌构建后的 React 静态资源并托管，持有节点表，把全部 node 的协议合并成单一 `/api/*` 与单一事件流。启动参数包含监听地址与 `hub` 数据库路径。细节见 `docs/specs/multi-node-hub.md`。
+- 浏览器始终同源访问 `hub`，不需要 CORS。鉴权、TLS、公网监听不在本规格内。
 - `agent` 缺少必需配置时启动失败，错误信息指出缺失项。
 
 ### 协议
@@ -121,13 +123,13 @@
 
 - 每个 session 有 FIFO 队列。入队即持久化；run 结束（成功、失败、取消）后自动取下一项。
 - 队列项在开始执行时成为当前 active leaf 的子消息节点。
-- 全局并发槽位默认 4，可配置；session 间公平轮转。
+- 全局并发槽位不存在。session 内 run 严格串行，session 之间没有上限。
 - 每个 run 有状态：queued、running、succeeded、failed、cancelled。session 存在 running 的 run 时视为忙碌。
 
 ```mermaid
 stateDiagram-v2
     [*] --> queued
-    queued --> running: 获得并发槽位
+    queued --> running: 取出队首即启动
     running --> succeeded: assistant 不再请求工具
     running --> failed: 模型错误 / 上下文超限 / 步数超限 / 进程中断
     running --> cancelled: 用户取消 / 删除 session
@@ -189,14 +191,14 @@ stateDiagram-v2
 ### 工程编排
 
 - `devenv.nix` 提供 Rust（stable + clippy + rustfmt）与 Node + npm，并提供构建 agent、构建 client、运行测试、生成类型、启动 Storybook 的命令入口。
-- Cargo workspace 包含 `agent` 与 `ui` 两个 crate；协议类型与 `ts-rs` 导出位于 agent。
+- Cargo workspace 包含 `agent` 与 `hub` 两个 crate；协议类型与 `ts-rs` 导出位于 agent。
 - 前端使用 npm + Vite + React + TypeScript + Storybook + Chromatic + Vitest。
 - Storybook：每个纯展示组件与页面组合提供 stories，数据来自静态 fixture。
-- 生成物：前端固定目录下的 TS 协议类型；`ui` 内嵌的 client 构建产物。
+- 生成物：前端固定目录下的 TS 协议类型；`hub` 内嵌的 client 构建产物。
 
 ## 测试决策
 
-测试 seam 共两个。两个 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。
+测试 seam 共两个。两个 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`hub` 的合并协议与总线由多节点规格新增的 Seam 3 覆盖。
 
 ### Seam 1：`agent` 的 HTTP API
 
@@ -204,7 +206,7 @@ stateDiagram-v2
 
 **防止**：协议契约漂移；agent 循环与工具调度回归；队列与并发调度错误；分支与 active leaf 状态错误；持久化与恢复错误；取消与失败语义错误；路径边界绕过。
 
-**漏掉**：真实供应商的行为差异与限流；真实模型输出质量；浏览器渲染与网络行为；`ui` 代理的流式转发细节（由人工冒烟验证覆盖）。
+**漏掉**：真实供应商的行为差异与限流；真实模型输出质量；浏览器渲染与网络行为；多节点合并与广播（由 `docs/specs/multi-node-hub.md` 的 Seam 3 覆盖）。
 
 **覆盖模块**：协议序列化、调度器、run 引擎、provider HTTP 客户端、工具执行器、消息树与事件存储、SQLite 迁移与恢复、bootstrap 与回放。
 
@@ -227,7 +229,7 @@ stateDiagram-v2
 
 **漏掉**：真实 SSE 传输与重连计时；浏览器渲染与视觉状态（由 Storybook 与 Chromatic 覆盖）。
 
-**覆盖模块**：事件归约、消息树到 transcript 的路径计算、队列与 run 状态映射、active leaf 切换、bootstrap 合并。
+**覆盖模块**：事件归约、消息树到 transcript 的路径计算、队列与 run 状态映射、active leaf 切换、bootstrap 合并。多节点下 reducer 按节点分片调用，分片之间互不影响。
 
 不设置 provider trait 级契约 seam：provider 的 HTTP 客户端由 seam 1 经脚本化服务真实覆盖。
 
@@ -267,7 +269,7 @@ stateDiagram-v2
 
 ### 安全与信任边界
 
-- 只绑定 `127.0.0.1`；单用户；无鉴权。任何能访问该端口的本机进程都能操作 workspace。
+- 只绑定 `127.0.0.1`；单用户；无鉴权。任何能访问该端口的本机进程都能操作 workspace。跨机器访问的信任边界由用户自建隧道提供，见 `docs/specs/multi-node-hub.md`。
 - 工具自动执行且 `bash` 无沙箱与网络限制。安全边界只有 workspace root containment 与用户对本机环境的信任。
 - agent 进程被强制杀死时，已启动的 bash 子进程可能残留；本规格只保证正常运行期与取消路径下杀掉进程组。
 - 模型输出视为不可信输入，但工具执行不对其做内容审查；路径约束是唯一强制限制。
