@@ -1,0 +1,20 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  padding: var(--space-0-5) var(--space-2);
+  border: var(--border-hairline) solid var(--color-border-2);
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.badge[data-status='unreachable'] {
+  color: var(--color-danger-text);
+}
+
+.badge[data-status='incompatible'] {
+  color: var(--color-warn-text);
+}

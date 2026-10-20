@@ -4,9 +4,9 @@ import { api } from './api/client';
 import type { ApiFailure, ApiResult } from './api/client';
 import { openEventStream } from './api/events';
 import type { EventStream } from './api/events';
-import type { BootstrapResponse } from './api/generated/BootstrapResponse';
+import type { HubBootstrap } from './api/generated/HubBootstrap';
 import type { MessageNode } from './api/generated/MessageNode';
-import type { SessionTree } from './api/generated/SessionTree';
+import type { NodeName } from './api/generated/NodeName';
 import { AppShell } from './components/AppShell';
 import { AssistantContent } from './components/AssistantContent';
 import { AssistantMessage } from './components/AssistantMessage';
@@ -24,16 +24,18 @@ import { toQueueItemId, toSessionId, toWorkspacePath } from './view/ids';
 import type { SessionId, WorkspacePath } from './view/ids';
 import {
   branchPosition,
-  initialClientState,
   messageView,
-  reduce,
+  sessionById,
   sessionQueue,
   sidebarWorkspaces,
   snapshotCursor,
   transcriptNodes,
-} from './view/reducer';
-import { readSessionFromHash, writeSessionToHash } from './view/session-hash';
-import type { BranchControl, SessionState } from './view/types';
+} from './view/node-state';
+import { initialClientState, reduce } from './view/reducer';
+import type { ClientState } from './view/reducer';
+import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
+import { nodeStatusLabel } from './view/labels';
+import type { BranchControl, NodeRecord, SessionState } from './view/types';
 
 type DialogState =
   | { kind: 'edit'; sessionId: string; messageId: number; text: string }
@@ -50,14 +52,48 @@ function sessionStateOf(busy: boolean, queueLength: number): SessionState {
   return queueLength > 0 ? 'queued' : 'idle';
 }
 
+function initialStateFromHash(): ClientState {
+  const location = readLocationFromHash(window.location.hash);
+  return reduce(initialClientState, { type: 'select-node', node: location?.node ?? null });
+}
+
+/// 侧栏顶部切换器下方的说明。节点可用时没有说明。
+function unavailableNotice(
+  selected: NodeName | null,
+  record: NodeRecord | undefined,
+): string | null {
+  if (selected === null) {
+    return null;
+  }
+  if (record === undefined) {
+    return '未知节点，节点表里没有这个名字';
+  }
+  if (record.status === 'ok') {
+    return null;
+  }
+  return record.detail ?? nodeStatusLabel[record.status];
+}
+
 export function App() {
-  const [state, dispatch] = useReducer(reduce, initialClientState);
-  const [selectedSessionId, setSelectedSessionId] = useState<SessionId | null>(() =>
-    readSessionFromHash(window.location.hash),
+  const [state, dispatch] = useReducer(reduce, undefined, initialStateFromHash);
+  const [selectedSessionId, setSelectedSessionId] = useState<SessionId | null>(
+    () => readLocationFromHash(window.location.hash)?.sessionId ?? null,
   );
   const [editing, setEditing] = useState<SessionEditing | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [draft, setDraft] = useState('');
+
+  const selectedNode = state.hub.selected;
+  const record =
+    selectedNode === null
+      ? undefined
+      : state.hub.nodes.find((entry) => entry.name === selectedNode);
+  const shard = selectedNode === null ? undefined : state.nodes[selectedNode];
+  const session =
+    shard === undefined || selectedSessionId === null
+      ? undefined
+      : sessionById(shard, selectedSessionId);
+  const nodeReady = record?.status === 'ok';
 
   const report = useCallback((failure: ApiFailure) => {
     dispatch({ type: 'error', error: { code: failure.code, message: failure.message } });
@@ -77,33 +113,62 @@ export function App() {
 
   const streamRef = useRef<EventStream | null>(null);
   const cursorRef = useRef<number | null>(null);
-  const selectedRef = useRef<SessionId | null>(selectedSessionId);
+  const selectionRef = useRef<{ node: NodeName | null; sessionId: SessionId | null }>({
+    node: selectedNode,
+    sessionId: selectedSessionId,
+  });
 
   useEffect(() => {
-    selectedRef.current = selectedSessionId;
-  }, [selectedSessionId]);
-
-  const applyBootstrap = useCallback((bootstrap: BootstrapResponse): number => {
-    const cursor = snapshotCursor(cursorRef.current, bootstrap.maxEventId);
-    cursorRef.current = cursor;
-    dispatch({ type: 'bootstrap', bootstrap });
-    return cursor;
-  }, []);
-
-  const applyTree = useCallback((tree: SessionTree): number => {
-    const cursor = snapshotCursor(cursorRef.current, tree.maxEventId);
-    cursorRef.current = cursor;
-    dispatch({ type: 'tree', tree });
-    return cursor;
-  }, []);
+    cursorRef.current = state.hub.cursor;
+  }, [state.hub.cursor]);
 
   useEffect(() => {
-    const handleHashChange = () => {
-      setSelectedSessionId(readSessionFromHash(window.location.hash));
+    selectionRef.current = { node: selectedNode, sessionId: selectedSessionId };
+  }, [selectedNode, selectedSessionId]);
+
+  useEffect(() => {
+    const apply = () => {
+      const next = readLocationFromHash(window.location.hash);
+      dispatch({ type: 'select-node', node: next?.node ?? null });
+      setSelectedSessionId(next?.sessionId ?? null);
     };
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
+    window.addEventListener('hashchange', apply);
+    return () => window.removeEventListener('hashchange', apply);
   }, []);
+
+  useEffect(() => {
+    setDialog(null);
+    setEditing(null);
+  }, [selectedNode]);
+
+  const missingKey = state.hub.nodes
+    .filter((entry) => entry.status === 'ok' && state.nodes[entry.name] === undefined)
+    .map((entry) => entry.name)
+    .join(',');
+
+  useEffect(() => {
+    if (missingKey === '') {
+      return;
+    }
+    const missing = missingKey.split(',');
+    let active = true;
+    void (async () => {
+      for (const name of missing) {
+        const outcome = await api.nodeBootstrap(name);
+        if (!active) {
+          return;
+        }
+        if (!outcome.ok) {
+          report(outcome.error);
+          continue;
+        }
+        dispatch({ type: 'node-bootstrap', node: name, bootstrap: outcome.value });
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [missingKey, report]);
 
   useEffect(() => {
     let active = true;
@@ -123,10 +188,11 @@ export function App() {
         report(outcome.error);
         return null;
       }
-      applyBootstrap(outcome.value);
-      const sessionId = selectedRef.current;
-      if (sessionId !== null) {
-        const tree = await api.sessionTree(sessionId);
+      const cursor = snapshotCursor(cursorRef.current, outcome.value.maxHubSeq);
+      dispatch({ type: 'bootstrap', bootstrap: outcome.value });
+      const selection = selectionRef.current;
+      if (selection.node !== null && selection.sessionId !== null) {
+        const tree = await api.sessionTree(selection.node, selection.sessionId);
         if (!active) {
           return null;
         }
@@ -134,9 +200,9 @@ export function App() {
           report(tree.error);
           return null;
         }
-        applyTree(tree.value);
+        dispatch({ type: 'tree', node: selection.node, tree: tree.value });
       }
-      return cursorRef.current;
+      return cursor;
     };
 
     const reconnect = async () => {
@@ -156,7 +222,9 @@ export function App() {
       }
     };
 
-    const connect = (cursor: number) => {
+    const connect = (bootstrap: HubBootstrap) => {
+      const cursor = snapshotCursor(cursorRef.current, bootstrap.maxHubSeq);
+      dispatch({ type: 'bootstrap', bootstrap });
       streamRef.current = openEventStream(cursor, {
         onEvent: (event) => dispatch({ type: 'stream', event }),
         onState: (connection) => dispatch({ type: 'connection', connection }),
@@ -176,7 +244,7 @@ export function App() {
         dispatch({ type: 'connection', connection: 'disconnected' });
         return;
       }
-      connect(applyBootstrap(outcome.value));
+      connect(outcome.value);
     })();
 
     return () => {
@@ -187,22 +255,19 @@ export function App() {
       streamRef.current?.close();
       streamRef.current = null;
     };
-  }, [report, applyBootstrap, applyTree]);
+  }, [report]);
 
-  const session =
-    selectedSessionId === null
-      ? undefined
-      : state.sessions.find((candidate) => candidate.id === selectedSessionId);
   const sessionExists = session !== undefined;
 
   useEffect(() => {
-    if (selectedSessionId === null || !sessionExists) {
+    if (selectedNode === null || selectedSessionId === null || !sessionExists) {
       return;
     }
+    const node = selectedNode;
     const id = selectedSessionId;
     let active = true;
     void (async () => {
-      const outcome = await api.sessionTree(id);
+      const outcome = await api.sessionTree(node, id);
       if (!active) {
         return;
       }
@@ -210,40 +275,54 @@ export function App() {
         report(outcome.error);
         return;
       }
-      const previous = cursorRef.current;
-      const cursor = applyTree(outcome.value);
-      if (previous !== null && cursor < previous) {
-        streamRef.current?.resume(cursor);
-      }
+      dispatch({ type: 'tree', node, tree: outcome.value });
     })();
     return () => {
       active = false;
     };
-  }, [selectedSessionId, sessionExists, report, applyTree]);
+  }, [selectedNode, selectedSessionId, sessionExists, report]);
 
-  const selectSession = useCallback((id: SessionId) => {
-    window.location.hash = writeSessionToHash(id);
+  const selectNode = useCallback((node: NodeName) => {
+    window.location.hash = writeLocationToHash(node, null);
   }, []);
+
+  const selectSession = useCallback(
+    (id: SessionId) => {
+      if (selectedNode === null) {
+        return;
+      }
+      window.location.hash = writeLocationToHash(selectedNode, id);
+    },
+    [selectedNode],
+  );
 
   const handleCreateSession = useCallback(
     (workspace: WorkspacePath) => {
+      if (selectedNode === null) {
+        return;
+      }
+      const node = selectedNode;
       void (async () => {
-        const outcome = await api.createSession(workspace, null);
+        const outcome = await api.createSession(node, workspace, null);
         if (!outcome.ok) {
           report(outcome.error);
           return;
         }
-        dispatch({ type: 'session', session: outcome.value });
-        window.location.hash = writeSessionToHash(toSessionId(outcome.value.id));
+        dispatch({ type: 'session', node, session: outcome.value });
+        window.location.hash = writeLocationToHash(node, toSessionId(outcome.value.id));
       })();
     },
-    [report],
+    [selectedNode, report],
   );
 
   const handleRenameSubmit = useCallback(
     (id: SessionId, title: string) => {
+      if (selectedNode === null) {
+        return;
+      }
+      const node = selectedNode;
       void (async () => {
-        const outcome = await api.renameSession(id, title);
+        const outcome = await api.renameSession(node, id, title);
         if (!outcome.ok) {
           report(outcome.error);
           return;
@@ -251,71 +330,77 @@ export function App() {
         setEditing(null);
       })();
     },
-    [report],
+    [selectedNode, report],
   );
 
   const handleDeleteConfirm = useCallback(
     (id: SessionId) => {
+      if (selectedNode === null) {
+        return;
+      }
+      const node = selectedNode;
       void (async () => {
-        const outcome = await api.deleteSession(id);
+        const outcome = await api.deleteSession(node, id);
         if (!outcome.ok) {
           report(outcome.error);
           return;
         }
         setEditing(null);
         if (id === selectedSessionId) {
-          window.location.hash = '';
+          window.location.hash = writeLocationToHash(node, null);
         }
       })();
     },
-    [report, selectedSessionId],
+    [selectedNode, selectedSessionId, report],
   );
 
   const handleSend = useCallback(() => {
-    if (session === undefined) {
+    if (selectedNode === null || session === undefined) {
       return;
     }
     const text = draft.trim();
     if (text.length === 0) {
       return;
     }
+    const node = selectedNode;
     const id = session.id;
     void (async () => {
-      const outcome = await api.submitMessage(id, text);
+      const outcome = await api.submitMessage(node, id, text);
       if (!outcome.ok) {
         report(outcome.error);
         return;
       }
       setDraft('');
     })();
-  }, [draft, session, report]);
+  }, [draft, session, selectedNode, report]);
 
   const handleCancelRun = useCallback(() => {
-    if (session === undefined) {
+    if (selectedNode === null || session === undefined) {
       return;
     }
-    runCommand(api.cancelRun(session.id));
-  }, [session, runCommand]);
+    runCommand(api.cancelRun(selectedNode, session.id));
+  }, [session, selectedNode, runCommand]);
 
   const handleDialogConfirm = useCallback(() => {
-    if (dialog === null) {
+    if (dialog === null || selectedNode === null) {
       return;
     }
+    const node = selectedNode;
     const current = dialog;
     void (async () => {
       let outcome: ApiResult<unknown>;
       switch (current.kind) {
         case 'edit':
-          outcome = await api.editUserMessage(current.sessionId, current.messageId, current.text);
+          outcome = await api.editUserMessage(node, current.sessionId, current.messageId, current.text);
           break;
         case 'retry':
-          outcome = await api.retryAssistantMessage(current.sessionId, current.messageId);
+          outcome = await api.retryAssistantMessage(node, current.sessionId, current.messageId);
           break;
         case 'register-workspace':
-          outcome = await api.registerWorkspace(current.path);
+          outcome = await api.registerWorkspace(node, current.path);
           break;
         case 'remove-workspace':
-          outcome = await api.removeWorkspace(current.path);
+          outcome = await api.removeWorkspace(node, current.path);
           break;
         default: {
           const unhandled: never = current;
@@ -328,15 +413,50 @@ export function App() {
       }
       setDialog(null);
     })();
-  }, [dialog, report]);
+  }, [dialog, selectedNode, report]);
 
-  const branchControl = useCallback(
-    (
-      sessionId: string,
-      idle: boolean,
-      node: MessageNode,
-    ): { branch?: BranchControl } => {
-      const position = branchPosition(state, sessionId, node);
+  const renderMain = (): ReactNode => {
+    if (selectedNode === null) {
+      return (
+        <EmptyState
+          title="选择一个节点"
+          description="在左侧节点切换器中选择一台机器。"
+        />
+      );
+    }
+    if (record === undefined) {
+      return (
+        <EmptyState
+          title="未知节点"
+          description={`节点 ${selectedNode} 不在节点表里。它可能已被删除或改名。`}
+        />
+      );
+    }
+    if (record.status !== 'ok') {
+      return (
+        <EmptyState
+          title="节点不可用"
+          description={record.detail ?? nodeStatusLabel[record.status]}
+        />
+      );
+    }
+    if (shard === undefined || session === undefined) {
+      return (
+        <EmptyState
+          title="选择一个 session"
+          description="从左侧选择 session，或者注册新的 workspace 后创建 session。"
+          actionLabel="注册 workspace"
+          onAction={() => setDialog({ kind: 'register-workspace', path: '' })}
+        />
+      );
+    }
+
+    const current = session;
+    const idle = !current.busy && current.queueLength === 0;
+    const nodeName = record.name;
+
+    const controls = (message: MessageNode): { branch?: BranchControl } => {
+      const position = branchPosition(shard, current.id, message);
       if (position === null) {
         return {};
       }
@@ -347,71 +467,104 @@ export function App() {
       const previousId = position.previousId;
       const nextId = position.nextId;
       if (previousId !== null) {
-        control.onPrev = () => runCommand(api.switchActiveLeaf(sessionId, previousId));
+        control.onPrev = () =>
+          runCommand(api.switchActiveLeaf(nodeName, current.id, previousId));
       }
       if (nextId !== null) {
-        control.onNext = () => runCommand(api.switchActiveLeaf(sessionId, nextId));
+        control.onNext = () => runCommand(api.switchActiveLeaf(nodeName, current.id, nextId));
       }
       return { branch: control };
-    },
-    [state, runCommand],
-  );
+    };
 
-  const workspaces = sidebarWorkspaces(state);
-  const isIdle = session !== undefined && !session.busy && session.queueLength === 0;
-  const queue =
-    session === undefined
-      ? []
-      : sessionQueue(state, session.id).map((item) => ({
-          id: toQueueItemId(String(item.id)),
-          text: item.text,
-        }));
-
-  const entries =
-    session === undefined
-      ? []
-      : transcriptNodes(state, session.id).map((node) => {
-          if (node.role === 'user') {
-            return (
-              <UserMessage
-                key={node.id}
-                text={node.text}
-                onEdit={() =>
-                  setDialog({
-                    kind: 'edit',
-                    sessionId: session.id,
-                    messageId: node.id,
-                    text: node.text,
-                  })
-                }
-                editDisabled={!isIdle}
-                {...branchControl(session.id, isIdle, node)}
-              />
-            );
+    const entries = transcriptNodes(shard, current.id).map((message) => {
+      if (message.role === 'user') {
+        return (
+          <UserMessage
+            key={message.id}
+            text={message.text}
+            onEdit={() =>
+              setDialog({
+                kind: 'edit',
+                sessionId: current.id,
+                messageId: message.id,
+                text: message.text,
+              })
+            }
+            editDisabled={!idle}
+            {...controls(message)}
+          />
+        );
+      }
+      const view = messageView(shard, current.id, message);
+      return (
+        <AssistantMessage
+          key={message.id}
+          state={view.state}
+          {...(view.note === null ? {} : { note: view.note })}
+          onRetry={() =>
+            setDialog({ kind: 'retry', sessionId: current.id, messageId: message.id })
           }
-          const view = messageView(state, session.id, node);
-          return (
-            <AssistantMessage
-              key={node.id}
-              state={view.state}
-              {...(view.note === null ? {} : { note: view.note })}
-              onRetry={() =>
-                setDialog({ kind: 'retry', sessionId: session.id, messageId: node.id })
-              }
-              retryDisabled={!isIdle}
-              {...branchControl(session.id, isIdle, node)}
-            >
-              <AssistantContent text={node.text} toolCalls={node.toolCalls} />
-            </AssistantMessage>
-          );
-        });
+          retryDisabled={!idle}
+          {...controls(message)}
+        >
+          <AssistantContent text={message.text} toolCalls={message.toolCalls} />
+        </AssistantMessage>
+      );
+    });
+
+    const queue = sessionQueue(shard, current.id).map((item) => ({
+      id: toQueueItemId(String(item.id)),
+      text: item.text,
+    }));
+
+    return (
+      <>
+        <MainHeader
+          node={nodeName}
+          nodeStatus={record.status}
+          nodeDetail={record.detail}
+          title={current.title}
+          workspacePath={toWorkspacePath(current.workspace)}
+          state={sessionStateOf(current.busy, current.queueLength)}
+          connection={state.connection}
+        />
+        <Transcript>
+          {entries.length === 0 ? (
+            <EmptyState title="还没有消息" description="在下方输入框提交第一条消息。" />
+          ) : (
+            entries
+          )}
+        </Transcript>
+        <QueueStrip
+          items={queue}
+          onRemove={(viewId) =>
+            runCommand(api.removeQueueItem(nodeName, current.id, Number(viewId)))
+          }
+        />
+        <Composer
+          value={draft}
+          onChange={setDraft}
+          onSend={handleSend}
+          {...(current.busy ? { onCancel: handleCancelRun } : {})}
+        />
+      </>
+    );
+  };
+
+  const workspaces = shard === undefined ? [] : sidebarWorkspaces(shard);
+  const notice = unavailableNotice(selectedNode, record);
 
   return (
     <>
       <AppShell
         sidebar={
           <Sidebar
-            modelName={state.modelName}
+            nodes={state.hub.nodes}
+            selectedNode={selectedNode}
+            onSelectNode={selectNode}
+            notice={notice}
+            commandsDisabled={!nodeReady}
+            modelName={shard?.modelName ?? ''}
             workspaces={workspaces}
             selectedSessionId={selectedSessionId}
             editing={editing}
@@ -434,40 +587,7 @@ export function App() {
             onDismiss={() => dispatch({ type: 'dismiss-error' })}
           />
         ) : null}
-        {session === undefined ? (
-          <EmptyState
-            title="选择一个 session"
-            description="从左侧选择 session，或者注册新的 workspace 后创建 session。"
-            actionLabel="注册 workspace"
-            onAction={() => setDialog({ kind: 'register-workspace', path: '' })}
-          />
-        ) : (
-          <>
-            <MainHeader
-              title={session.title}
-              workspacePath={toWorkspacePath(session.workspace)}
-              state={sessionStateOf(session.busy, session.queueLength)}
-              connection={state.connection}
-            />
-            <Transcript>
-              {entries.length === 0 ? (
-                <EmptyState title="还没有消息" description="在下方输入框提交第一条消息。" />
-              ) : (
-                entries
-              )}
-            </Transcript>
-            <QueueStrip
-              items={queue}
-              onRemove={(viewId) => runCommand(api.removeQueueItem(session.id, Number(viewId)))}
-            />
-            <Composer
-              value={draft}
-              onChange={setDraft}
-              onSend={handleSend}
-              {...(session.busy ? { onCancel: handleCancelRun } : {})}
-            />
-          </>
-        )}
+        {renderMain()}
       </AppShell>
       {dialog !== null ? (
         <Dialog

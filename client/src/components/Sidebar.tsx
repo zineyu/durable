@@ -1,10 +1,12 @@
 import { Button } from './Button';
+import { NodeSwitcher } from './NodeSwitcher';
 import { SessionListItem } from './SessionListItem';
 import { WorkspaceGroup } from './WorkspaceGroup';
 import styles from './Sidebar.module.css';
 import type { SessionItemView } from './SessionListItem';
+import type { NodeName } from '../api/generated/NodeName';
 import type { SessionId, WorkspacePath } from '../view/ids';
-import type { WorkspaceSummary } from '../view/types';
+import type { NodeRecord, WorkspaceSummary } from '../view/types';
 
 export type SessionEditing = {
   sessionId: SessionId;
@@ -12,6 +14,12 @@ export type SessionEditing = {
 };
 
 export type SidebarProps = {
+  nodes: NodeRecord[];
+  selectedNode: NodeName | null;
+  onSelectNode?: (node: NodeName) => void;
+  /// 节点不可用或未知时的说明，替换空列表提示。
+  notice?: string | null;
+  commandsDisabled?: boolean;
   modelName: string;
   workspaces: WorkspaceSummary[];
   selectedSessionId: SessionId | null;
@@ -28,6 +36,11 @@ export type SidebarProps = {
 };
 
 export function Sidebar({
+  nodes,
+  selectedNode,
+  onSelectNode,
+  notice = null,
+  commandsDisabled = false,
   modelName,
   workspaces,
   selectedSessionId,
@@ -48,8 +61,15 @@ export function Sidebar({
         <span className={styles.brandName}>durable</span>
         <span className={styles.model}>{modelName}</span>
       </header>
+      <NodeSwitcher
+        nodes={nodes}
+        selected={selectedNode}
+        {...(onSelectNode ? { onSelect: onSelectNode } : {})}
+      />
       <div className={styles.list}>
-        {workspaces.length === 0 ? (
+        {notice !== null ? (
+          <p className={styles.notice}>{notice}</p>
+        ) : workspaces.length === 0 ? (
           <p className={styles.empty}>还没有 workspace。注册一个目录后即可创建 session。</p>
         ) : null}
         {workspaces.map((workspace) => (
@@ -81,7 +101,12 @@ export function Sidebar({
         ))}
       </div>
       <footer className={styles.footer}>
-        <Button variant="secondary" onClick={onAddWorkspace} className={styles.addButton}>
+        <Button
+          variant="secondary"
+          onClick={onAddWorkspace}
+          className={styles.addButton}
+          disabled={commandsDisabled}
+        >
           注册 workspace
         </Button>
       </footer>

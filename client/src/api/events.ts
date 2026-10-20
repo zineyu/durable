@@ -1,8 +1,8 @@
 import type { ConnectionState } from '../view/types';
-import type { StreamEvent } from './generated/StreamEvent';
+import type { HubStreamEvent } from './generated/HubStreamEvent';
 
 export type EventStreamHandlers = {
-  onEvent: (event: StreamEvent) => void;
+  onEvent: (event: HubStreamEvent) => void;
   onState: (state: ConnectionState) => void;
   onDisconnect: () => void;
 };
@@ -12,8 +12,8 @@ export type EventStream = {
   close: () => void;
 };
 
-/// 订阅全局事件流。连接中断或 server 要求 resync 时通知调用方；
-/// 调用方刷新快照后调用 `resume` 从给定游标重开。
+/// 订阅 hub 的合并事件流。连接中断或 hub 要求 resync 时通知调用方；
+/// 调用方刷新合并 bootstrap 后调用 `resume` 从给定广播序号重开。
 export function openEventStream(after: number, handlers: EventStreamHandlers): EventStream {
   let source: EventSource | null = null;
   let closed = false;
@@ -27,7 +27,7 @@ export function openEventStream(after: number, handlers: EventStreamHandlers): E
     stream.onopen = () => handlers.onState('connected');
     stream.onmessage = (message) => {
       const data: unknown = JSON.parse(message.data);
-      const event = data as StreamEvent;
+      const event = data as HubStreamEvent;
       handlers.onEvent(event);
       if (event.type === 'resync') {
         disconnect();

@@ -1,3 +1,5 @@
+import type { NodeName } from '../api/generated/NodeName';
+import type { NodeStatus } from '../api/generated/NodeStatus';
 import type { QueueItemId, SessionId, WorkspaceId, WorkspacePath } from './ids';
 
 export type SessionState = 'idle' | 'queued' | 'running';
@@ -38,4 +40,12 @@ export type BranchControl = {
   total: number;
   onPrev?: () => void;
   onNext?: () => void;
+};
+
+/// 节点表的一项。`detail` 是节点状态的具体说明。
+export type NodeRecord = {
+  name: NodeName;
+  url: string;
+  status: NodeStatus;
+  detail: string | null;
 };

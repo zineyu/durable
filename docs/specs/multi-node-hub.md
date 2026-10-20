@@ -224,8 +224,9 @@ stateDiagram-v2
 
 ## Further Notes
 
-- 决策记录：ADR 0021（`hub` 作为总线）、ADR 0022（节点名即身份）、ADR 0023（移除并发槽位）。ADR 0003 与 0014 已标注并发槽位部分被 0023 取代。
+- 决策记录：ADR 0021（`hub` 作为总线）、ADR 0022（节点名即身份）、ADR 0023（移除并发槽位）、ADR 0024（客户端分片状态与广播游标）。ADR 0003 与 0014 已标注并发槽位部分被 0023 取代；ADR 0018 已标注客户端游标部分被 0024 取代。
 - 本文与 `docs/specs/multi-node-hub.md` 同源，并已发布为 issue #11。
 - 主规格 `docs/specs/rust-react-coding-agent.md` 已完成定点修订：删除被推翻的非目标、`ui` 改为 `hub`、删除并发槽位、指向本规格。
 - 器件与环境命名待同步：二进制重命名后，`AGENTS.md` 的目录表与命令表、`devenv.nix` 的命令入口都要从 `ui` 改为 `hub`。
 - 建议的纵向切片顺序（每片独立通过 `durable-test`）：① `agent` 的 `protocol_version` 与移除并发槽位；② `hub` 的节点表与迁移；③ `hub` 的合并 bootstrap 与节点作用域转发；④ `hub` 的总线与回放窗口；⑤ client 的节点切换器与分片状态。
+- 切片 ⑤ 未包含页面内的节点注册、改名与删除；节点表仍只能经 `POST /api/nodes` 与 `DELETE /api/nodes/{name}` 维护。

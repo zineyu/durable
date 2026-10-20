@@ -3,7 +3,11 @@ import type { CreateSessionRequest } from './generated/CreateSessionRequest';
 import type { EditMessageRequest } from './generated/EditMessageRequest';
 import type { ErrorCode } from './generated/ErrorCode';
 import type { ErrorResponse } from './generated/ErrorResponse';
+import type { HubBootstrap } from './generated/HubBootstrap';
+import type { HubErrorCode } from './generated/HubErrorCode';
+import type { HubErrorResponse } from './generated/HubErrorResponse';
 import type { MessageNode } from './generated/MessageNode';
+import type { NodeName } from './generated/NodeName';
 import type { QueueItem } from './generated/QueueItem';
 import type { RegisterWorkspaceRequest } from './generated/RegisterWorkspaceRequest';
 import type { RemoveWorkspaceRequest } from './generated/RemoveWorkspaceRequest';
@@ -14,13 +18,15 @@ import type { SubmitMessageRequest } from './generated/SubmitMessageRequest';
 import type { SwitchActiveLeafRequest } from './generated/SwitchActiveLeafRequest';
 import type { WorkspaceMetadata } from './generated/WorkspaceMetadata';
 
-/// agent 拒绝请求或不可达时的失败类别。
+/// hub 或节点拒绝请求、或 socket 失败时的失败类别。
 export type ApiFailure = {
-  code: ErrorCode | 'network';
+  code: ErrorCode | HubErrorCode | 'network';
   message: string;
 };
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: ApiFailure };
+
+type FailureBody = ErrorResponse | HubErrorResponse;
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
   const init: RequestInit = { method };
@@ -30,7 +36,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   }
   const response = await fetch(path, init).catch(() => null);
   if (response === null) {
-    return { ok: false, error: { code: 'network', message: `请求 agent 失败: ${method} ${path}` } };
+    return { ok: false, error: { code: 'network', message: `请求 hub 失败: ${method} ${path}` } };
   }
   if (!response.ok) {
     return { ok: false, error: await readFailure(response) };
@@ -43,62 +49,91 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 async function readFailure(response: Response): Promise<ApiFailure> {
-  const body = (await response.json().catch(() => null)) as ErrorResponse | null;
+  const body = (await response.json().catch(() => null)) as FailureBody | null;
   if (body === null) {
-    return { code: 'network', message: `agent 返回 ${response.status}` };
+    return { code: 'network', message: `hub 返回 ${response.status}` };
   }
   return { code: body.code, message: body.message };
 }
 
-function sessionPath(id: string): string {
-  return `/api/sessions/${encodeURIComponent(id)}`;
+/// 节点作用域请求。hub 剥掉前缀后原样转发给该节点。
+function nodePath(node: NodeName, rest: string): string {
+  return `/api/n/${encodeURIComponent(node)}/${rest}`;
+}
+
+function sessionPath(node: NodeName, id: string): string {
+  return nodePath(node, `sessions/${encodeURIComponent(id)}`);
 }
 
 export const api = {
-  bootstrap(): Promise<ApiResult<BootstrapResponse>> {
+  bootstrap(): Promise<ApiResult<HubBootstrap>> {
     return request('GET', '/api/bootstrap');
   },
-  sessionTree(id: string): Promise<ApiResult<SessionTree>> {
-    return request('GET', `${sessionPath(id)}/tree`);
+  nodeBootstrap(node: NodeName): Promise<ApiResult<BootstrapResponse>> {
+    return request('GET', nodePath(node, 'bootstrap'));
   },
-  registerWorkspace(path: string): Promise<ApiResult<WorkspaceMetadata>> {
+  sessionTree(node: NodeName, id: string): Promise<ApiResult<SessionTree>> {
+    return request('GET', `${sessionPath(node, id)}/tree`);
+  },
+  registerWorkspace(node: NodeName, path: string): Promise<ApiResult<WorkspaceMetadata>> {
     const body: RegisterWorkspaceRequest = { path };
-    return request('POST', '/api/workspaces', body);
+    return request('POST', nodePath(node, 'workspaces'), body);
   },
-  removeWorkspace(path: string): Promise<ApiResult<void>> {
+  removeWorkspace(node: NodeName, path: string): Promise<ApiResult<void>> {
     const body: RemoveWorkspaceRequest = { path };
-    return request('POST', '/api/workspaces/remove', body);
+    return request('POST', nodePath(node, 'workspaces/remove'), body);
   },
-  createSession(workspace: string, title: string | null): Promise<ApiResult<SessionMetadata>> {
+  createSession(
+    node: NodeName,
+    workspace: string,
+    title: string | null,
+  ): Promise<ApiResult<SessionMetadata>> {
     const body: CreateSessionRequest = { workspace, title };
-    return request('POST', '/api/sessions', body);
+    return request('POST', nodePath(node, 'sessions'), body);
   },
-  renameSession(id: string, title: string): Promise<ApiResult<SessionMetadata>> {
+  renameSession(node: NodeName, id: string, title: string): Promise<ApiResult<SessionMetadata>> {
     const body: RenameSessionRequest = { title };
-    return request('POST', `${sessionPath(id)}/rename`, body);
+    return request('POST', `${sessionPath(node, id)}/rename`, body);
   },
-  deleteSession(id: string): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(id)}/delete`);
+  deleteSession(node: NodeName, id: string): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(node, id)}/delete`);
   },
-  submitMessage(id: string, text: string): Promise<ApiResult<QueueItem>> {
+  submitMessage(node: NodeName, id: string, text: string): Promise<ApiResult<QueueItem>> {
     const body: SubmitMessageRequest = { text };
-    return request('POST', `${sessionPath(id)}/messages`, body);
+    return request('POST', `${sessionPath(node, id)}/messages`, body);
   },
-  editUserMessage(id: string, messageId: number, text: string): Promise<ApiResult<MessageNode>> {
+  editUserMessage(
+    node: NodeName,
+    id: string,
+    messageId: number,
+    text: string,
+  ): Promise<ApiResult<MessageNode>> {
     const body: EditMessageRequest = { text };
-    return request('POST', `${sessionPath(id)}/messages/${messageId}/edit`, body);
+    return request('POST', `${sessionPath(node, id)}/messages/${messageId}/edit`, body);
   },
-  retryAssistantMessage(id: string, messageId: number): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(id)}/messages/${messageId}/retry`);
+  retryAssistantMessage(
+    node: NodeName,
+    id: string,
+    messageId: number,
+  ): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(node, id)}/messages/${messageId}/retry`);
   },
-  switchActiveLeaf(id: string, messageId: number): Promise<ApiResult<void>> {
+  switchActiveLeaf(
+    node: NodeName,
+    id: string,
+    messageId: number,
+  ): Promise<ApiResult<void>> {
     const body: SwitchActiveLeafRequest = { messageId };
-    return request('POST', `${sessionPath(id)}/active-leaf`, body);
+    return request('POST', `${sessionPath(node, id)}/active-leaf`, body);
   },
-  removeQueueItem(id: string, itemId: number): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(id)}/queue/${itemId}/remove`);
+  removeQueueItem(
+    node: NodeName,
+    id: string,
+    itemId: number,
+  ): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(node, id)}/queue/${itemId}/remove`);
   },
-  cancelRun(id: string): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(id)}/cancel`);
+  cancelRun(node: NodeName, id: string): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(node, id)}/cancel`);
   },
 };

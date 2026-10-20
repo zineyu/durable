@@ -73,6 +73,27 @@ if (stories.length === 0) {
 
 const isConsolePage = (id) => id.startsWith('pages-console');
 
+const switcherStories = (id) =>
+  id.startsWith('pages-console') ||
+  id.startsWith('components-sidebar') ||
+  id.startsWith('components-nodeswitcher') ||
+  id.startsWith('components-appshell');
+
+const emptyNodeStories = new Set([
+  'components-nodeswitcher--empty',
+  'components-sidebar--no-nodes',
+  'pages-console--no-nodes',
+]);
+
+const noSelectionStories = new Set([
+  'components-nodeswitcher--empty',
+  'components-nodeswitcher--unknown-selection',
+  'components-sidebar--unknown-node',
+  'components-sidebar--no-nodes',
+  'pages-console--no-nodes',
+  'pages-console--unknown-node',
+]);
+
 async function assertNoHorizontalOverflow(page) {
   const overflows = await page.evaluate(
     () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -192,23 +213,92 @@ async function assertWorkspaceRemoveRevealsOnHover(page) {
   await page.mouse.move(0, 0);
 }
 
-async function capture(page, target, story, theme) {
+async function assertNodeSwitcher(page, story) {
+  const switcher = page.getByRole('navigation', { name: '节点切换器' });
+  if ((await switcher.count()) === 0) {
+    throw new Error('缺少节点切换器');
+  }
+
+  const pills = switcher.locator('button');
+  const pillCount = await pills.count();
+  if (emptyNodeStories.has(story.id) && pillCount !== 0) {
+    throw new Error(`空节点表仍渲染了 ${pillCount} 个节点`);
+  }
+  if (!emptyNodeStories.has(story.id) && pillCount === 0) {
+    throw new Error('节点切换器没有节点');
+  }
+
+  const switcherBox = await switcher.boundingBox();
+  if (switcherBox === null) {
+    throw new Error('未取得节点切换器尺寸');
+  }
+  for (let index = 0; index < pillCount; index += 1) {
+    const box = await pills.nth(index).boundingBox();
+    if (box === null) {
+      throw new Error('未取得节点按钮尺寸');
+    }
+    if (box.x < switcherBox.x - 1 || box.x + box.width > switcherBox.x + switcherBox.width + 1) {
+      throw new Error(`节点按钮溢出切换器: ${box.x}..${box.x + box.width}`);
+    }
+  }
+
+  const selected = await switcher.locator('button[aria-pressed="true"]').count();
+  const expected = noSelectionStories.has(story.id) ? 0 : 1;
+  if (selected !== expected) {
+    throw new Error(`选中节点数量不是 ${expected}: ${selected}`);
+  }
+}
+
+const nodeStateHeadings = new Map([
+  ['pages-console--unavailable-node', '节点不可用'],
+  ['pages-console--unknown-node', '未知节点'],
+  ['pages-console--no-nodes', '选择一个节点'],
+]);
+
+async function assertNodeStates(page, story) {
+  const expected = nodeStateHeadings.get(story.id);
+  if (expected === undefined) {
+    return;
+  }
+  const heading = page.locator('h2').first();
+  if ((await heading.count()) === 0) {
+    throw new Error(`节点状态页缺少标题: ${story.id}`);
+  }
+  const text = await heading.textContent();
+  if (text !== expected) {
+    throw new Error(`节点状态页标题不是「${expected}」: ${text}`);
+  }
+  const add = page.getByRole('button', { name: '注册 workspace' });
+  if ((await add.count()) === 0) {
+    throw new Error('节点不可用的侧栏缺少注册 workspace 按钮');
+  }
+  if (!(await add.isDisabled())) {
+    throw new Error('节点不可用时未禁用注册 workspace 命令');
+  }
+}
+
+async function capture(page, target, story, theme, prefix = '') {
   const globals = theme === 'dark' ? '&globals=theme:dark' : '';
   try {
     await page.goto(
       `http://127.0.0.1:${address.port}/iframe.html?id=${story.id}&viewMode=story${globals}`,
     );
-    await page.locator('#storybook-root').waitFor({ state: 'attached' });
+    await page.locator('#storybook-root > *').first().waitFor({ state: 'attached' });
     await page.evaluate(() => document.fonts.ready);
     await assertNoHorizontalOverflow(page);
     await assertBranchSwitcherPlacement(page);
-    if (isConsolePage(story.id)) {
+    if (switcherStories(story.id)) {
+      await assertNodeSwitcher(page, story);
+    }
+    await assertNodeStates(page, story);
+    const hasComposer = (await page.locator('[class*="composer"]').count()) > 0;
+    if (isConsolePage(story.id) && hasComposer) {
       await assertChromeInViewport(page);
       await assertColumnAlignment(page);
       await assertSessionMenuExpandsOnHover(page);
       await assertWorkspaceRemoveRevealsOnHover(page);
     }
-    const file = join(target, `${story.id.replaceAll('/', '-')}.png`);
+    const file = join(target, `${prefix}${story.id.replaceAll('/', '-')}.png`);
     await page.screenshot({ path: file });
     const info = await stat(file);
     if (info.size === 0) {
@@ -245,7 +335,7 @@ try {
     for (const theme of ['light', 'dark']) {
       for (const story of stories.filter((entry) => isConsolePage(entry.id))) {
         const target = join(output, 'viewports');
-        await capture(page, target, { ...story, id: `${viewport.label}-${theme}-${story.id}` }, theme);
+        await capture(page, target, story, theme, `${viewport.label}-${theme}-`);
       }
     }
   }

@@ -52,6 +52,17 @@
   color: var(--color-text-tertiary);
 }
 
+.notice {
+  margin: 0;
+  padding: var(--space-2);
+  border: var(--border-hairline) solid var(--color-border-2);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-1);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-secondary);
+}
+
 .emptySessions {
   margin: 0;
   padding: var(--space-0-5) var(--space-2);

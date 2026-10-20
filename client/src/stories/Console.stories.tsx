@@ -3,6 +3,7 @@ import { AppShell } from '../components/AppShell';
 import { AssistantMessage } from '../components/AssistantMessage';
 import { CodeBlock } from '../components/CodeBlock';
 import { Composer } from '../components/Composer';
+import { EmptyState } from '../components/EmptyState';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { MainHeader } from '../components/MainHeader';
 import { QueueStrip } from '../components/QueueStrip';
@@ -10,7 +11,7 @@ import { Sidebar } from '../components/Sidebar';
 import { ToolCard } from '../components/ToolCard';
 import { Transcript } from '../components/Transcript';
 import { UserMessage } from '../components/UserMessage';
-import { codeSample, modelName, queueItems, workspaces } from '../fixtures/view';
+import { codeSample, modelName, nodes, queueItems, workspaces } from '../fixtures/view';
 import { toSessionId, toWorkspacePath } from '../view/ids';
 
 const meta = {
@@ -22,12 +23,32 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-const sidebar = <Sidebar modelName={modelName} workspaces={workspaces} selectedSessionId={toSessionId('s-1')} />;
+const sidebar = (
+  <Sidebar
+    nodes={nodes}
+    selectedNode="macbook-air-01"
+    modelName={modelName}
+    workspaces={workspaces}
+    selectedSessionId={toSessionId('s-1')}
+  />
+);
+
+const emptySidebar = (
+  <Sidebar
+    nodes={nodes}
+    selectedNode="macbook-air-01"
+    modelName={modelName}
+    workspaces={workspaces}
+    selectedSessionId={null}
+  />
+);
 
 export const Running: Story = {
   render: () => (
     <AppShell sidebar={sidebar}>
       <MainHeader
+        node="macbook-air-01"
+        nodeStatus="ok"
         title="双二进制骨架与工程基线"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="running"
@@ -66,6 +87,8 @@ export const Idle: Story = {
   render: () => (
     <AppShell sidebar={sidebar}>
       <MainHeader
+        node="macbook-air-01"
+        nodeStatus="ok"
         title="类型生成一致性检查"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="idle"
@@ -91,6 +114,8 @@ export const Failed: Story = {
         message="session 有 run 进行中：分支操作需要 session 空闲且队列为空。"
       />
       <MainHeader
+        node="macbook-air-01"
+        nodeStatus="ok"
         title="SQLite 迁移与恢复"
         workspacePath={toWorkspacePath('/Users/zine/space/project/agent-lab')}
         state="idle"
@@ -113,10 +138,10 @@ export const Failed: Story = {
 
 export const NoSession: Story = {
   render: () => (
-    <AppShell
-      sidebar={<Sidebar modelName={modelName} workspaces={workspaces} selectedSessionId={null} />}
-    >
+    <AppShell sidebar={emptySidebar}>
       <MainHeader
+        node="macbook-air-01"
+        nodeStatus="ok"
         title="未选择 session"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="idle"
@@ -128,6 +153,68 @@ export const NoSession: Story = {
         </AssistantMessage>
       </Transcript>
       <Composer value="" onChange={() => undefined} disabled />
+    </AppShell>
+  ),
+};
+
+export const UnavailableNode: Story = {
+  render: () => (
+    <AppShell
+      sidebar={
+        <Sidebar
+          nodes={nodes}
+          selectedNode="studio"
+          notice="连接节点失败: 隧道已断开"
+          commandsDisabled
+          modelName=""
+          workspaces={[]}
+          selectedSessionId={null}
+        />
+      }
+    >
+      <EmptyState title="节点不可用" description="连接节点失败: 隧道已断开" />
+    </AppShell>
+  ),
+};
+
+export const UnknownNode: Story = {
+  render: () => (
+    <AppShell
+      sidebar={
+        <Sidebar
+          nodes={nodes}
+          selectedNode="retired-studio"
+          notice="未知节点，节点表里没有这个名字"
+          commandsDisabled
+          modelName=""
+          workspaces={[]}
+          selectedSessionId={null}
+        />
+      }
+    >
+      <EmptyState
+        title="未知节点"
+        description="节点 retired-studio 不在节点表里。它可能已被删除或改名。"
+      />
+    </AppShell>
+  ),
+};
+
+export const NoNodes: Story = {
+  render: () => (
+    <AppShell
+      sidebar={
+        <Sidebar
+          nodes={[]}
+          selectedNode={null}
+          modelName=""
+          workspaces={[]}
+          selectedSessionId={null}
+          commandsDisabled
+        />
+      }
+    >
+      <EmptyState title="选择一个节点" description="在左侧节点切换器中选择一台机器。" />
     </AppShell>
   ),
 };

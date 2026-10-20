@@ -1,20 +1,29 @@
+import type { NodeName } from '../api/generated/NodeName';
 import { toSessionId } from './ids';
 import type { SessionId } from './ids';
 
-const sessionHash = /^#session=([A-Za-z0-9._~-]+)$/;
+/// URL 指向的位置。`sessionId` 为 `null` 表示只选定了节点。
+export type SessionLocation = {
+  node: NodeName;
+  sessionId: SessionId | null;
+};
 
-export function readSessionFromHash(hash: string): SessionId | null {
-  const match = sessionHash.exec(hash);
+const nodeName = /^[A-Za-z0-9._-]{1,64}$/;
+const location = /^#\/n\/([^/]+)(?:\/s\/([A-Za-z0-9._~-]+))?$/;
+
+export function readLocationFromHash(hash: string): SessionLocation | null {
+  const match = location.exec(hash);
   if (match === null) {
     return null;
   }
-  const value = match[1];
-  if (value === undefined) {
+  const node = match[1];
+  if (node === undefined || !nodeName.test(node) || node === '.' || node === '..') {
     return null;
   }
-  return toSessionId(value);
+  const sessionId = match[2];
+  return { node, sessionId: sessionId === undefined ? null : toSessionId(sessionId) };
 }
 
-export function writeSessionToHash(id: SessionId): string {
-  return `#session=${id}`;
+export function writeLocationToHash(node: NodeName, sessionId: SessionId | null): string {
+  return sessionId === null ? `#/n/${node}` : `#/n/${node}/s/${sessionId}`;
 }

@@ -1,5 +1,18 @@
+import type { NodeStatus } from '../api/generated/NodeStatus';
 import type { RunFailureCode } from '../api/generated/RunFailureCode';
 import type { ConnectionState, MessageState, SessionState, StatusTone, ToolState } from './types';
+
+export const nodeStatusLabel: Record<NodeStatus, string> = {
+  ok: '可用',
+  unreachable: '不可达',
+  incompatible: '版本不兼容',
+};
+
+export const nodeStatusTone: Record<NodeStatus, StatusTone> = {
+  ok: 'success',
+  unreachable: 'danger',
+  incompatible: 'warn',
+};
 
 export const sessionStateLabel: Record<SessionState, string> = {
   idle: '空闲',
