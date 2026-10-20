@@ -18,6 +18,7 @@ export type ModelScript =
 
 const ENDPOINT = '/v1/chat/completions';
 const CLOSE_TIMEOUT_MS = 5_000;
+const HOLD_TIMEOUT_MS = 30_000;
 
 /// 脚本化的 OpenAI 兼容 SSE 服务。它是真实 HTTP 服务，不替换被测代码。
 export class ModelServer {
@@ -25,7 +26,7 @@ export class ModelServer {
   private readonly server: Server;
   private readonly scripts: ModelScript[] = [];
   private readonly bodies: unknown[] = [];
-  private readonly held: ServerResponse[] = [];
+  private readonly held = new Map<ServerResponse, NodeJS.Timeout>();
 
   private constructor(server: Server, baseUrl: string) {
     this.server = server;
@@ -53,12 +54,13 @@ export class ModelServer {
 
   /// 结束所有挂起的响应，让运行中的 run 正常收尾。
   release(): void {
-    for (const response of this.held.splice(0)) {
-      if (response.writableEnded || response.destroyed) {
-        continue;
+    for (const [response, timer] of this.held) {
+      clearTimeout(timer);
+      if (!response.writableEnded && !response.destroyed) {
+        finishStream(response);
       }
-      finishStream(response);
     }
+    this.held.clear();
   }
 
   /// 已收到的请求体，按到达顺序。
@@ -67,14 +69,28 @@ export class ModelServer {
   }
 
   async stop(): Promise<void> {
-    for (const response of this.held.splice(0)) {
+    for (const [response, timer] of this.held) {
+      clearTimeout(timer);
       response.destroy();
     }
+    this.held.clear();
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => {
       this.server.close(() => resolve());
       setTimeout(resolve, CLOSE_TIMEOUT_MS).unref();
     });
+  }
+
+  /// 保持连接不结束。用例未显式调用 `release()` 时，兜底定时器在用例超时前收尾。
+  private hold(response: ServerResponse): void {
+    const timer = setTimeout(() => {
+      this.held.delete(response);
+      if (!response.writableEnded && !response.destroyed) {
+        finishStream(response);
+      }
+    }, HOLD_TIMEOUT_MS);
+    timer.unref();
+    this.held.set(response, timer);
   }
 
   private readonly handle = (request: IncomingMessage, response: ServerResponse): void => {
@@ -115,7 +131,7 @@ export class ModelServer {
       case 'hold':
         startStream(response);
         writeText(response, script.text);
-        this.held.push(response);
+        this.hold(response);
         return;
       default: {
         const unhandled: never = script;
