@@ -42,6 +42,7 @@ impl Store {
     /// 失败：目录无法建立、数据库无法打开、连接参数被拒绝或迁移失败。
     /// 副作用：创建数据库目录、数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
+        tracing::debug!(database = %path.display(), "打开 SQLite");
         Ok(Self {
             storage: SqliteStorage::open(path).await?,
             line: Mutex::new(()),
@@ -861,6 +862,7 @@ impl Store {
         if running.is_empty() {
             return Ok(());
         }
+        tracing::warn!(runs = running.len(), "把中断的 run 标记为失败");
         let now = now_millis();
         let mut changes = Changeset::new();
         for run in &running {

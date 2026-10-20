@@ -117,7 +117,7 @@ impl RunEngine {
                 Ok(Some(start)) => self.run_once(start).await,
                 Ok(None) => break,
                 Err(error) => {
-                    eprintln!("启动 run 失败: {error}");
+                    tracing::error!(session = %session.as_str(), error = %error, "启动 run 失败");
                     break;
                 }
             }
@@ -136,6 +136,8 @@ impl RunEngine {
 
     async fn run_once(self: &Arc<Self>, start: RunStart) {
         let session = start.run.session_id.clone();
+        let run = start.run.id.get();
+        tracing::info!(session = %session.as_str(), run, "开始 run");
         let cancellation = Cancellation::new();
         let done = Arc::new(Notify::new());
         self.controls.lock().expect("controls 锁").insert(
@@ -151,6 +153,15 @@ impl RunEngine {
             tool_calls: outcome.tool_calls,
             ..start.assistant.clone()
         };
+        if let Some(failure) = &outcome.failure {
+            tracing::warn!(
+                session = %session.as_str(),
+                run,
+                code = ?failure.code,
+                message = %failure.message,
+                "run 失败"
+            );
+        }
         if let Err(error) = self
             .store
             .finish_run(
@@ -162,7 +173,14 @@ impl RunEngine {
             )
             .await
         {
-            eprintln!("结束 run 失败: {error}");
+            tracing::error!(session = %session.as_str(), run, error = %error, "结束 run 失败");
+        } else {
+            tracing::info!(
+                session = %session.as_str(),
+                run,
+                status = outcome.status.as_str(),
+                "结束 run"
+            );
         }
         self.controls.lock().expect("controls 锁").remove(&session);
         done.notify_waiters();
@@ -301,6 +319,7 @@ impl RunEngine {
                 cancellation: cancellation.clone(),
             };
             for call in calls {
+                tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
                 let outcome = tokio::select! {
                     biased;
                     _ = cancellation.cancelled() => {
@@ -315,6 +334,20 @@ impl RunEngine {
                     arguments: call.arguments,
                     outcome,
                 };
+                match &record.outcome {
+                    ToolOutcome::Failed { code, message } => tracing::warn!(
+                        session = %session.as_str(),
+                        tool = %record.name,
+                        code = ?code,
+                        message = %message,
+                        "工具失败"
+                    ),
+                    ToolOutcome::Succeeded { .. } => tracing::debug!(
+                        session = %session.as_str(),
+                        tool = %record.name,
+                        "工具成功"
+                    ),
+                }
                 self.record_tool_call(&session, assistant_id, &record).await;
                 records.push(record);
             }
@@ -338,7 +371,7 @@ impl RunEngine {
             .flush_message(assistant_id, MessageContent::new(text), records.to_vec())
             .await
         {
-            eprintln!("写入部分输出失败: {error}");
+            tracing::error!(message = assistant_id.get(), error = %error, "写入部分输出失败");
         }
     }
 
@@ -353,7 +386,12 @@ impl RunEngine {
             .record_tool_call(session, assistant_id, call.clone())
             .await
         {
-            eprintln!("写入工具调用失败: {error}");
+            tracing::error!(
+                session = %session.as_str(),
+                tool = %call.name,
+                error = %error,
+                "写入工具调用失败"
+            );
         }
     }
 }

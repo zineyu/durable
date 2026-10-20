@@ -32,14 +32,32 @@ pub fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_agent"))
 }
 
-/// 运行 agent 二进制的命令：指定 SQLite 路径并带上模型配置。
+/// 运行 agent 二进制的命令：指定 SQLite 与日志路径并带上模型配置。
 pub fn command(database: &Path) -> std::process::Command {
-    let mut command = std::process::Command::new(binary());
+    let mut command = command_without_paths();
     command
         .args(["--database"])
         .arg(database)
-        .envs(model_environment());
+        .args(["--log-dir"])
+        .arg(log_directory(database));
     command
+}
+
+/// 未指定数据库与日志路径的 agent 命令：用于验证标准目录，也供 [`command`] 派生。
+pub fn command_without_paths() -> std::process::Command {
+    let mut command = std::process::Command::new(binary());
+    command
+        .envs(model_environment())
+        .env(runtime::logging::FILTER_ENV, "warn");
+    command
+}
+
+/// 与给定数据库同级的日志目录，使测试不写入用户的标准日志目录。
+pub fn log_directory(database: &Path) -> PathBuf {
+    database
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("logs")
 }
 
 /// 启动 agent 二进制的命令：随机回环端口、捕获 stdout、随进程退出而结束。
@@ -48,7 +66,10 @@ pub fn serving_command(database: &Path) -> tokio::process::Command {
     command
         .args(["--listen", "127.0.0.1:0", "--database"])
         .arg(database)
+        .args(["--log-dir"])
+        .arg(log_directory(database))
         .envs(model_environment())
+        .env(runtime::logging::FILTER_ENV, "warn")
         .stdout(Stdio::piped())
         .kill_on_drop(true);
     command
