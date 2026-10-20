@@ -6,7 +6,7 @@ use durable::{
     EventBus, MessageContent, MessageNode, MessageRole, RunFailure, RunFailureCode, RunStart,
     RunStatus, SessionId, Store, StoreError, StreamEvent, ToolCallRecord, ToolOutcome,
 };
-use tokio::sync::{Notify, Semaphore};
+use tokio::sync::Notify;
 
 use crate::cancel::Cancellation;
 use crate::config::EngineConfig;
@@ -20,14 +20,13 @@ const SYSTEM_PROMPT: &str = "你是运行在本机 workspace 根目录中的 cod
 使用提供的工具读取文件、写入文件、精确编辑文件与执行命令；所有路径都必须位于 workspace 根内。\
 禁止猜测文件内容，需要时先读取文件。回答保持简洁。";
 
-/// run 引擎：全局并发槽位、session 间公平轮转、流式生成、工具循环与取消。
+/// run 引擎：session 内串行、session 间并发、流式生成、工具循环与取消。
 pub struct RunEngine {
     store: Arc<Store>,
     provider: Arc<dyn ModelProvider>,
     tools: Arc<dyn ToolBox>,
     bus: EventBus,
     config: EngineConfig,
-    permits: Arc<Semaphore>,
     drivers: Arc<Mutex<HashSet<SessionId>>>,
     controls: Arc<Mutex<HashMap<SessionId, RunControl>>>,
 }
@@ -66,7 +65,6 @@ impl RunEngine {
             tools,
             bus,
             config,
-            permits: Arc::new(Semaphore::new(config.max_concurrency)),
             drivers: Arc::new(Mutex::new(HashSet::new())),
             controls: Arc::new(Mutex::new(HashMap::new())),
         })
@@ -115,22 +113,11 @@ impl RunEngine {
 
     async fn drive_loop(self: Arc<Self>, session: SessionId) {
         loop {
-            let permit = match self.permits.clone().acquire_owned().await {
-                Ok(permit) => permit,
-                Err(_) => break,
-            };
             match self.store.start_run(&session).await {
-                Ok(Some(start)) => {
-                    self.run_once(start).await;
-                    drop(permit);
-                }
-                Ok(None) => {
-                    drop(permit);
-                    break;
-                }
+                Ok(Some(start)) => self.run_once(start).await,
+                Ok(None) => break,
                 Err(error) => {
                     eprintln!("启动 run 失败: {error}");
-                    drop(permit);
                     break;
                 }
             }

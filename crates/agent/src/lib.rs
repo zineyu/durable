@@ -18,8 +18,8 @@ mod tools;
 pub use api::{AgentState, router, serve};
 pub use cancel::Cancellation;
 pub use config::{
-    CONTEXT_CHAR_LIMIT, ConfigError, EngineConfig, MAX_CONCURRENCY, MAX_STEPS, MODEL_API_KEY,
-    MODEL_BASE_URL, MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
+    CONTEXT_CHAR_LIMIT, ConfigError, EngineConfig, MAX_STEPS, MODEL_API_KEY, MODEL_BASE_URL,
+    MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
 };
 pub use durable::{
     DEFAULT_SESSION_TITLE, FactEvent, MessageContent, MessageId, MessageNode, MessageRole,
@@ -32,8 +32,8 @@ pub use engine::RunEngine;
 pub use error::ApiError;
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,
-    HealthResponse, HealthStatus, RegisterWorkspaceRequest, RemoveWorkspaceRequest,
-    RenameSessionRequest, SubmitMessageRequest, SwitchActiveLeafRequest,
+    HealthResponse, HealthStatus, PROTOCOL_VERSION, RegisterWorkspaceRequest,
+    RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest, SwitchActiveLeafRequest,
 };
 pub use provider::{
     ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,

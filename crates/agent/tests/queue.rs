@@ -237,14 +237,10 @@ async fn deletes_running_session_with_its_queue() {
     assert_eq!(remaining, 0, "session 删除后不保留队列项");
 }
 
-/// 规格「调度与会话状态」：全局并发槽位限制同时运行的 run，等待的 session 在槽位释放后执行。
+/// 规格「调度与会话状态」：session 内的 FIFO 串行，session 之间的 run 同时启动，没有全局并发上限。
 #[tokio::test]
-async fn enforces_global_concurrency_slots_across_sessions() {
-    let config = agent::EngineConfig {
-        max_concurrency: 2,
-        ..agent::EngineConfig::default()
-    };
-    let harness = Harness::start_with(config, vec![Script::Hang, Script::Hang, Script::Hang]).await;
+async fn starts_runs_across_sessions_simultaneously() {
+    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang; 3]).await;
     let (_, workspace) = harness.registered_workspace("workspace").await;
     let sessions = vec![
         harness.created_session(&workspace.path).await,
@@ -255,25 +251,12 @@ async fn enforces_global_concurrency_slots_across_sessions() {
         harness.submit_message(&session.id, "运行").await;
     }
 
-    let running = wait_for_busy_count(&harness, &sessions, 2).await;
-    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-    assert_eq!(
-        busy_ids(&harness, &sessions).await.len(),
-        2,
-        "第三个 run 不得越过槽位"
-    );
-
-    let waiting = sessions
-        .iter()
-        .find(|session| !running.contains(&session.id))
-        .expect("有等待槽位的 session");
-    let tree = harness.tree(&waiting.id).await;
-    assert!(!tree.session.busy);
-    assert_eq!(queue_texts(&tree), vec!["运行"], "等待的 run 留在队列");
-
-    let response = harness.cancel_run(&running[0]).await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-    harness.wait_busy(&waiting.id).await;
+    let running = wait_for_busy_count(&harness, &sessions, 3).await;
+    assert_eq!(running.len(), 3, "三个 session 的 run 必须同时运行");
+    for session in &sessions {
+        let tree = harness.tree(&session.id).await;
+        assert!(tree.queue.is_empty(), "启动后队列项离开队列");
+    }
 }
 
 /// 规格「事实事件」：入队写入 `message_queued`，携带队列项与更新后的 session 元数据。

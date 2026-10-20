@@ -4,11 +4,9 @@ use std::fmt;
 pub const MODEL_BASE_URL: &str = "DURABLE_MODEL_BASE_URL";
 pub const MODEL_API_KEY: &str = "DURABLE_MODEL_API_KEY";
 pub const MODEL_NAME: &str = "DURABLE_MODEL_NAME";
-pub const MAX_CONCURRENCY: &str = "DURABLE_MAX_CONCURRENCY";
 pub const CONTEXT_CHAR_LIMIT: &str = "DURABLE_CONTEXT_CHAR_LIMIT";
 pub const MAX_STEPS: &str = "DURABLE_MAX_STEPS";
 
-const DEFAULT_MAX_CONCURRENCY: usize = 4;
 const DEFAULT_CONTEXT_CHAR_LIMIT: usize = 200_000;
 const DEFAULT_MAX_STEPS: usize = 50;
 
@@ -19,10 +17,9 @@ pub struct ModelConfig {
     pub model_name: String,
 }
 
-/// run 引擎的调度与边界配置。
+/// run 引擎的边界配置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EngineConfig {
-    pub max_concurrency: usize,
     pub context_char_limit: usize,
     pub max_steps: usize,
 }
@@ -30,7 +27,6 @@ pub struct EngineConfig {
 impl Default for EngineConfig {
     fn default() -> Self {
         Self {
-            max_concurrency: DEFAULT_MAX_CONCURRENCY,
             context_char_limit: DEFAULT_CONTEXT_CHAR_LIMIT,
             max_steps: DEFAULT_MAX_STEPS,
         }
@@ -89,7 +85,6 @@ pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
 pub fn engine_config_from_env() -> Result<EngineConfig, ConfigError> {
     let defaults = EngineConfig::default();
     Ok(EngineConfig {
-        max_concurrency: read_positive(MAX_CONCURRENCY, defaults.max_concurrency)?,
         context_char_limit: read_positive(CONTEXT_CHAR_LIMIT, defaults.context_char_limit)?,
         max_steps: read_positive(MAX_STEPS, defaults.max_steps)?,
     })

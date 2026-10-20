@@ -17,8 +17,8 @@ use crate::engine::RunEngine;
 use crate::error::ApiError;
 use crate::protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, HealthResponse, HealthStatus,
-    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest,
-    SwitchActiveLeafRequest,
+    PROTOCOL_VERSION, RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest,
+    SubmitMessageRequest, SwitchActiveLeafRequest,
 };
 use crate::provider::ModelProvider;
 use crate::sse;
@@ -198,6 +198,7 @@ async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: HealthStatus::Ok,
         version: env!("CARGO_PKG_VERSION").to_owned(),
+        protocol_version: PROTOCOL_VERSION,
     })
 }
 

@@ -9,10 +9,15 @@ pub enum HealthStatus {
     Ok,
 }
 
+/// 协议版本。任何不兼容的协议改动都递增它。
+pub const PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct HealthResponse {
     pub status: HealthStatus,
     pub version: String,
+    pub protocol_version: u32,
 }
 
 // i64 字段是毫秒时间戳与事件 id，均小于 JS 安全整数上限；TS 侧映射为 number。

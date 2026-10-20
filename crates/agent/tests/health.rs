@@ -14,4 +14,5 @@ async fn health_endpoint_reports_ok() {
     let body: agent::HealthResponse = response.json().await.expect("解析 health 响应");
     assert_eq!(body.status, agent::HealthStatus::Ok);
     assert_eq!(body.version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(body.protocol_version, agent::PROTOCOL_VERSION);
 }
