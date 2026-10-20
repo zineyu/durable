@@ -1,5 +1,5 @@
 [package]
-name = "ui"
+name = "hub"
 version.workspace = true
 edition.workspace = true
 build = "build.rs"

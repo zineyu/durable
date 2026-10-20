@@ -69,25 +69,25 @@ async fn start_streaming_upstream(release: Arc<Notify>) -> SocketAddr {
     address
 }
 
-async fn start_ui(agent_url: String) -> SocketAddr {
+async fn start_hub(agent_url: String) -> SocketAddr {
     let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
         .await
-        .expect("绑定 ui 端口");
-    let address = listener.local_addr().expect("读取 ui 地址");
+        .expect("绑定 hub 端口");
+    let address = listener.local_addr().expect("读取 hub 地址");
     tokio::spawn(async move {
-        ui::serve(listener, agent_url).await.expect("ui 服务运行");
+        hub::serve(listener, agent_url).await.expect("hub 服务运行");
     });
     address
 }
 
 #[tokio::test]
-async fn health_is_reachable_through_ui_proxy() {
+async fn health_is_reachable_through_hub_proxy() {
     let (_directory, agent_address) = start_agent().await;
-    let ui_address = start_ui(format!("http://{agent_address}")).await;
+    let hub_address = start_hub(format!("http://{agent_address}")).await;
 
-    let response = reqwest::get(format!("http://{ui_address}/api/health"))
+    let response = reqwest::get(format!("http://{hub_address}/api/health"))
         .await
-        .expect("经 ui 请求 health");
+        .expect("经 hub 请求 health");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
 
     let body: agent::HealthResponse = response.json().await.expect("解析 health 响应");
@@ -98,9 +98,9 @@ async fn health_is_reachable_through_ui_proxy() {
 #[tokio::test]
 async fn serves_embedded_index() {
     let (_directory, agent_address) = start_agent().await;
-    let ui_address = start_ui(format!("http://{agent_address}")).await;
+    let hub_address = start_hub(format!("http://{agent_address}")).await;
 
-    let response = reqwest::get(format!("http://{ui_address}/"))
+    let response = reqwest::get(format!("http://{hub_address}/"))
         .await
         .expect("请求首页");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
@@ -118,26 +118,26 @@ async fn serves_embedded_index() {
     let body = response.text().await.expect("读取首页");
     assert!(body.contains("<div id=\"root\">"), "首页缺少根节点");
 
-    let missing = reqwest::get(format!("http://{ui_address}/missing.js"))
+    let missing = reqwest::get(format!("http://{hub_address}/missing.js"))
         .await
         .expect("请求未知路径");
     assert_eq!(missing.status(), reqwest::StatusCode::NOT_FOUND);
 }
 
-/// 规格「ui 反代」：SSE 不缓冲，上游发一段就转一段。
+/// 规格「hub 反代」：SSE 不缓冲，上游发一段就转一段。
 #[tokio::test]
 async fn streams_server_sent_events_without_buffering() {
     let release = Arc::new(Notify::new());
     let upstream = start_streaming_upstream(Arc::clone(&release)).await;
-    let ui_address = start_ui(format!("http://{upstream}")).await;
+    let hub_address = start_hub(format!("http://{upstream}")).await;
 
     let response = tokio::time::timeout(
         Duration::from_secs(5),
-        reqwest::get(format!("http://{ui_address}/api/events")),
+        reqwest::get(format!("http://{hub_address}/api/events")),
     )
     .await
     .expect("代理返回响应头")
-    .expect("经 ui 订阅事件流");
+    .expect("经 hub 订阅事件流");
     assert_eq!(response.status(), reqwest::StatusCode::OK);
     assert_eq!(
         response

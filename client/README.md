@@ -19,7 +19,7 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 
 ## 构建顺序
 
-`ui` 二进制在编译期内嵌 `client/dist`。先构建 client，再构建 Rust：
+`hub` 二进制在编译期内嵌 `client/dist`。先构建 client，再构建 Rust：
 
 ```
 devenv shell -- durable-build

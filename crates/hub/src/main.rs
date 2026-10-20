@@ -4,9 +4,9 @@ use clap::Parser;
 
 #[derive(Debug, Parser)]
 struct Arguments {
-    #[arg(long, default_value = ui::DEFAULT_LISTEN)]
+    #[arg(long, default_value = hub::DEFAULT_LISTEN)]
     listen: String,
-    #[arg(long, default_value = ui::DEFAULT_AGENT_URL)]
+    #[arg(long, default_value = hub::DEFAULT_AGENT_URL)]
     agent_url: String,
 }
 
@@ -23,12 +23,12 @@ async fn main() -> ExitCode {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments = Arguments::parse();
-    let address = ui::parse_listen_address(&arguments.listen)?;
+    let address = hub::parse_listen_address(&arguments.listen)?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!(
-        "ui listening on http://{address}, proxying /api to {}",
+        "hub listening on http://{address}, proxying /api to {}",
         arguments.agent_url
     );
-    ui::serve(listener, arguments.agent_url).await?;
+    hub::serve(listener, arguments.agent_url).await?;
     Ok(())
 }

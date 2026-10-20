@@ -18,7 +18,7 @@ pub const DEFAULT_AGENT_URL: &str = "http://127.0.0.1:8081";
 struct Assets;
 
 #[derive(Clone)]
-struct UiState {
+struct HubState {
     agent_url: String,
     client: reqwest::Client,
 }
@@ -51,7 +51,7 @@ pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError>
 }
 
 pub fn router(agent_url: String) -> Router {
-    let state = UiState {
+    let state = HubState {
         agent_url: agent_url.trim_end_matches('/').to_owned(),
         client: reqwest::Client::new(),
     };
@@ -66,7 +66,7 @@ pub async fn serve(listener: tokio::net::TcpListener, agent_url: String) -> std:
     axum::serve(listener, router(agent_url)).await
 }
 
-async fn proxy(State(state): State<UiState>, request: Request) -> Response {
+async fn proxy(State(state): State<HubState>, request: Request) -> Response {
     let method = request.method().clone();
     let uri = request.uri().clone();
     let headers = request.headers().clone();

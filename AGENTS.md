@@ -1,6 +1,6 @@
 # durable
 
-本机单用户的 coding agent：`agent` 只提供 HTTP API，`ui` 托管内嵌的 React 客户端并把 `/api/*` 原样反代给 `agent`。
+本机单用户的 coding agent：`agent` 只提供 HTTP API，`hub` 托管内嵌的 React 客户端并把 `/api/*` 原样反代给 `agent`。
 
 - 规格：`docs/specs/rust-react-coding-agent.md`（主 issue 的正文即该规格）。
 - 架构决策：`docs/adr/`。
@@ -13,7 +13,7 @@
 | --- | --- |
 | `crates/core` | 领域与持久化内核（包名 `durable`）；领域类型、`ts-rs` 派生、单一写入线与 SQLite 存储 |
 | `crates/agent` | agent 二进制；HTTP/SSE 协议与 `ts-rs` 导出入口 |
-| `crates/ui` | ui 二进制；编译期内嵌 `client/dist` |
+| `crates/hub` | hub 二进制；编译期内嵌 `client/dist` |
 | `client` | React + Vite + TypeScript 客户端 |
 | `docs` | 规格、ADR、术语表 |
 
@@ -32,7 +32,7 @@
 
 ## 构建顺序
 
-`ui` 在编译期读取 `client/dist`，缺失或过期时行为不可预期。任何 Rust 构建之前先构建 client；`durable-build` 已按此顺序执行。
+`hub` 在编译期读取 `client/dist`，缺失或过期时行为不可预期。任何 Rust 构建之前先构建 client；`durable-build` 已按此顺序执行。
 
 ## 生成物
 
