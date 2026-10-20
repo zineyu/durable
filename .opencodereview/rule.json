@@ -1,9 +1,6 @@
 {
   "exclude": [
     "client/src/api/generated/**",
-    "client/dist/**",
-    "client/storybook-static/**",
-    "client/screenshots/**",
     "**/Cargo.lock",
     "**/devenv.lock",
     "**/package-lock.json"
