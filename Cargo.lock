@@ -957,6 +957,7 @@ name = "hub"
 version = "0.1.0"
 dependencies = [
  "agent",
+ "async-stream",
  "axum",
  "bytes",
  "clap",

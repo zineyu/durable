@@ -4,4 +4,8 @@ import type { NodeSnapshot } from "./NodeSnapshot";
 /**
  * 合并 bootstrap。节点级失败体现在各自的 `status` 与 `detail` 里。
  */
-export type HubBootstrap = { nodes: Array<NodeSnapshot>, };
+export type HubBootstrap = { nodes: Array<NodeSnapshot>, 
+/**
+ * 当前最大广播序号。客户端用它作为续传游标的起点。
+ */
+maxHubSeq: number, };

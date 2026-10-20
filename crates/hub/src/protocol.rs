@@ -1,4 +1,5 @@
-use durable::{NodeMetadata, NodeName};
+use agent::BootstrapResponse;
+use durable::{FactEvent, MessageId, NodeMetadata, NodeName, ResyncReason, SessionId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -39,11 +40,11 @@ pub struct NodeSnapshot {
     pub url: String,
     pub status: NodeStatus,
     pub detail: Option<String>,
-    pub bootstrap: Option<agent::BootstrapResponse>,
+    pub bootstrap: Option<BootstrapResponse>,
 }
 
 impl NodeSnapshot {
-    pub fn ok(node: NodeMetadata, bootstrap: agent::BootstrapResponse) -> Self {
+    pub fn ok(node: NodeMetadata, bootstrap: BootstrapResponse) -> Self {
         Self {
             name: node.name,
             url: node.url,
@@ -69,6 +70,9 @@ impl NodeSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct HubBootstrap {
     pub nodes: Vec<NodeSnapshot>,
+    /// 当前最大广播序号。客户端用它作为续传游标的起点。
+    #[ts(type = "number")]
+    pub max_hub_seq: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -76,6 +80,56 @@ pub struct HubBootstrap {
 pub struct RegisterNodeRequest {
     pub name: String,
     pub url: String,
+}
+
+/// 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "type",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum HubStreamEvent {
+    Fact {
+        #[ts(type = "number")]
+        hub_seq: u64,
+        node: NodeName,
+        #[ts(type = "number")]
+        id: i64,
+        session_id: Option<SessionId>,
+        #[ts(type = "number")]
+        timestamp: i64,
+        event: FactEvent,
+    },
+    Delta {
+        node: NodeName,
+        session_id: SessionId,
+        #[ts(type = "number")]
+        message_id: MessageId,
+        text: String,
+        #[ts(type = "number")]
+        timestamp: i64,
+    },
+    NodeRegistered {
+        #[ts(type = "number")]
+        hub_seq: u64,
+        node: NodeMetadata,
+    },
+    NodeRemoved {
+        #[ts(type = "number")]
+        hub_seq: u64,
+        name: NodeName,
+    },
+    NodeStatusChanged {
+        #[ts(type = "number")]
+        hub_seq: u64,
+        name: NodeName,
+        status: NodeStatus,
+        detail: Option<String>,
+    },
+    Resync {
+        reason: ResyncReason,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]

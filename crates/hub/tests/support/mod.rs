@@ -8,6 +8,7 @@
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::routing::get;
 use axum::{Json, Router};
@@ -26,8 +27,17 @@ impl Harness {
         Self::start_with(tempfile::tempdir().expect("创建临时目录")).await
     }
 
+    /// 用较小的总线容量启动，用于覆盖落后与窗口外游标。
+    pub async fn start_with_options(options: hub::HubOptions) -> Self {
+        Self::start_options(tempfile::tempdir().expect("创建临时目录"), options).await
+    }
+
     /// 在给定临时目录上启动 hub。复用目录即重启场景。
     pub async fn start_with(directory: TempDir) -> Self {
+        Self::start_options(directory, hub::HubOptions::default()).await
+    }
+
+    pub async fn start_options(directory: TempDir, options: hub::HubOptions) -> Self {
         let store = durable::Store::open(&database_path(&directory))
             .await
             .expect("打开 hub 数据库");
@@ -36,7 +46,7 @@ impl Harness {
             .expect("绑定 hub 端口");
         let address = listener.local_addr().expect("读取 hub 地址");
         tokio::spawn(async move {
-            hub::serve(listener, Arc::new(store))
+            hub::serve_with(listener, Arc::new(store), options)
                 .await
                 .expect("hub 服务运行")
         });
@@ -75,6 +85,30 @@ impl Harness {
             .json()
             .await
             .expect("解析 bootstrap")
+    }
+
+    /// 轮询等待某个节点到达指定状态。上游状态由总线异步更新。
+    pub async fn wait_for_status(&self, name: &str, status: hub::NodeStatus) -> hub::NodeSnapshot {
+        for _ in 0..500 {
+            let snapshot = self.snapshot(name).await;
+            if snapshot.status == status {
+                return snapshot;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("节点 {name} 未在超时内到达状态 {status:?}");
+    }
+
+    /// 等待广播序号推进到 `target` 之后。
+    pub async fn wait_for_seq_after(&self, target: u64) -> u64 {
+        for _ in 0..500 {
+            let seq = self.bootstrap().await.max_hub_seq;
+            if seq > target {
+                return seq;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("广播序号未在超时内超过 {target}");
     }
 
     /// 按名称取出 bootstrap 中的节点快照。
@@ -180,4 +214,69 @@ pub async fn start_fake_agent(protocol_version: u32) -> String {
     let address = listener.local_addr().expect("读取假 agent 地址");
     tokio::spawn(async move { axum::serve(listener, router).await.expect("假 agent 运行") });
     format!("http://{address}")
+}
+
+/// hub 合并事件流的测试客户端。
+pub struct EventStream {
+    stream:
+        std::pin::Pin<Box<dyn futures_util::Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>,
+    buffer: Vec<u8>,
+}
+
+impl EventStream {
+    pub async fn connect(harness: &Harness, after: u64) -> Self {
+        let response = reqwest::get(harness.url(&format!("/api/events?after={after}")))
+            .await
+            .expect("订阅合并事件流");
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        Self {
+            stream: Box::pin(response.bytes_stream()),
+            buffer: Vec::new(),
+        }
+    }
+
+    /// 读取下一条事件。
+    pub async fn next_event(&mut self) -> hub::HubStreamEvent {
+        use futures_util::StreamExt;
+
+        let read = async {
+            loop {
+                if let Some(end) = self.buffer.windows(2).position(|window| window == b"\n\n") {
+                    let frame: Vec<u8> = self.buffer.drain(..end + 2).collect();
+                    let text = String::from_utf8_lossy(&frame).to_string();
+                    for line in text.lines() {
+                        if let Some(payload) = line.strip_prefix("data: ") {
+                            return serde_json::from_str::<hub::HubStreamEvent>(payload)
+                                .expect("解析合并事件");
+                        }
+                    }
+                    continue;
+                }
+                let chunk = self
+                    .stream
+                    .next()
+                    .await
+                    .expect("事件流结束")
+                    .expect("读取事件流");
+                self.buffer.extend_from_slice(&chunk);
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(10), read)
+            .await
+            .expect("等待事件超时")
+    }
+
+    /// 读取事件直到满足条件。
+    pub async fn next_matching(
+        &mut self,
+        mut predicate: impl FnMut(&hub::HubStreamEvent) -> bool,
+    ) -> hub::HubStreamEvent {
+        for _ in 0..50 {
+            let event = self.next_event().await;
+            if predicate(&event) {
+                return event;
+            }
+        }
+        panic!("未等到满足条件的事件");
+    }
 }

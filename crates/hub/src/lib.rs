@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::extract::rejection::JsonRejection;
@@ -16,26 +17,84 @@ use rust_embed::Embed;
 use serde::de::DeserializeOwned;
 use ts_rs::TS;
 
+mod bus;
 mod error;
 mod node_probe;
 mod protocol;
+mod sse;
 
+pub use bus::{Bus, NodeView};
 pub use error::ApiError;
 pub use protocol::{
     HUB_PROTOCOL_VERSION, HubBootstrap, HubErrorCode, HubErrorResponse, HubHealth, HubStatus,
-    NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION, RegisterNodeRequest,
+    HubStreamEvent, NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION, RegisterNodeRequest,
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
+const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
+const DEFAULT_REPLAY_WINDOW: usize = 4096;
 
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../client/dist"]
 struct Assets;
 
+/// hub 的可调参数。测试用较小的容量以覆盖落后与窗口外游标。
+#[derive(Debug, Clone, Copy)]
+pub struct HubOptions {
+    pub broadcast_capacity: usize,
+    pub replay_window: usize,
+}
+
+impl Default for HubOptions {
+    fn default() -> Self {
+        Self {
+            broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
+            replay_window: DEFAULT_REPLAY_WINDOW,
+        }
+    }
+}
+
 #[derive(Clone)]
-struct HubState {
-    store: Arc<Store>,
+pub struct HubState {
+    pub store: Arc<Store>,
+    pub bus: Arc<Bus>,
     client: reqwest::Client,
+    watchers: Arc<Mutex<HashMap<NodeName, bus::NodeWatcher>>>,
+}
+
+impl HubState {
+    /// 打开状态并为节点表中已有的节点启动上游订阅。
+    pub async fn start(store: Arc<Store>, options: HubOptions) -> std::io::Result<Self> {
+        let bus = Arc::new(Bus::new(options.broadcast_capacity, options.replay_window));
+        let state = Self {
+            store,
+            bus,
+            client: reqwest::Client::new(),
+            watchers: Arc::new(Mutex::new(HashMap::new())),
+        };
+        let nodes = match state.store.nodes().await {
+            Ok(nodes) => nodes,
+            Err(error) => {
+                return Err(std::io::Error::other(error.to_string()));
+            }
+        };
+        for node in nodes {
+            state.watch(node);
+        }
+        Ok(state)
+    }
+
+    fn watch(&self, node: NodeMetadata) {
+        let watcher = bus::NodeWatcher::start(Arc::clone(&self.bus), node.clone());
+        self.watchers
+            .lock()
+            .expect("watchers 锁")
+            .insert(node.name, watcher);
+    }
+
+    fn unwatch(&self, name: &NodeName) {
+        self.watchers.lock().expect("watchers 锁").remove(name);
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,14 +124,11 @@ pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError>
     Ok(address)
 }
 
-pub fn router(store: Arc<Store>) -> Router {
-    let state = HubState {
-        store,
-        client: reqwest::Client::new(),
-    };
+pub fn router(state: HubState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/bootstrap", get(bootstrap))
+        .route("/api/events", get(sse::events))
         .route("/api/nodes", post(register_node))
         .route("/api/nodes/{name}", delete(remove_node))
         .route("/api/n/{node}", any(forward_node))
@@ -82,7 +138,16 @@ pub fn router(store: Arc<Store>) -> Router {
 }
 
 pub async fn serve(listener: tokio::net::TcpListener, store: Arc<Store>) -> std::io::Result<()> {
-    axum::serve(listener, router(store)).await
+    serve_with(listener, store, HubOptions::default()).await
+}
+
+pub async fn serve_with(
+    listener: tokio::net::TcpListener,
+    store: Arc<Store>,
+    options: HubOptions,
+) -> std::io::Result<()> {
+    let state = HubState::start(store, options).await?;
+    axum::serve(listener, router(state)).await
 }
 
 pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
@@ -93,6 +158,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     NodeStatus::export_all(&config)?;
     NodeSnapshot::export_all(&config)?;
     HubBootstrap::export_all(&config)?;
+    HubStreamEvent::export_all(&config)?;
     RegisterNodeRequest::export_all(&config)?;
     HubErrorCode::export_all(&config)?;
     HubErrorResponse::export_all(&config)?;
@@ -112,9 +178,24 @@ async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, 
     let nodes = state.store.nodes().await?;
     let mut snapshots = Vec::with_capacity(nodes.len());
     for node in nodes {
-        snapshots.push(node_probe::inspect(&state.client, node).await);
+        let view = state.bus.view(&node.name);
+        let snapshot = match view.status {
+            NodeStatus::Ok => match node_probe::fetch_bootstrap(&state.client, &node).await {
+                Ok(bootstrap) => NodeSnapshot::ok(node, bootstrap),
+                Err(detail) => NodeSnapshot::failed(node, NodeStatus::Unreachable, detail),
+            },
+            status => NodeSnapshot::failed(
+                node,
+                status,
+                view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
+            ),
+        };
+        snapshots.push(snapshot);
     }
-    Ok(Json(HubBootstrap { nodes: snapshots }))
+    Ok(Json(HubBootstrap {
+        nodes: snapshots,
+        max_hub_seq: state.bus.max_seq(),
+    }))
 }
 
 async fn register_node(
@@ -130,8 +211,16 @@ async fn register_node(
         ));
     }
     let node = state.store.register_node(name, url.to_owned()).await?;
-    let snapshot = node_probe::inspect(&state.client, node).await;
-    Ok((StatusCode::CREATED, Json(snapshot)))
+    state.bus.node_registered(node.clone());
+    state.watch(node.clone());
+    Ok((
+        StatusCode::CREATED,
+        Json(NodeSnapshot::failed(
+            node,
+            NodeStatus::Unreachable,
+            "正在建立上游连接".to_owned(),
+        )),
+    ))
 }
 
 async fn remove_node(
@@ -140,6 +229,8 @@ async fn remove_node(
 ) -> Result<StatusCode, ApiError> {
     let name = NodeName::parse(&name)?;
     state.store.remove_node(&name).await?;
+    state.unwatch(&name);
+    state.bus.node_removed(name);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -152,11 +243,14 @@ async fn forward_node(
     let (raw_name, rest) = split_node_path(uri.path())?;
     let name = NodeName::parse(raw_name)?;
     let node = lookup(&state, &name).await?;
-    let base = node_probe::base_url(&node);
-    if let Err(error) = node_probe::check_status(&state.client, &base).await {
-        return Err(ApiError::node_unavailable(error.detail().to_owned()));
+    let view = state.bus.view(&name);
+    if view.status != NodeStatus::Ok {
+        return Err(ApiError::node_unavailable(
+            view.detail.unwrap_or_else(|| format!("节点不可用: {name}")),
+        ));
     }
 
+    let base = node_probe::base_url(&node);
     let target = format!("{base}/api{rest}{}", query_suffix(uri.query()));
 
     let method = request.method().clone();

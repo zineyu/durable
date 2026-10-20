@@ -11,12 +11,13 @@ async fn streams_node_events_without_buffering() {
     let harness = Harness::start().await;
     let laptop = AgentHandle::start().await;
     harness.register_node("laptop", &laptop.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
 
-    let upstream = reqwest::get(harness.url("/api/n/laptop/events"))
+    let response = reqwest::get(harness.url("/api/n/laptop/events"))
         .await
         .expect("订阅节点事件流");
-    assert_eq!(upstream.status(), reqwest::StatusCode::OK);
-    let mut stream = upstream.bytes_stream();
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let mut stream = response.bytes_stream();
 
     let path = laptop.directory.path().to_str().expect("临时路径是 UTF-8");
     reqwest::Client::new()
@@ -26,16 +27,6 @@ async fn streams_node_events_without_buffering() {
         .await
         .expect("注册 workspace 以产生事实事件");
 
-    let event = next_event(&mut stream).await;
-    assert!(
-        event.contains("workspace_registered"),
-        "事件流未转发 workspace_registered: {event}"
-    );
-}
-
-async fn next_event(
-    stream: &mut (impl StreamExt<Item = reqwest::Result<bytes::Bytes>> + Unpin),
-) -> String {
     let mut collected = Vec::new();
     let read = async {
         while let Some(chunk) = stream.next().await {
@@ -48,7 +39,8 @@ async fn next_event(
         }
         panic!("事件流提前结束");
     };
-    tokio::time::timeout(Duration::from_secs(10), read)
+    let text = tokio::time::timeout(Duration::from_secs(10), read)
         .await
-        .expect("等待事件超时")
+        .expect("等待事件超时");
+    assert!(text.contains("workspace_registered"));
 }

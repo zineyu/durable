@@ -6,6 +6,7 @@ build = "build.rs"
 
 [dependencies]
 agent = { path = "../agent" }
+async-stream = "0.3.6"
 axum = "0.8.9"
 clap = { version = "4.6.7", features = ["derive"] }
 durable = { path = "../core" }
@@ -14,10 +15,10 @@ mime_guess = "2.0.5"
 reqwest = { version = "0.13.5", features = ["json", "stream"] }
 rust-embed = { version = "8.13.0", features = ["debug-embed", "interpolate-folder-path"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tokio = { workspace = true }
 ts-rs = { workspace = true }
 
 [dev-dependencies]
 bytes = "1.10.1"
-serde_json = { workspace = true }
 tempfile = "3.27.0"
