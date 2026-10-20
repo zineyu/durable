@@ -6,5 +6,5 @@ client/storybook-static/
 client/screenshots/
 .screenshots/
 .DS_Store
-client/test-results/
-client/playwright-report/
+test-results/
+playwright-report/
