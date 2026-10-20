@@ -32,6 +32,12 @@ jobs:
       - name: Repository checks
         run: devenv shell -- durable-test
 
+      - name: Install Playwright browser
+        run: devenv shell -- bash -c 'cd client && npx playwright install --with-deps chromium'
+
+      - name: End-to-end tests
+        run: devenv shell -- bash -c 'cargo build --workspace && cd client && npm run test:e2e'
+
       - name: Build Storybook
         run: devenv shell -- bash -c 'cd client && npm run build-storybook'
 

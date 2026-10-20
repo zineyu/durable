@@ -25,10 +25,13 @@
 | --- | --- |
 | `devenv shell -- durable-build` | 先构建 client，再构建 Rust workspace |
 | `devenv shell -- durable-test` | 提交前的全部检查 |
+| `devenv shell -- durable-e2e` | 端到端测试：构建后由 Playwright 驱动真实 agent、hub 与浏览器 |
 | `devenv shell -- durable-typegen` | 重新生成 TS 协议类型 |
 | `devenv shell -- storybook` | Storybook 开发服务器 |
 
 `durable-test` 依次执行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`、TS 类型一致性、ESLint、`tsc --noEmit`、Vitest。提交前必须全部通过。
+
+`durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 hub 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
 
 ## 构建顺序
 
@@ -46,4 +49,4 @@
 
 ## 工作区噪声
 
-工作区包含 devenv 与构建产物目录：`.devenv/`、`target/`、`client/dist/`、`client/storybook-static/`、`client/screenshots/`。扫描仓库使用 `rg` 或 `git ls-files`，不要用 `find .`。
+工作区包含 devenv 与构建产物目录：`.devenv/`、`target/`、`client/dist/`、`client/storybook-static/`、`client/screenshots/`、`client/test-results/`、`client/playwright-report/`。扫描仓库使用 `rg` 或 `git ls-files`，不要用 `find .`。

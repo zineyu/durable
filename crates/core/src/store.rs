@@ -467,6 +467,13 @@ impl Store {
             created_at,
         );
         changes.append_event(
+            FactEvent::ActiveLeafChanged {
+                session: metadata.clone(),
+                active_leaf: Some(node.id),
+            },
+            created_at,
+        );
+        changes.append_event(
             FactEvent::MessageQueued {
                 session: metadata,
                 item,
@@ -706,6 +713,13 @@ impl Store {
             FactEvent::MessageAppended {
                 session: metadata.clone(),
                 message: assistant.clone(),
+            },
+            now,
+        );
+        changes.append_event(
+            FactEvent::ActiveLeafChanged {
+                session: metadata.clone(),
+                active_leaf: Some(assistant.id),
             },
             now,
         );

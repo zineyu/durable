@@ -28,7 +28,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let address = hub::parse_listen_address(&arguments.listen)?;
     let store = Arc::new(durable::Store::open(&arguments.database).await?);
     let listener = tokio::net::TcpListener::bind(address).await?;
-    println!("hub listening on http://{address}");
+    let bound = listener.local_addr()?;
+    println!("hub listening on http://{bound}");
     hub::serve(listener, store).await?;
     Ok(())
 }

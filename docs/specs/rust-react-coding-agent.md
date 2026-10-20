@@ -198,7 +198,7 @@ stateDiagram-v2
 
 ## 测试决策
 
-测试 seam 共两个。两个 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`hub` 的合并协议与总线由多节点规格新增的 Seam 3 覆盖。
+测试 seam 共四个：本文档定义 Seam 1、Seam 2 与 Seam 4，多节点规格定义 Seam 3。所有 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`hub` 的合并协议与总线由多节点规格新增的 Seam 3 覆盖。
 
 ### Seam 1：`agent` 的 HTTP API
 
@@ -240,6 +240,21 @@ stateDiagram-v2
 - 两个 session 的事件交错到达时，各自状态互不影响。
 - `after` 回放与 bootstrap 合并结果等于一次性从零构建的结果。
 
+### Seam 4：浏览器端到端
+
+**形态**：Playwright 启动真实 `agent` 与 `hub` 进程，各自使用临时 SQLite 与临时 workspace，并指向脚本化 OpenAI 兼容 SSE 服务；Chromium 加载 `hub` 托管的客户端，用可访问名称驱动完整用户流程。用例位于 `client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。
+
+**防止**：浏览器渲染与事件流接线错误；断线重连与 `hub` 重启；客户端与真实协议之间的字段错位。决策见 `docs/adr/0025-browser-e2e.md`。
+
+**漏掉**：真实供应商的行为差异；多节点拓扑；视觉回归。
+
+**验收标准**：
+- 经界面注册 workspace、创建 session、提交消息后，回答流式出现并在刷新后保留。
+- 运行中提交的消息进入队列，可移除；取消运行中的 run 后部分回答保留且队列继续。
+- 工具调用渲染为可折叠卡片，入参与结果可见。
+- 编辑用户消息与重试 assistant 消息产生兄弟分支，切换分支改变 transcript。
+- `hub` 重启后连接状态显示重连中，随后自动回到已连接，新消息仍可执行。
+
 ### 渲染与视觉
 
 - 组件与页面 stories 覆盖：空会话、流式中、工具调用卡片（成功/错误/截断）、长输出、错误横幅、断线状态、队列、多 session 侧栏、分支切换器。
@@ -251,7 +266,7 @@ stateDiagram-v2
 
 ### CI 验收
 
-依次执行并全部通过：`cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`、TS 类型重新生成后 diff 为空、`npm run lint`、`npm run typecheck`、`vitest run`、`storybook build`、Chromatic 发布与视觉门禁。
+依次执行并全部通过：`cargo fmt --check`、`cargo clippy -- -D warnings`、`cargo test`、TS 类型重新生成后 diff 为空、`npm run lint`、`npm run typecheck`、`vitest run`、`npm run test:e2e`、`storybook build`、Chromatic 发布与视觉门禁。
 
 ## 约束与依赖
 
