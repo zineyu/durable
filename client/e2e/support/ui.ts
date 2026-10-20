@@ -23,7 +23,7 @@ export function nodeSwitcher(page: Page): Locator {
 }
 
 export function workspaceGroup(page: Page, path: string): Locator {
-  return page.locator('section').filter({ hasText: path });
+  return page.locator('section').filter({ has: page.getByText(path, { exact: true }) });
 }
 
 /// 打开给定 session 并等待节点已选中、输入区可见。
