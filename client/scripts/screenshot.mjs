@@ -219,7 +219,7 @@ async function assertNodeSwitcher(page, story) {
     throw new Error('缺少节点切换器');
   }
 
-  const pills = switcher.locator('button');
+  const pills = switcher.locator('button[aria-pressed]');
   const pillCount = await pills.count();
   if (emptyNodeStories.has(story.id) && pillCount !== 0) {
     throw new Error(`空节点表仍渲染了 ${pillCount} 个节点`);
@@ -240,6 +240,11 @@ async function assertNodeSwitcher(page, story) {
     if (box.x < switcherBox.x - 1 || box.x + box.width > switcherBox.x + switcherBox.width + 1) {
       throw new Error(`节点按钮溢出切换器: ${box.x}..${box.x + box.width}`);
     }
+  }
+
+  const register = switcher.getByRole('button', { name: '注册节点' });
+  if ((await register.count()) === 0) {
+    throw new Error('节点切换器缺少注册节点入口');
   }
 
   const selected = await switcher.locator('button[aria-pressed="true"]').count();

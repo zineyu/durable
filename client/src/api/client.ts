@@ -8,8 +8,11 @@ import type { HubErrorCode } from './generated/HubErrorCode';
 import type { HubErrorResponse } from './generated/HubErrorResponse';
 import type { MessageNode } from './generated/MessageNode';
 import type { NodeName } from './generated/NodeName';
+import type { NodeSnapshot } from './generated/NodeSnapshot';
 import type { QueueItem } from './generated/QueueItem';
+import type { RegisterNodeRequest } from './generated/RegisterNodeRequest';
 import type { RegisterWorkspaceRequest } from './generated/RegisterWorkspaceRequest';
+import type { RenameNodeRequest } from './generated/RenameNodeRequest';
 import type { RemoveWorkspaceRequest } from './generated/RemoveWorkspaceRequest';
 import type { RenameSessionRequest } from './generated/RenameSessionRequest';
 import type { SessionMetadata } from './generated/SessionMetadata';
@@ -71,6 +74,17 @@ export const api = {
   },
   nodeBootstrap(node: NodeName): Promise<ApiResult<BootstrapResponse>> {
     return request('GET', nodePath(node, 'bootstrap'));
+  },
+  registerNode(name: string, url: string): Promise<ApiResult<NodeSnapshot>> {
+    const body: RegisterNodeRequest = { name, url };
+    return request('POST', '/api/nodes', body);
+  },
+  renameNode(name: NodeName, next: string): Promise<ApiResult<NodeSnapshot>> {
+    const body: RenameNodeRequest = { name: next };
+    return request('PATCH', `/api/nodes/${encodeURIComponent(name)}`, body);
+  },
+  removeNode(name: NodeName): Promise<ApiResult<void>> {
+    return request('DELETE', `/api/nodes/${encodeURIComponent(name)}`);
   },
   sessionTree(node: NodeName, id: string): Promise<ApiResult<SessionTree>> {
     return request('GET', `${sessionPath(node, id)}/tree`);

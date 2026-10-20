@@ -115,7 +115,7 @@
 
 - `GET /api/bootstrap`：节点表、每节点 `status` 与 `detail`、可达节点的 bootstrap。
 - `GET /api/events?after=<hub_seq>`：单一合并事件流。
-- `POST /api/nodes`、`DELETE /api/nodes/{name}`：节点表管理。
+- `POST /api/nodes`、`PATCH /api/nodes/{name}`（改名）、`DELETE /api/nodes/{name}`：节点表管理。
 - `GET /api/health`：`hub` 自身健康与 `protocol_version`。
 
 节点作用域：`/api/n/<node>/<rest>` 转发到该节点 `url` 下的 `/api/<rest>`。方法、查询、请求体与 SSE 全部原样透传，不缓冲、不聚合、不改写。
@@ -199,6 +199,7 @@ stateDiagram-v2
 - `POST /api/n/a/sessions` 只落在节点 a；节点 b 的 session 列表不变。
 - 未知节点名返回 `unknown_node`；非 `ok` 节点的命令返回 `node_unavailable`。
 - 重复注册同一节点名返回 `node_name_taken`；空名返回 `node_name_invalid`。
+- 改名保留 URL 与注册时间，旧名立即返回 `unknown_node`，新名可达；改名对已打开的客户端表现为 `node_removed` 加 `node_registered`。
 - 合并事件流的 `hub_seq` 严格递增且不重复。
 - 游标落在窗口内时回放缺失事件，且不重复已见事件。
 - 游标落在窗口外时返回 resync 指示。
@@ -228,5 +229,5 @@ stateDiagram-v2
 - 本文与 `docs/specs/multi-node-hub.md` 同源，并已发布为 issue #11。
 - 主规格 `docs/specs/rust-react-coding-agent.md` 已完成定点修订：删除被推翻的非目标、`ui` 改为 `hub`、删除并发槽位、指向本规格。
 - 器件与环境命名待同步：二进制重命名后，`AGENTS.md` 的目录表与命令表、`devenv.nix` 的命令入口都要从 `ui` 改为 `hub`。
-- 建议的纵向切片顺序（每片独立通过 `durable-test`）：① `agent` 的 `protocol_version` 与移除并发槽位；② `hub` 的节点表与迁移；③ `hub` 的合并 bootstrap 与节点作用域转发；④ `hub` 的总线与回放窗口；⑤ client 的节点切换器与分片状态。
-- 切片 ⑤ 未包含页面内的节点注册、改名与删除；节点表仍只能经 `POST /api/nodes` 与 `DELETE /api/nodes/{name}` 维护。
+- 建议的纵向切片顺序（每片独立通过 `durable-test`）：① `agent` 的 `protocol_version` 与移除并发槽位；② `hub` 的节点表与迁移；③ `hub` 的合并 bootstrap 与节点作用域转发；④ `hub` 的总线与回放窗口；⑤ client 的节点切换器与分片状态；⑥ client 的节点注册、改名与删除。
+- 切片 ⑤ 只做节点切换器与分片状态；页面内的节点注册、改名与删除在切片 ⑥。

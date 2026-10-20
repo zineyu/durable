@@ -41,7 +41,10 @@ type DialogState =
   | { kind: 'edit'; sessionId: string; messageId: number; text: string }
   | { kind: 'retry'; sessionId: string; messageId: number }
   | { kind: 'register-workspace'; path: string }
-  | { kind: 'remove-workspace'; path: string };
+  | { kind: 'remove-workspace'; path: string }
+  | { kind: 'register-node'; name: string; url: string }
+  | { kind: 'rename-node'; name: NodeName; next: string }
+  | { kind: 'remove-node'; name: NodeName };
 
 const RECONNECT_DELAY_MS = 1000;
 
@@ -382,11 +385,62 @@ export function App() {
   }, [session, selectedNode, runCommand]);
 
   const handleDialogConfirm = useCallback(() => {
-    if (dialog === null || selectedNode === null) {
+    if (dialog === null) {
+      return;
+    }
+    const current = dialog;
+    const close = () => setDialog(null);
+
+    if (isNodeDialog(current)) {
+      void (async () => {
+        switch (current.kind) {
+          case 'register-node': {
+            const outcome = await api.registerNode(current.name.trim(), current.url.trim());
+            if (!outcome.ok) {
+              report(outcome.error);
+              return;
+            }
+            close();
+            window.location.hash = writeLocationToHash(outcome.value.name, null);
+            return;
+          }
+          case 'rename-node': {
+            const outcome = await api.renameNode(current.name, current.next.trim());
+            if (!outcome.ok) {
+              report(outcome.error);
+              return;
+            }
+            close();
+            if (selectedNode === current.name) {
+              window.location.hash = writeLocationToHash(outcome.value.name, selectedSessionId);
+            }
+            return;
+          }
+          case 'remove-node': {
+            const outcome = await api.removeNode(current.name);
+            if (!outcome.ok) {
+              report(outcome.error);
+              return;
+            }
+            close();
+            if (selectedNode === current.name) {
+              window.location.hash = '';
+            }
+            return;
+          }
+          default: {
+            const unhandled: never = current;
+            throw new Error(`未处理的节点对话框: ${JSON.stringify(unhandled)}`);
+          }
+        }
+      })();
+      return;
+    }
+
+    if (selectedNode === null) {
       return;
     }
     const node = selectedNode;
-    const current = dialog;
     void (async () => {
       let outcome: ApiResult<unknown>;
       switch (current.kind) {
@@ -411,9 +465,9 @@ export function App() {
         report(outcome.error);
         return;
       }
-      setDialog(null);
+      close();
     })();
-  }, [dialog, selectedNode, report]);
+  }, [dialog, selectedNode, selectedSessionId, report]);
 
   const renderMain = (): ReactNode => {
     if (selectedNode === null) {
@@ -562,6 +616,9 @@ export function App() {
             nodes={state.hub.nodes}
             selectedNode={selectedNode}
             onSelectNode={selectNode}
+            onRegisterNode={() => setDialog({ kind: 'register-node', name: '', url: '' })}
+            onRenameNode={(name) => setDialog({ kind: 'rename-node', name, next: name })}
+            onRemoveNode={(name) => setDialog({ kind: 'remove-node', name })}
             notice={notice}
             commandsDisabled={!nodeReady}
             modelName={shard?.modelName ?? ''}
@@ -593,7 +650,8 @@ export function App() {
         <Dialog
           title={dialogTitle(dialog)}
           confirmLabel={dialogConfirmLabel(dialog)}
-          confirmDisabled={dialog.kind === 'register-workspace' && dialog.path.trim().length === 0}
+          confirmDisabled={dialogConfirmDisabled(dialog)}
+          danger={dialog.kind === 'remove-node'}
           onConfirm={handleDialogConfirm}
           onCancel={() => setDialog(null)}
         >
@@ -602,6 +660,32 @@ export function App() {
       ) : null}
     </>
   );
+}
+
+type NodeDialog = Extract<
+  DialogState,
+  { kind: 'register-node' | 'rename-node' | 'remove-node' }
+>;
+
+function isNodeDialog(dialog: DialogState): dialog is NodeDialog {
+  return (
+    dialog.kind === 'register-node' ||
+    dialog.kind === 'rename-node' ||
+    dialog.kind === 'remove-node'
+  );
+}
+
+function dialogConfirmDisabled(dialog: DialogState): boolean {
+  switch (dialog.kind) {
+    case 'register-workspace':
+      return dialog.path.trim().length === 0;
+    case 'register-node':
+      return dialog.name.trim().length === 0 || dialog.url.trim().length === 0;
+    case 'rename-node':
+      return dialog.next.trim().length === 0;
+    default:
+      return false;
+  }
 }
 
 function dialogTitle(dialog: DialogState): string {
@@ -614,6 +698,12 @@ function dialogTitle(dialog: DialogState): string {
       return '注册 workspace';
     case 'remove-workspace':
       return '移除 workspace';
+    case 'register-node':
+      return '注册节点';
+    case 'rename-node':
+      return '重命名节点';
+    case 'remove-node':
+      return '删除节点';
     default: {
       const unhandled: never = dialog;
       throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
@@ -631,6 +721,12 @@ function dialogConfirmLabel(dialog: DialogState): string {
       return '注册';
     case 'remove-workspace':
       return '移除';
+    case 'register-node':
+      return '注册';
+    case 'rename-node':
+      return '重命名';
+    case 'remove-node':
+      return '删除';
     default: {
       const unhandled: never = dialog;
       throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
@@ -673,6 +769,42 @@ function renderDialogBody(
       return (
         <p>
           移除只删除注册记录，不触碰磁盘文件。仍有 session 时 server 会拒绝并说明原因，此操作不可撤销。
+        </p>
+      );
+    case 'register-node':
+      return (
+        <>
+          <input
+            value={dialog.name}
+            aria-label="节点名"
+            placeholder="macbook-air-02"
+            autoFocus
+            onChange={(event) => setDialog({ ...dialog, name: event.target.value })}
+          />
+          <input
+            value={dialog.url}
+            aria-label="节点 URL"
+            placeholder="http://127.0.0.1:8081"
+            onChange={(event) => setDialog({ ...dialog, url: event.target.value })}
+          />
+        </>
+      );
+    case 'rename-node':
+      return (
+        <>
+          <input
+            value={dialog.next}
+            aria-label="新节点名"
+            autoFocus
+            onChange={(event) => setDialog({ ...dialog, next: event.target.value })}
+          />
+          <p>改名后旧链接失效，指向旧名的页面会显示「未知节点」。</p>
+        </>
+      );
+    case 'remove-node':
+      return (
+        <p>
+          删除只移除节点表登记，不触碰那台机器上的 agent、SQLite 与在跑的 run。此操作不可撤销。
         </p>
       );
     default: {

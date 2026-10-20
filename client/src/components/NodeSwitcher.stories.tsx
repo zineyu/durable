@@ -28,6 +28,10 @@ export const UnknownSelection: Story = {
   args: { nodes, selected: 'retired-studio' },
 };
 
+export const MenuOpen: Story = {
+  args: { nodes, selected: 'studio', defaultMenuOpen: true },
+};
+
 export const Empty: Story = {
   args: { nodes: [], selected: null },
 };

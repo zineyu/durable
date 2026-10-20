@@ -178,6 +178,38 @@ impl Store {
         Ok(node)
     }
 
+    /// 重命名节点。
+    ///
+    /// 输入：节点表中的旧名与新名。名称即身份，改名后旧名不再存在。
+    /// 失败：旧名不在节点表中，或新名已被使用。
+    /// 副作用：替换 node 行，保留 URL 与注册时间。
+    pub async fn rename_node(
+        &self,
+        name: &NodeName,
+        next: NodeName,
+    ) -> Result<NodeMetadata, StoreError> {
+        let _line = self.line.lock().await;
+        let Some(node) = self.storage.node(name).await? else {
+            return Err(StoreError::NodeNotFound(name.clone()));
+        };
+        if *name == next {
+            return Ok(node);
+        }
+        if self.storage.node(&next).await?.is_some() {
+            return Err(StoreError::NodeNameTaken(next));
+        }
+        let renamed = NodeMetadata {
+            name: next,
+            url: node.url,
+            created_at: node.created_at,
+        };
+        let mut changes = Changeset::new();
+        changes.delete_node(name.clone());
+        changes.insert_node(renamed.clone());
+        self.commit(&changes).await?;
+        Ok(renamed)
+    }
+
     /// 移除节点。
     ///
     /// 失败：该名称不在节点表中。

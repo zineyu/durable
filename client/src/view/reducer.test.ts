@@ -728,6 +728,20 @@ describe('节点表变更', () => {
     expect(sidebarWorkspaces(shardOf(state, nodeA))).not.toEqual([]);
   });
 
+  it('改名按删除加登记广播，旧名与旧分片一起消失', () => {
+    const removed = streamed(loaded(), { type: 'node_removed', hubSeq: 8, name: nodeB });
+    const registered = streamed(removed, {
+      type: 'node_registered',
+      hubSeq: 9,
+      node: { name: 'studio-2', url: `http://127.0.0.1:${nodeB}`, createdAt: 20 },
+    });
+
+    expect(registered.hub.nodes.map((record) => record.name)).toEqual([nodeA, 'studio-2']);
+    expect(registered.hub.nodes.at(-1)?.status).toBe('unreachable');
+    expect(registered.nodes[nodeB]).toBeUndefined();
+    expect(registered.hub.cursor).toBe(9);
+  });
+
   it('node_removed 删除记录与分片', () => {
     const state = reduce(loaded(), { type: 'select-node', node: nodeB });
     const removed = streamed(state, { type: 'node_removed', hubSeq: 8, name: nodeB });

@@ -31,6 +31,7 @@ devenv shell -- durable-build
 - 工具栏「主题」切换浅色与深色语义 token。
 - 组件 stories 位于 `src/components/*.stories.tsx`；页面级 stories 为 `Pages/Console` 与 `Pages/Tokens`。
 - 节点状态由 `Components/NodeSwitcher`、`Components/NodeStatusBadge` 与 `Components/Sidebar` 覆盖；页面级 `Pages/Console` 另有不可达节点、未知节点与空节点表三种状态。
+- 节点表在切换器里维护：`注册节点` 打开注册对话框，选中节点的 `节点操作` 菜单提供重命名与删除。
 - 组件 stories 通过 `parameters.frame` 选择画框：`sidebar`（280px，侧栏内组件）、`content`（748px，消息与工具行）、`centered`（自然尺寸居中，按钮与图标）、`page`（整页，shell 与页面）。画框只存在于 Storybook。
 
 ## 截图

@@ -28,6 +28,7 @@ pub use error::ApiError;
 pub use protocol::{
     HUB_PROTOCOL_VERSION, HubBootstrap, HubErrorCode, HubErrorResponse, HubHealth, HubStatus,
     HubStreamEvent, NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION, RegisterNodeRequest,
+    RenameNodeRequest,
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
@@ -130,7 +131,7 @@ pub fn router(state: HubState) -> Router {
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/events", get(sse::events))
         .route("/api/nodes", post(register_node))
-        .route("/api/nodes/{name}", delete(remove_node))
+        .route("/api/nodes/{name}", delete(remove_node).patch(rename_node))
         .route("/api/n/{node}", any(forward_node))
         .route("/api/n/{node}/{*rest}", any(forward_node))
         .fallback(static_asset)
@@ -160,6 +161,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     HubBootstrap::export_all(&config)?;
     HubStreamEvent::export_all(&config)?;
     RegisterNodeRequest::export_all(&config)?;
+    RenameNodeRequest::export_all(&config)?;
     HubErrorCode::export_all(&config)?;
     HubErrorResponse::export_all(&config)?;
     NodeName::export_all(&config)?;
@@ -221,6 +223,28 @@ async fn register_node(
             "正在建立上游连接".to_owned(),
         )),
     ))
+}
+
+/// 重命名节点。旧名立即失效，总线广播旧名的删除与新名的登记。
+async fn rename_node(
+    State(state): State<HubState>,
+    UrlPath(name): UrlPath<String>,
+    JsonBody(request): JsonBody<RenameNodeRequest>,
+) -> Result<Json<NodeSnapshot>, ApiError> {
+    let name = NodeName::parse(&name)?;
+    let next = NodeName::parse(&request.name)?;
+    let node = state.store.rename_node(&name, next).await?;
+    if node.name != name {
+        state.unwatch(&name);
+        state.bus.node_removed(name);
+        state.bus.node_registered(node.clone());
+        state.watch(node.clone());
+    }
+    Ok(Json(NodeSnapshot::failed(
+        node,
+        NodeStatus::Unreachable,
+        "正在建立上游连接".to_owned(),
+    )))
 }
 
 async fn remove_node(

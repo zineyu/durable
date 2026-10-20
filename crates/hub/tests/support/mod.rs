@@ -70,6 +70,15 @@ impl Harness {
             .expect("请求注册节点")
     }
 
+    pub async fn rename_node(&self, name: &str, next: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .patch(self.url(&format!("/api/nodes/{name}")))
+            .json(&serde_json::json!({ "name": next }))
+            .send()
+            .await
+            .expect("请求重命名节点")
+    }
+
     pub async fn remove_node(&self, name: &str) -> reqwest::Response {
         reqwest::Client::new()
             .delete(self.url(&format!("/api/nodes/{name}")))

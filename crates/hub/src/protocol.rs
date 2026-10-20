@@ -82,6 +82,12 @@ pub struct RegisterNodeRequest {
     pub url: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameNodeRequest {
+    pub name: String,
+}
+
 /// 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(

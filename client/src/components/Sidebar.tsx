@@ -17,6 +17,9 @@ export type SidebarProps = {
   nodes: NodeRecord[];
   selectedNode: NodeName | null;
   onSelectNode?: (node: NodeName) => void;
+  onRegisterNode?: () => void;
+  onRenameNode?: (node: NodeName) => void;
+  onRemoveNode?: (node: NodeName) => void;
   /// 节点不可用或未知时的说明，替换空列表提示。
   notice?: string | null;
   commandsDisabled?: boolean;
@@ -39,6 +42,9 @@ export function Sidebar({
   nodes,
   selectedNode,
   onSelectNode,
+  onRegisterNode,
+  onRenameNode,
+  onRemoveNode,
   notice = null,
   commandsDisabled = false,
   modelName,
@@ -65,6 +71,9 @@ export function Sidebar({
         nodes={nodes}
         selected={selectedNode}
         {...(onSelectNode ? { onSelect: onSelectNode } : {})}
+        {...(onRegisterNode ? { onRegister: onRegisterNode } : {})}
+        {...(onRenameNode ? { onRename: onRenameNode } : {})}
+        {...(onRemoveNode ? { onRemove: onRemoveNode } : {})}
       />
       <div className={styles.list}>
         {notice !== null ? (
