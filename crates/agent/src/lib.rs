@@ -44,6 +44,10 @@ pub use tools::{
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";
+/// 未指定 `--database` 时使用的数据库文件名。
+pub const DEFAULT_DATABASE_FILE: &str = "agent.sqlite";
+/// 日志文件的前缀。
+pub const LOG_FILE_PREFIX: &str = "agent";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListenAddressError {

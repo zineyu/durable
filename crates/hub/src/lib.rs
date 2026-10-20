@@ -32,6 +32,10 @@ pub use protocol::{
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
+/// 未指定 `--database` 时使用的数据库文件名。
+pub const DEFAULT_DATABASE_FILE: &str = "hub.sqlite";
+/// 日志文件的前缀。
+pub const LOG_FILE_PREFIX: &str = "hub";
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 const DEFAULT_REPLAY_WINDOW: usize = 4096;
 
@@ -79,6 +83,7 @@ impl HubState {
                 return Err(std::io::Error::other(error.to_string()));
             }
         };
+        tracing::info!(nodes = nodes.len(), "恢复节点订阅");
         for node in nodes {
             state.watch(node);
         }
@@ -215,6 +220,7 @@ async fn register_node(
     let node = state.store.register_node(name, url.to_owned()).await?;
     state.bus.node_registered(node.clone());
     state.watch(node.clone());
+    tracing::info!(node = %node.name, url = %node.url, "注册节点");
     Ok((
         StatusCode::CREATED,
         Json(NodeSnapshot::failed(
@@ -234,6 +240,7 @@ async fn rename_node(
     let name = NodeName::parse(&name)?;
     let next = NodeName::parse(&request.name)?;
     let node = state.store.rename_node(&name, next).await?;
+    tracing::info!(from = %name, to = %node.name, "重命名节点");
     if node.name != name {
         state.unwatch(&name);
         state.bus.node_removed(name);
@@ -253,6 +260,7 @@ async fn remove_node(
 ) -> Result<StatusCode, ApiError> {
     let name = NodeName::parse(&name)?;
     state.store.remove_node(&name).await?;
+    tracing::info!(node = %name, "移除节点");
     state.unwatch(&name);
     state.bus.node_removed(name);
     Ok(StatusCode::NO_CONTENT)
@@ -294,11 +302,10 @@ async fn forward_node(
         upstream = upstream.header(name, value);
     }
 
-    let response = upstream
-        .body(body)
-        .send()
-        .await
-        .map_err(|error| ApiError::node_unavailable(format!("连接节点失败: {error}")))?;
+    let response = upstream.body(body).send().await.map_err(|error| {
+        tracing::debug!(node = %name, error = %error, "转发请求失败");
+        ApiError::node_unavailable(format!("连接节点失败: {error}"))
+    })?;
 
     let status = response.status();
     let response_headers = response.headers().clone();

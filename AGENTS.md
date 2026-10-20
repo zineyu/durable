@@ -12,6 +12,7 @@
 | 路径 | 职责 |
 | --- | --- |
 | `crates/core` | 领域与持久化内核（包名 `durable`）；领域类型、`ts-rs` 派生、单一写入线与 SQLite 存储 |
+| `crates/runtime` | 进程级支撑（包名 `runtime`）；平台标准目录解析与日志初始化 |
 | `crates/agent` | agent 二进制；HTTP/SSE 协议与 `ts-rs` 导出入口 |
 | `crates/hub` | hub 二进制；编译期内嵌 `client/dist` |
 | `client` | React + Vite + TypeScript 客户端 |
@@ -32,6 +33,10 @@
 `durable-test` 依次执行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`、TS 类型一致性、ESLint、`tsc --noEmit`、Vitest。提交前必须全部通过。
 
 `durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 hub 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
+
+## 日志与路径
+
+`--database` 与 `--log-dir` 可省略：省略时使用平台标准目录（见 `docs/adr/0026-logging-and-default-paths.md`）。日志同时写入标准错误（pretty 格式）与每日轮转的 JSON Lines 文件，保留 14 天。`DURABLE_LOG` 控制过滤，默认 `info`。测试必须传 `--log-dir`，避免写入用户的标准日志目录。
 
 ## 构建顺序
 

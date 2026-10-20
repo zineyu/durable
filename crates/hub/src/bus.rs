@@ -109,6 +109,15 @@ impl Bus {
         if previous.as_ref().map(|old| old.status) == Some(view.status) {
             return;
         }
+        match view.status {
+            NodeStatus::Ok => tracing::info!(node = %name, "节点可用"),
+            status => tracing::warn!(
+                node = %name,
+                status = ?status,
+                detail = view.detail.as_deref().unwrap_or(""),
+                "节点不可用"
+            ),
+        }
         self.publish_fact(|hub_seq| HubStreamEvent::NodeStatusChanged {
             hub_seq,
             name,

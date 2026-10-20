@@ -72,6 +72,8 @@ export class Harness {
         '127.0.0.1:0',
         '--database',
         join(root, 'agent.sqlite'),
+        '--log-dir',
+        join(root, 'logs'),
         '--workspace',
         workspace,
       ],
@@ -86,7 +88,14 @@ export class Harness {
     });
     const hub = await launchProcess({
       binary: hubBinary,
-      args: ['--listen', '127.0.0.1:0', '--database', join(root, 'hub.sqlite')],
+      args: [
+        '--listen',
+        '127.0.0.1:0',
+        '--database',
+        join(root, 'hub.sqlite'),
+        '--log-dir',
+        join(root, 'logs'),
+      ],
       environment: process.env,
       readyLine: 'hub listening on ',
       label: 'hub',
@@ -150,7 +159,14 @@ export class Harness {
       try {
         return await launchProcess({
           binary,
-          args: ['--listen', this.hubListen, '--database', this.hubDatabase],
+          args: [
+            '--listen',
+            this.hubListen,
+            '--database',
+            this.hubDatabase,
+            '--log-dir',
+            join(this.root, 'logs'),
+          ],
           environment: process.env,
           readyLine: 'hub listening on ',
           label: 'hub',

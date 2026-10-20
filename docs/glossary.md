@@ -56,4 +56,8 @@
 | 客户端状态 | 浏览器内由纯 reducer 从 bootstrap、事实事件、token 增量与 session 树快照推导的视图模型。 |
 | 连接状态 | 客户端对 SSE 连接的可见状态：已连接、重连中、已断开。 |
 | scripted provider | 测试用本地 OpenAI 兼容 SSE 服务。按脚本返回响应，不替换被测代码。 |
+| 标准目录 | 应用按平台惯例使用的可写数据与日志目录。macOS 用 `Library` 子目录，类 Unix 平台用 XDG 基础目录，Windows 用 `LOCALAPPDATA`。 |
+| 日志文件 | 标准日志目录中按天轮转的 JSON Lines 文件，文件名为 `<prefix>.<YYYY-MM-DD>.log`，保留最近 14 个。 |
+| 日志过滤器 | `DURABLE_LOG` 环境变量的指令。语法同 `RUST_LOG`，默认 `info`。 |
+| 默认数据库路径 | 未指定 `--database` 时使用的标准数据目录下的 `agent.sqlite` 或 `hub.sqlite`。 |
 | seam | 规格定义的公开测试边界。 |

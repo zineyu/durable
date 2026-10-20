@@ -96,8 +96,9 @@
 ### 进程与部署
 
 - 两个 Rust 二进制：`agent` 与 `hub`（原 `ui`）。两者默认只监听 `127.0.0.1`。
-- `agent` 只提供 HTTP API，不托管前端资源。启动参数包含监听地址、SQLite 路径、可重复的初始 workspace 路径。模型配置经环境变量提供。
-- `hub` 内嵌构建后的 React 静态资源并托管，持有节点表，把全部 node 的协议合并成单一 `/api/*` 与单一事件流。启动参数包含监听地址与 `hub` 数据库路径。细节见 `docs/specs/multi-node-hub.md`。
+- `agent` 只提供 HTTP API，不托管前端资源。启动参数包含监听地址、可选的 SQLite 路径、可选的日志目录、可重复的初始 workspace 路径。模型配置经环境变量提供。
+- `hub` 内嵌构建后的 React 静态资源并托管，持有节点表，把全部 node 的协议合并成单一 `/api/*` 与单一事件流。启动参数包含监听地址、可选的 `hub` 数据库路径与可选的日志目录。细节见 `docs/specs/multi-node-hub.md`。
+- 省略数据库路径时使用平台标准数据目录下的 `agent.sqlite` 或 `hub.sqlite`；省略日志目录时使用平台标准日志目录。两个二进制同时把日志写到标准错误与标准日志目录下的每日 JSON Lines 文件，`DURABLE_LOG` 控制过滤。见 `docs/adr/0026-logging-and-default-paths.md`。
 - 浏览器始终同源访问 `hub`，不需要 CORS。鉴权、TLS、公网监听不在本规格内。
 - `agent` 缺少必需配置时启动失败，错误信息指出缺失项。
 
