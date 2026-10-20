@@ -138,6 +138,9 @@ async fn restarts_with_same_initial_workspace_without_duplicating() {
     second.wait().await.expect("等待第二个 agent 退出");
 }
 /// 规格「进程与部署」：未指定数据库与日志目录时使用平台标准目录。
+///
+/// 用例清除 `runtime::dirs::VARIABLES` 中的全部变量后只设置 `HOME`：三个平台在各自的
+/// 原生变量缺失时都回退到 `HOME`，因此期望值可从同一份 `Env` 推导。
 #[test]
 fn uses_standard_locations_when_paths_are_omitted() {
     let directory = tempfile::tempdir().expect("创建临时目录");
@@ -148,12 +151,14 @@ fn uses_standard_locations_when_paths_are_omitted() {
     command
         .args(["--listen", "127.0.0.1:0"])
         .env("HOME", &home)
-        .env(runtime::logging::FILTER_ENV, "info")
-        .env_remove("XDG_DATA_HOME")
-        .env_remove("XDG_STATE_HOME")
-        .env_remove("LOCALAPPDATA")
+        .env(runtime::logging::FILTER_ENV, "debug")
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
+    for name in runtime::dirs::VARIABLES {
+        if name != "HOME" {
+            command.env_remove(name);
+        }
+    }
     let mut child = command.spawn().expect("启动 agent");
     let line = first_line(&mut child);
     assert!(
@@ -176,18 +181,31 @@ fn uses_standard_locations_when_paths_are_omitted() {
     let record = wait_for_startup_log(&dirs.logs);
     assert_eq!(record["database"], database.display().to_string());
     assert_eq!(record["log_directory"], dirs.logs.display().to_string());
+    assert!(
+        startup_log_record(&dirs.logs, "打开 SQLite").is_some(),
+        "内核的 `tracing` 事件进入同一订阅者"
+    );
 
     child.kill().expect("结束 agent");
     child.wait().expect("等待 agent 退出");
 }
 
+/// 读取启动输出的首行。超时后结束子进程，避免用例挂起。
 fn first_line(child: &mut std::process::Child) -> String {
     let stdout = child.stdout.take().expect("取得启动输出");
-    let mut line = String::new();
-    BufReader::new(stdout)
-        .read_line(&mut line)
-        .expect("读取启动输出");
-    line.trim_end().to_owned()
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = sender.send(line);
+    });
+    match receiver.recv_timeout(Duration::from_secs(10)) {
+        Ok(line) => line.trim_end().to_owned(),
+        Err(error) => {
+            child.kill().expect("结束未就绪的进程");
+            panic!("未在 10 秒内读到启动输出: {error}");
+        }
+    }
 }
 
 /// 在标准日志目录中等待带指定消息的 JSON 记录。
