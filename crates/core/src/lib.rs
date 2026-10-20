@@ -3,6 +3,7 @@ mod error;
 mod event;
 mod id;
 mod message;
+mod node;
 mod queue;
 mod run;
 mod session;
@@ -24,6 +25,7 @@ pub use message::{
     Message, MessageContent, MessageNode, MessageRole, MessageRoleError, MessageText,
     MessageTextError,
 };
+pub use node::{NodeMetadata, NodeName, NodeNameError};
 pub use queue::QueueItem;
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTree};

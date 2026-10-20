@@ -13,6 +13,7 @@ use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{Message, MessageContent, MessageNode, MessageRole};
+use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
@@ -87,6 +88,26 @@ impl SqliteStorage {
             .await?
             .as_ref()
             .map(parse_workspace)
+            .transpose()
+    }
+
+    /// 节点表中的全部节点，按注册顺序排列。
+    pub async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
+        sqlx::query("SELECT name, url, created_at FROM node ORDER BY created_at ASC, name ASC")
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(parse_node)
+            .collect()
+    }
+
+    pub async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
+        sqlx::query("SELECT name, url, created_at FROM node WHERE name = ?1")
+            .bind(name.as_str())
+            .fetch_optional(&self.pool)
+            .await?
+            .as_ref()
+            .map(parse_node)
             .transpose()
     }
 
@@ -304,6 +325,21 @@ impl SqliteStorage {
                         .await?;
                     ensure_written(&result, "删除 workspace")?;
                 }
+                Change::InsertNode(node) => {
+                    sqlx::query("INSERT INTO node (name, url, created_at) VALUES (?1, ?2, ?3)")
+                        .bind(node.name.as_str())
+                        .bind(&node.url)
+                        .bind(node.created_at)
+                        .execute(&mut *transaction)
+                        .await?;
+                }
+                Change::DeleteNode(name) => {
+                    let result = sqlx::query("DELETE FROM node WHERE name = ?1")
+                        .bind(name.as_str())
+                        .execute(&mut *transaction)
+                        .await?;
+                    ensure_written(&result, "删除 node")?;
+                }
                 Change::InsertSession(session) => {
                     sqlx::query(
                         "INSERT INTO session (id, workspace, title, title_auto, created_at, updated_at)
@@ -519,6 +555,15 @@ impl SqliteStorage {
         .await?;
         RunId::parse(id).map_err(|error| corrupted("run.id", error))
     }
+}
+
+fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
+    Ok(NodeMetadata {
+        name: NodeName::parse(&row.get::<String, _>("name"))
+            .map_err(|error| corrupted("node.name", error))?,
+        url: row.get("url"),
+        created_at: row.get("created_at"),
+    })
 }
 
 fn parse_workspace(row: &SqliteRow) -> Result<WorkspaceMetadata, StoreError> {

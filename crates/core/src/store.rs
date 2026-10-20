@@ -7,6 +7,7 @@ use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::id::{MessageId, QueueItemId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{Message, MessageContent, MessageNode, MessageRole, MessageText};
+use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunFailureCode, RunRecord, RunStatus};
 use crate::session::{SessionMetadata, SessionRecord, SessionTree, derive_title};
@@ -135,6 +136,52 @@ impl Store {
             FactEvent::WorkspaceRemoved { path: path.clone() },
             now_millis(),
         );
+        self.commit(&changes).await.map(|_| ())
+    }
+
+    /// 节点表中的全部节点，按注册顺序排列。
+    ///
+    /// 失败：数据库读取失败或存储值不符合领域约束。
+    pub async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
+        self.storage.nodes().await
+    }
+
+    /// 注册节点。
+    ///
+    /// 输入：已解析的节点名与非空 URL。
+    /// 失败：该名称已注册。
+    /// 副作用：写入 node 行。
+    pub async fn register_node(
+        &self,
+        name: NodeName,
+        url: String,
+    ) -> Result<NodeMetadata, StoreError> {
+        let _line = self.line.lock().await;
+        if self.storage.node(&name).await?.is_some() {
+            return Err(StoreError::NodeNameTaken(name));
+        }
+        let node = NodeMetadata {
+            name,
+            url,
+            created_at: now_millis(),
+        };
+        let mut changes = Changeset::new();
+        changes.insert_node(node.clone());
+        self.commit(&changes).await?;
+        Ok(node)
+    }
+
+    /// 移除节点。
+    ///
+    /// 失败：该名称不在节点表中。
+    /// 副作用：删除 node 行。
+    pub async fn remove_node(&self, name: &NodeName) -> Result<(), StoreError> {
+        let _line = self.line.lock().await;
+        if self.storage.node(name).await?.is_none() {
+            return Err(StoreError::NodeNotFound(name.clone()));
+        }
+        let mut changes = Changeset::new();
+        changes.delete_node(name.clone());
         self.commit(&changes).await.map(|_| ())
     }
 

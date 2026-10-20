@@ -1,8 +1,10 @@
 use std::process::Command;
 
 fn run_hub(listen: &str) -> std::process::Output {
+    let directory = tempfile::tempdir().expect("创建临时目录");
     Command::new(env!("CARGO_BIN_EXE_hub"))
-        .args(["--listen", listen])
+        .args(["--listen", listen, "--database"])
+        .arg(directory.path().join("hub.sqlite"))
         .output()
         .expect("启动 hub 二进制")
 }

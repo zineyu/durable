@@ -2,6 +2,7 @@ use thiserror::Error;
 
 use crate::id::{MessageId, QueueItemId, SessionId, WorkspacePath};
 use crate::message::MessageRole;
+use crate::node::NodeName;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -33,4 +34,8 @@ pub enum StoreError {
     RunInProgress(SessionId),
     #[error("session 的队列非空: {}", .0.as_str())]
     QueueNotEmpty(SessionId),
+    #[error("节点名已注册: {}", .0.as_str())]
+    NodeNameTaken(NodeName),
+    #[error("节点未注册: {}", .0.as_str())]
+    NodeNotFound(NodeName),
 }

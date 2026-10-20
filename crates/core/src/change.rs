@@ -1,6 +1,7 @@
 use crate::event::FactEvent;
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{Message, MessageContent};
+use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
@@ -58,6 +59,14 @@ impl Changeset {
 
     pub fn insert_queue_item(&mut self, session: SessionId, item: QueueItem) {
         self.push(Change::InsertQueueItem { session, item });
+    }
+
+    pub fn insert_node(&mut self, node: NodeMetadata) {
+        self.push(Change::InsertNode(node));
+    }
+
+    pub fn delete_node(&mut self, name: NodeName) {
+        self.push(Change::DeleteNode(name));
     }
 
     pub fn delete_queue_item(&mut self, session: SessionId, item: QueueItemId) {
@@ -119,6 +128,8 @@ pub(crate) enum Change {
     InsertWorkspace(WorkspaceMetadata),
     DeleteWorkspace(WorkspacePath),
     InsertSession(SessionRecord),
+    InsertNode(NodeMetadata),
+    DeleteNode(NodeName),
     UpdateSession {
         id: SessionId,
         title: SessionTitle,

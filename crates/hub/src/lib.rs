@@ -1,17 +1,29 @@
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::Path;
+use std::sync::Arc;
 
-use axum::Router;
-use axum::body::Body;
-use axum::extract::{Request, State};
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{FromRequest, Path as UrlPath, Request, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::any;
-use futures_util::TryStreamExt;
+use axum::routing::{delete, get, post};
+use axum::{Json, Router};
+use durable::{NodeName, Store};
 use rust_embed::Embed;
+use serde::de::DeserializeOwned;
+use ts_rs::TS;
+
+mod error;
+mod protocol;
+
+pub use error::ApiError;
+pub use protocol::{
+    HUB_PROTOCOL_VERSION, HubBootstrap, HubErrorCode, HubErrorResponse, HubHealth, HubStatus,
+    NodeSnapshot, NodeStatus, RegisterNodeRequest,
+};
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
-pub const DEFAULT_AGENT_URL: &str = "http://127.0.0.1:8081";
 
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../client/dist"]
@@ -19,8 +31,7 @@ struct Assets;
 
 #[derive(Clone)]
 struct HubState {
-    agent_url: String,
-    client: reqwest::Client,
+    store: Arc<Store>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,78 +61,101 @@ pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError>
     Ok(address)
 }
 
-pub fn router(agent_url: String) -> Router {
-    let state = HubState {
-        agent_url: agent_url.trim_end_matches('/').to_owned(),
-        client: reqwest::Client::new(),
-    };
+pub fn router(store: Arc<Store>) -> Router {
+    let state = HubState { store };
     Router::new()
-        .route("/api", any(proxy))
-        .route("/api/{*path}", any(proxy))
+        .route("/api/health", get(health))
+        .route("/api/bootstrap", get(bootstrap))
+        .route("/api/nodes", post(register_node))
+        .route("/api/nodes/{name}", delete(remove_node))
         .fallback(static_asset)
         .with_state(state)
 }
 
-pub async fn serve(listener: tokio::net::TcpListener, agent_url: String) -> std::io::Result<()> {
-    axum::serve(listener, router(agent_url)).await
+pub async fn serve(listener: tokio::net::TcpListener, store: Arc<Store>) -> std::io::Result<()> {
+    axum::serve(listener, router(store)).await
 }
 
-async fn proxy(State(state): State<HubState>, request: Request) -> Response {
-    let method = request.method().clone();
-    let uri = request.uri().clone();
-    let headers = request.headers().clone();
-    let target = format!(
-        "{}{}{}",
-        state.agent_url,
-        uri.path(),
-        uri.query()
-            .map(|query| format!("?{query}"))
-            .unwrap_or_default()
-    );
+pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(directory)?;
+    let config = ts_rs::Config::new().with_out_dir(directory);
+    HubStatus::export_all(&config)?;
+    HubHealth::export_all(&config)?;
+    NodeStatus::export_all(&config)?;
+    NodeSnapshot::export_all(&config)?;
+    HubBootstrap::export_all(&config)?;
+    RegisterNodeRequest::export_all(&config)?;
+    HubErrorCode::export_all(&config)?;
+    HubErrorResponse::export_all(&config)?;
+    NodeName::export_all(&config)?;
+    Ok(())
+}
 
-    let body = reqwest::Body::wrap_stream(
-        request
-            .into_body()
-            .into_data_stream()
-            .map_err(std::io::Error::other),
-    );
+async fn health() -> Json<HubHealth> {
+    Json(HubHealth {
+        status: HubStatus::Ok,
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        protocol_version: HUB_PROTOCOL_VERSION,
+    })
+}
 
-    let mut upstream = state.client.request(method, target);
-    for (name, value) in headers.iter() {
-        if is_hop_by_hop(name.as_str()) || name == header::HOST {
-            continue;
-        }
-        upstream = upstream.header(name, value);
+async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, ApiError> {
+    let nodes = state.store.nodes().await?;
+    Ok(Json(HubBootstrap {
+        nodes: nodes
+            .into_iter()
+            .map(|node| NodeSnapshot::unattached(node, None))
+            .collect(),
+    }))
+}
+
+async fn register_node(
+    State(state): State<HubState>,
+    JsonBody(request): JsonBody<RegisterNodeRequest>,
+) -> Result<(StatusCode, Json<NodeSnapshot>), ApiError> {
+    let name = NodeName::parse(&request.name)?;
+    let url = request.url.trim();
+    if url.is_empty() {
+        return Err(ApiError::invalid_request(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "节点 URL 不能为空".to_owned(),
+        ));
     }
+    let node = state.store.register_node(name, url.to_owned()).await?;
+    Ok((
+        StatusCode::CREATED,
+        Json(NodeSnapshot::unattached(node, None)),
+    ))
+}
 
-    let response = match upstream.body(body).send().await {
-        Ok(response) => response,
-        Err(error) => {
-            return (StatusCode::BAD_GATEWAY, format!("连接 agent 失败: {error}")).into_response();
-        }
-    };
+async fn remove_node(
+    State(state): State<HubState>,
+    UrlPath(name): UrlPath<String>,
+) -> Result<StatusCode, ApiError> {
+    let name = NodeName::parse(&name)?;
+    state.store.remove_node(&name).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
 
-    let status = response.status();
-    let response_headers = response.headers().clone();
-    let stream = response.bytes_stream().map_err(std::io::Error::other);
+/// 请求体；反序列化失败时返回协议错误信封而非纯文本。
+struct JsonBody<T>(T);
 
-    let mut builder = Response::builder().status(status);
-    for (name, value) in response_headers.iter() {
-        if is_hop_by_hop(name.as_str()) {
-            continue;
-        }
-        builder = builder.header(name, value);
+impl<S, T> FromRequest<S> for JsonBody<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let Json(value) =
+            Json::<T>::from_request(request, state)
+                .await
+                .map_err(|rejection: JsonRejection| {
+                    ApiError::invalid_request(rejection.status(), rejection.body_text())
+                })?;
+        Ok(Self(value))
     }
-
-    builder
-        .body(Body::from_stream(stream))
-        .unwrap_or_else(|error| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("构造反代响应失败: {error}"),
-            )
-                .into_response()
-        })
 }
 
 async fn static_asset(uri: Uri) -> Response {
@@ -143,18 +177,4 @@ fn asset_response(path: &str, data: Vec<u8>) -> Response {
     let content_type = HeaderValue::from_str(mime.as_ref())
         .unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream"));
     ([(header::CONTENT_TYPE, content_type)], data).into_response()
-}
-
-fn is_hop_by_hop(name: &str) -> bool {
-    matches!(
-        name,
-        "connection"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
 }

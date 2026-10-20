@@ -97,7 +97,11 @@ impl From<StoreError> for ApiError {
             | StoreError::Migration(_)
             | StoreError::Serialization(_)
             | StoreError::CorruptedData(_)
-            | StoreError::Invariant(_) => (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR),
+            | StoreError::Invariant(_)
+            | StoreError::NodeNameTaken(_)
+            | StoreError::NodeNotFound(_) => {
+                (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR)
+            }
             StoreError::WorkspaceDuplicate(_) => {
                 (ErrorCode::WorkspaceDuplicate, StatusCode::CONFLICT)
             }
