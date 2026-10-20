@@ -1,0 +1,23 @@
+{
+  "exclude": [
+    "client/src/api/generated/**",
+    "client/dist/**",
+    "client/storybook-static/**",
+    "client/screenshots/**",
+    "**/Cargo.lock",
+    "**/devenv.lock",
+    "**/package-lock.json"
+  ],
+  "rules": [
+    {
+      "path": "client/**/*.{ts,tsx}",
+      "rule": "TypeScript 客户端规范：禁止使用 any 绕过类型检查；样式只消费 client/src/styles/tokens.css 的语义 token，出现颜色字面量或硬编码长度即为问题；页面文件不得包含注释性说明；协议类型来自 client/src/api/generated，不得手写替代。",
+      "merge_system_rule": true
+    },
+    {
+      "path": "crates/**/*.rs",
+      "rule": "Rust 规范：优先指出问题的根因修复，堆叠补丁式修补是问题；不为臆测的未来需求引入抽象；可失败路径不得用 unwrap 或 expect 掩盖错误；跨层协议类型变更需同步 crates/core 的领域类型与 ts-rs 导出。",
+      "merge_system_rule": true
+    }
+  ]
+}
