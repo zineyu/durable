@@ -95,6 +95,7 @@ impl From<StoreError> for ApiError {
         let (code, status) = match &error {
             StoreError::Database(_)
             | StoreError::Migration(_)
+            | StoreError::DatabaseDirectory { .. }
             | StoreError::Serialization(_)
             | StoreError::CorruptedData(_)
             | StoreError::Invariant(_)

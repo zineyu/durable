@@ -31,6 +31,7 @@ impl SqliteStorage {
     /// 失败：数据库无法打开、连接参数被拒绝或迁移失败。
     /// 副作用：创建数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
+        create_parent_directory(path).await?;
         let options = SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(true)
@@ -686,4 +687,22 @@ fn ensure_written(result: &SqliteQueryResult, operation: &str) -> Result<(), Sto
         return Err(StoreError::Invariant(format!("{operation} 未命中任何行")));
     }
     Ok(())
+}
+
+/// 建立数据库文件的父目录。SQLite 只创建文件，不创建目录。
+///
+/// 失败：目录无法建立，例如父级不可写。
+async fn create_parent_directory(path: &Path) -> Result<(), StoreError> {
+    let Some(parent) = path.parent() else {
+        return Ok(());
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(());
+    }
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|error| StoreError::DatabaseDirectory {
+            path: parent.to_path_buf(),
+            message: error.to_string(),
+        })
 }

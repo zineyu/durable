@@ -37,10 +37,10 @@ pub struct Store {
 }
 
 impl Store {
-    /// 打开 SQLite 文件并应用迁移。
+    /// 打开 SQLite 文件并应用迁移。父目录不存在时自动建立。
     ///
-    /// 失败：数据库无法打开、连接参数被拒绝或迁移失败。
-    /// 副作用：创建数据库文件与表。
+    /// 失败：目录无法建立、数据库无法打开、连接参数被拒绝或迁移失败。
+    /// 副作用：创建数据库目录、数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
         Ok(Self {
             storage: SqliteStorage::open(path).await?,
