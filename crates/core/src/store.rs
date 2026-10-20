@@ -566,8 +566,8 @@ impl Store {
             StoreError::Invariant(format!("目标 {} 的子树没有叶子", target.get()))
         })?;
         let now = now_millis();
-        let metadata = session.metadata(snapshot.queue_length, snapshot.busy);
         session.updated_at = now;
+        let metadata = session.metadata(snapshot.queue_length, snapshot.busy);
         let mut changes = Changeset::new();
         changes.update_session(
             id.clone(),
@@ -615,7 +615,7 @@ impl Store {
     /// 队列为空或该 session 已有 running 的 run 时返回 `None`。
     pub async fn start_run(&self, id: &SessionId) -> Result<Option<RunStart>, StoreError> {
         let _line = self.line.lock().await;
-        let session = self.find_session(id).await?;
+        let mut session = self.find_session(id).await?;
         if self.storage.busy(id).await? {
             return Ok(None);
         }
@@ -623,6 +623,7 @@ impl Store {
             return Ok(None);
         };
         let now = now_millis();
+        session.updated_at = now;
         let run_id = self.storage.mint_run_id().await?;
         let pending = self.storage.queue_length(id).await?;
         let remaining = pending.saturating_sub(1);
