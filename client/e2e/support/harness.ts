@@ -38,7 +38,6 @@ export class Harness {
   hubUrl: string;
   private readonly agent: LaunchedProcess;
   private hub: LaunchedProcess;
-  private readonly hubListen: string;
   private readonly hubDatabase: string;
 
   private constructor(init: HarnessInit) {
@@ -49,7 +48,6 @@ export class Harness {
     this.agent = init.agent;
     this.hub = init.hub;
     this.hubUrl = init.hub.url;
-    this.hubListen = new URL(init.hub.url).host;
     this.hubDatabase = join(init.root, 'hub.sqlite');
   }
 
@@ -139,20 +137,20 @@ export class Harness {
 
   /// 用同一端口与同一数据库重启 hub，模拟进程重启与客户端重连。
   async restartHub(): Promise<void> {
+    const listen = new URL(this.hub.url).host;
     await this.hub.stop();
-    this.hub = await this.relaunchHub();
+    this.hub = await this.relaunchHub(listen);
     this.hubUrl = this.hub.url;
     await this.waitForNode();
   }
 
+  /// 结束整套栈并删除临时目录。任一步失败都不阻断其余步骤。
   async dispose(): Promise<void> {
-    await this.hub.stop();
-    await this.agent.stop();
-    await this.provider.stop();
+    await Promise.allSettled([this.hub.stop(), this.agent.stop(), this.provider.stop()]);
     await rm(this.root, { recursive: true, force: true });
   }
 
-  private async relaunchHub(): Promise<LaunchedProcess> {
+  private async relaunchHub(listen: string): Promise<LaunchedProcess> {
     const binary = await binaryPath('hub');
     let lastError: unknown = null;
     for (let attempt = 0; attempt < RESTART_ATTEMPTS; attempt += 1) {
@@ -161,7 +159,7 @@ export class Harness {
           binary,
           args: [
             '--listen',
-            this.hubListen,
+            listen,
             '--database',
             this.hubDatabase,
             '--log-dir',
@@ -186,14 +184,23 @@ export class Harness {
 
   private async waitForNode(): Promise<void> {
     for (let attempt = 0; attempt < READY_POLL_ATTEMPTS; attempt += 1) {
-      const bootstrap = await this.bootstrap();
-      const node = bootstrap.nodes.find((entry) => entry.name === this.nodeName);
-      if (node !== undefined && node.status === 'ok' && node.bootstrap !== null) {
+      if (await this.nodeReady()) {
         return;
       }
       await delay(READY_POLL_INTERVAL_MS);
     }
     throw new Error(`节点 ${this.nodeName} 未就绪`);
+  }
+
+  /// hub 重启期间端口尚未监听，fetch 以连接错误拒绝；此期间按未就绪处理。
+  private async nodeReady(): Promise<boolean> {
+    try {
+      const bootstrap = await this.bootstrap();
+      const node = bootstrap.nodes.find((entry) => entry.name === this.nodeName);
+      return node !== undefined && node.status === 'ok' && node.bootstrap !== null;
+    } catch {
+      return false;
+    }
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
