@@ -21,8 +21,12 @@
 
   scripts.durable-e2e.exec = ''
     set -e
+    if [ ! -d client/node_modules ]; then
+      echo "缺少 client/node_modules。先运行 devenv shell -- bash -c 'cd client && npm ci'。" >&2
+      exit 1
+    fi
     durable-build
-    cd client && npx playwright test
+    cd client && npm run test:e2e
   '';
 
   scripts.durable-test.exec = ''
