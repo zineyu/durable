@@ -41,18 +41,28 @@ pub const LOG_FILE_PREFIX: &str = "hub";
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 const DEFAULT_REPLAY_WINDOW: usize = 4096;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
+/// 上游事件流的空闲超时。等于 3 个上游 keep-alive 间隔（15 秒）。
+const DEFAULT_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(45);
+const DEFAULT_BACKOFF_BASE: Duration = Duration::from_secs(1);
 
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../client/dist"]
 struct Assets;
 
-/// hub 的可调参数。测试用较小的容量以覆盖落后与窗口外游标，用较短的连接超时以覆盖探测失败。
+/// hub 的可调参数。测试用较小的容量以覆盖落后与窗口外游标，用较短的时长以覆盖超时与退避。
 #[derive(Debug, Clone, Copy)]
 pub struct HubOptions {
     pub broadcast_capacity: usize,
     pub replay_window: usize,
     /// 连接上游的超时，也是 health 与 bootstrap 探测的总时限。
     pub connect_timeout: Duration,
+    /// 命令转发的总超时，从请求开始算到响应读完。
+    pub command_timeout: Duration,
+    /// 转发事件流的逐块空闲超时。
+    pub stream_idle_timeout: Duration,
+    /// 上游重连退避的底数。上限是它的 8 倍。
+    pub backoff_base: Duration,
 }
 
 impl Default for HubOptions {
@@ -61,6 +71,9 @@ impl Default for HubOptions {
             broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
             replay_window: DEFAULT_REPLAY_WINDOW,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
+            command_timeout: DEFAULT_COMMAND_TIMEOUT,
+            stream_idle_timeout: DEFAULT_STREAM_IDLE_TIMEOUT,
+            backoff_base: DEFAULT_BACKOFF_BASE,
         }
     }
 }
@@ -103,7 +116,12 @@ impl HubState {
     }
 
     fn watch(&self, node: NodeMetadata) {
-        let watcher = bus::NodeWatcher::start(Arc::clone(&self.bus), node.clone());
+        let watcher = bus::NodeWatcher::start(
+            Arc::clone(&self.bus),
+            node.clone(),
+            self.client.clone(),
+            self.options,
+        );
         self.watchers
             .lock()
             .expect("watchers 锁")

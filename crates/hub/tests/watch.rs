@@ -1,13 +1,25 @@
 mod support;
 
-use support::scripted::ScriptedNode;
+use std::time::Duration;
+
+use support::scripted::{EventsMode, ScriptedNode, fact, wait_for_after, wait_for_upstream};
 use support::{EventStream, Harness};
 
 fn options() -> hub::HubOptions {
     hub::HubOptions {
         broadcast_capacity: 64,
         replay_window: 64,
-        ..hub::HubOptions::default()
+        connect_timeout: Duration::from_millis(200),
+        command_timeout: Duration::from_millis(300),
+        stream_idle_timeout: Duration::from_secs(5),
+        backoff_base: Duration::from_millis(20),
+    }
+}
+
+fn fact_id(event: &hub::HubStreamEvent) -> i64 {
+    match event {
+        hub::HubStreamEvent::Fact { id, .. } => *id,
+        other => panic!("不是事实事件: {other:?}"),
     }
 }
 
@@ -53,4 +65,123 @@ async fn broadcasts_detail_change_while_status_stays_unreachable() {
             unreachable_detail(event).is_some_and(|detail| detail.contains("连接节点失败"))
         })
         .await;
+}
+
+/// 探测读得到响应头却读不到 body 时，水位读取必须按时限失败，不能无限挂起。
+#[tokio::test]
+async fn demotes_node_when_probe_body_stalls() {
+    let harness = Harness::start_with_options(options()).await;
+    let node = ScriptedNode::start().await;
+    node.stall_bootstrap_body();
+    harness.register_node("laptop", &node.url).await;
+    let started = std::time::Instant::now();
+
+    let cursor = harness.bootstrap().await.max_hub_seq;
+    let mut stream = EventStream::connect(&harness, cursor).await;
+    stream
+        .next_matching(|event| {
+            unreachable_detail(event).is_some_and(|detail| detail.contains("读取节点水位失败"))
+        })
+        .await;
+    // 时限来自 fetch_bootstrap 的请求级 timeout，connect_timeout 同时是探测的总时限。
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "探测必须在时限内失败，实际 {:?}",
+        started.elapsed()
+    );
+}
+
+/// 上游接受连接却永不返回响应头时，订阅必须按时限失败。
+#[tokio::test]
+async fn demotes_node_when_stream_headers_never_arrive() {
+    let harness = Harness::start_with_options(options()).await;
+    let node = ScriptedNode::start().await;
+    node.set_events_mode(EventsMode::Stall);
+    harness.register_node("laptop", &node.url).await;
+    let started = std::time::Instant::now();
+
+    let cursor = harness.bootstrap().await.max_hub_seq;
+    let mut stream = EventStream::connect(&harness, cursor).await;
+    stream
+        .next_matching(|event| {
+            unreachable_detail(event).is_some_and(|detail| detail.contains("等待事件流响应超时"))
+        })
+        .await;
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "等响应头必须在时限内失败，实际 {:?}",
+        started.elapsed()
+    );
+}
+
+/// 规格 user story 3：hub 重启后上游从节点水位起订阅，不重播历史事实。
+#[tokio::test]
+async fn restarts_upstream_from_node_watermark() {
+    let harness = Harness::start_with_options(options()).await;
+    let node = ScriptedNode::start().await;
+    node.set_watermark(500);
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    assert_eq!(
+        node.after_requests().last().copied().flatten(),
+        Some(500),
+        "首次订阅必须使用节点水位而不是 0"
+    );
+
+    node.set_watermark(700);
+    let directory = harness.stop().await;
+    let harness = Harness::start_options(directory, options()).await;
+    wait_for_after(&node, 700).await;
+
+    let cursor = harness.bootstrap().await.max_hub_seq;
+    let mut stream = EventStream::connect(&harness, cursor).await;
+    node.publish_fact(700, fact());
+    let event = stream
+        .next_matching(|event| matches!(event, hub::HubStreamEvent::Fact { .. }))
+        .await;
+    assert_eq!(fact_id(&event), 700, "重启后不应重播历史事实");
+}
+
+/// 上游安静超过空闲超时后节点被降级，说明点明空闲超时。
+#[tokio::test]
+async fn demotes_node_when_upstream_stream_goes_idle() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        stream_idle_timeout: Duration::from_millis(200),
+        ..options()
+    })
+    .await;
+    let node = ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    let cursor = harness.bootstrap().await.max_hub_seq;
+    let mut stream = EventStream::connect(&harness, cursor).await;
+    stream
+        .next_matching(|event| {
+            unreachable_detail(event).is_some_and(|detail| detail.contains("事件流空闲超时"))
+        })
+        .await;
+}
+
+/// 退避使用注入的底数：卡住的节点在一秒内多次重连，不会退到几十秒。
+#[tokio::test]
+async fn reconnects_quickly_with_small_backoff_base() {
+    let harness = Harness::start_with_options(options()).await;
+    let node = ScriptedNode::start().await;
+    node.set_events_mode(EventsMode::End);
+    harness.register_node("laptop", &node.url).await;
+    harness
+        .wait_for_status("laptop", hub::NodeStatus::Unreachable)
+        .await;
+
+    let before = node.after_requests().len();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let attempts = node.after_requests().len() - before;
+    assert!(
+        (3..=40).contains(&attempts),
+        "一秒内应多次重连，但不应退到几十秒一次，实际 {attempts}"
+    );
 }
