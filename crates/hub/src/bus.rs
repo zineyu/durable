@@ -16,7 +16,7 @@ pub struct Subscription {
     pub resync: Option<ResyncReason>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeView {
     pub status: NodeStatus,
     pub detail: Option<String>,
@@ -106,7 +106,7 @@ impl Bus {
             .expect("bus 锁")
             .views
             .insert(name.clone(), view.clone());
-        if previous.as_ref().map(|old| old.status) == Some(view.status) {
+        if previous.as_ref() == Some(&view) {
             return;
         }
         match view.status {
@@ -345,5 +345,53 @@ async fn run_stream(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name(raw: &str) -> NodeName {
+        NodeName::parse(raw).expect("合法节点名")
+    }
+
+    fn view(status: NodeStatus, detail: &str) -> NodeView {
+        NodeView {
+            status,
+            detail: Some(detail.to_owned()),
+        }
+    }
+
+    /// 状态说明变化也广播；连续相同的组合不发。
+    #[test]
+    fn set_view_broadcasts_detail_changes_once() {
+        let bus = Bus::new(16, 16);
+        let mut receiver = bus.sender.subscribe();
+        let laptop = name("laptop");
+
+        bus.set_view(
+            laptop.clone(),
+            view(NodeStatus::Unreachable, "连接节点失败"),
+        );
+        bus.set_view(
+            laptop.clone(),
+            view(NodeStatus::Unreachable, "连接节点失败"),
+        );
+        bus.set_view(laptop.clone(), view(NodeStatus::Unreachable, "事件流结束"));
+
+        assert_eq!(bus.max_seq(), 2, "相同的 (status, detail) 只广播一次");
+
+        let mut details = Vec::new();
+        while let Ok(HubStreamEvent::NodeStatusChanged { detail, .. }) = receiver.try_recv() {
+            details.push(detail);
+        }
+        assert_eq!(
+            details,
+            vec![
+                Some("连接节点失败".to_owned()),
+                Some("事件流结束".to_owned())
+            ]
+        );
     }
 }
