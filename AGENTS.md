@@ -113,7 +113,7 @@
 
 ## 规模与依赖预算
 
-- 源码预算：`crates/*/src` 下单个 Rust 文件 600 行，`client/src` 下单个 TS/TSX 文件 400 行（不含 `*.test.ts(x)` 与 `src/api/generated/`）。超限必须拆文件；存量欠账登记在 `scripts/source-budget.allow`，登记值只许变小。
+- 规模预算：`crates/*/src` 与 `crates/*/tests` 下单个 Rust 文件 600 行，`client/src` 下单个 TS/TSX 文件 400 行（不含 `*.test.ts(x)` 与 `src/api/generated/`）。超限必须拆文件；存量欠账登记在 `scripts/source-budget.allow`，登记值只许变小。
 - 依赖白名单：每个包的直接依赖（含 dev 依赖）都登记在 `deps.allow`，新增依赖必须先写明理由。
 
 两条检查由 `scripts/check-source-budget.sh` 与 `scripts/check-deps.sh` 执行，已包含在 `durable-lint` 内。

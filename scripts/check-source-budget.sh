@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 源码规模预算：单个文件超过默认上限即失败。
+# 规模预算：单个文件超过默认上限即失败，源码与集成测试同一套上限。
 # 超限文件必须在 scripts/source-budget.allow 登记，登记值不得再增大。
 set -euo pipefail
 
@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-git ls-files 'crates/*/src/*.rs' 'client/src/*.ts' 'client/src/*.tsx' |
+git ls-files 'crates/*/src/*.rs' 'crates/*/tests/*.rs' 'client/src/*.ts' 'client/src/*.tsx' |
   grep -Ev '^client/src/api/generated/|\.test\.tsx?$' |
   sort -u > "$work/files"
 

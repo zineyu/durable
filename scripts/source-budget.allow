@@ -1,7 +1,7 @@
 # 超限文件登记表：<path> <max>。
 #
-# 默认上限：crates/*/src 下 Rust 单文件 600 行；client/src 下 TS/TSX 单文件 400 行
-# （不含 *.test.ts(x) 与 src/api/generated/）。这里是存量欠账，只许变短：
+# 默认上限：crates/*/src 与 crates/*/tests 下 Rust 单文件 600 行；client/src 下 TS/TSX
+# 单文件 400 行（不含 *.test.ts(x) 与 src/api/generated/）。这里是存量欠账，只许变短：
 # 缩短后必须把 <max> 改小；回到默认上限以内则整行删除。
 # 检查脚本：scripts/check-source-budget.sh。
 

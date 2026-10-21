@@ -19,9 +19,11 @@ ADR-0032 让 lint 告警阻断并禁用抑制，覆盖的是「写错的代码�
 
 快 lane 只含秒级检查：`cargo fmt --check`、`cargo check --workspace --all-targets`、ESLint、stylelint、`tsc --noEmit`。它供连续编辑时反复运行。
 
-### 源码规模预算
+### 规模预算
 
-单个文件的上限：`crates/*/src` 下 Rust 600 行，`client/src` 下 TS/TSX 400 行，排除 `*.test.ts(x)` 与 `src/api/generated/`。存量超限登记在 `scripts/source-budget.allow`，登记值只许变小；文件回到默认上限以内时必须删除登记行。
+单个文件的上限：`crates/*/src` 与 `crates/*/tests` 下 Rust 600 行，`client/src` 下 TS/TSX 400 行，排除 `*.test.ts(x)` 与 `src/api/generated/`。
+
+集成测试同样计入。测试文件越长，agent 越难找到「这条断言写在哪」，而新增用例总是落在最近的文件里，因此测试与源码用同一套上限。存量超限登记在 `scripts/source-budget.allow`，登记值只许变小；文件回到默认上限以内时必须删除登记行。
 
 这是欠账表，不是豁免：登记值变大即失败。
 
