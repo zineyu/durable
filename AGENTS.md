@@ -26,6 +26,7 @@
 | --- | --- |
 | `devenv shell -- durable-build` | 先构建 client，再构建 Rust workspace |
 | `devenv shell -- durable-lint` | 全部静态检查，不含测试 |
+| `devenv shell -- durable-lint-fast` | 只含秒级静态检查，编辑时反复运行 |
 | `devenv shell -- durable-test` | 提交前的全部检查：lint 与测试 |
 | `devenv shell -- durable-e2e` | 端到端测试：构建后由 Playwright 驱动真实 agent、hub 与浏览器 |
 | `devenv shell -- durable-typegen` | 重新生成 TS 协议类型 |
@@ -33,7 +34,12 @@
 
 `durable-test` 先跑 `durable-lint`，再跑 `cargo test --workspace`、Vitest 与 TS 类型一致性比对。提交前必须全部通过。
 
-`durable-lint` 依次执行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --lib --document-private-items`、`cargo machete`、`cargo deny check`、`typos`、`taplo fmt --check`、`actionlint`、`nixfmt --check devenv.nix`、ESLint（`--max-warnings=0`）、stylelint、`tsc --noEmit`。规则与理由见 `docs/adr/0032-strict-lint-gate.md`。
+门禁本体是版本库里的两条脚本，`devenv.nix` 只负责转调：
+
+- `scripts/lint-fast.sh`：`cargo fmt --all --check`、`cargo check --workspace --all-targets`、ESLint（`--max-warnings=0`）、stylelint、`tsc --noEmit`。
+- `scripts/lint.sh`：先跑快 lane，再加 `cargo clippy --workspace --all-targets -- -D warnings`、`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --lib --document-private-items`、`cargo machete`、`cargo deny check`、`typos`、`taplo fmt --check`、`actionlint`、`shellcheck scripts/*.sh`、`nixfmt --check devenv.nix`，最后跑 `scripts/check-*.sh`。
+
+规则与理由见 `docs/adr/0032-strict-lint-gate.md`。
 
 ## 检查门禁
 

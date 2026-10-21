@@ -18,6 +18,7 @@
 
   scripts.build.exec = "durable-build";
   scripts.lint.exec = "durable-lint";
+  scripts.lint-fast.exec = "durable-lint-fast";
   scripts.test.exec = "durable-test";
   scripts.typegen.exec = "durable-typegen";
 
@@ -29,19 +30,12 @@
 
   scripts.durable-lint.exec = ''
     set -e
-    cargo fmt --all --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --lib --document-private-items
-    cargo machete
-    cargo deny check
-    typos
-    taplo fmt --check Cargo.toml crates/*/Cargo.toml deny.toml clippy.toml rustfmt.toml
-    actionlint
-    nixfmt --check devenv.nix
-    cd client
-    npm run lint
-    npm run lint:css
-    npm run typecheck
+    bash scripts/lint.sh
+  '';
+
+  scripts.durable-lint-fast.exec = ''
+    set -e
+    bash scripts/lint-fast.sh
   '';
 
   scripts.durable-test.exec = ''
