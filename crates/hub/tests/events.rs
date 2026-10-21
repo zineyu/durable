@@ -1,5 +1,6 @@
 mod support;
 
+use support::scripted::{ScriptedNode, fact, wait_for_upstream};
 use support::{AgentHandle, EventStream, Harness};
 
 fn is_fact(event: &hub::HubStreamEvent) -> bool {
@@ -86,6 +87,7 @@ async fn resyncs_when_cursor_falls_outside_window() {
     let harness = Harness::start_with_options(hub::HubOptions {
         broadcast_capacity: 64,
         replay_window: 2,
+        ..hub::HubOptions::default()
     })
     .await;
     let laptop = AgentHandle::start().await;
@@ -112,6 +114,57 @@ async fn resyncs_when_cursor_is_ahead_of_hub() {
 
     let mut stream = EventStream::connect(&harness, 1_000_000).await;
     assert!(is_resync(&stream.next_event().await));
+}
+
+/// 规格 user story 1：快照进行中产生的事实不会漏掉。
+///
+/// 水位必须在任何节点请求之前取：否则该事实既不在快照里，也不在游标之后。
+#[tokio::test]
+async fn bootstrap_watermark_precedes_node_requests() {
+    let harness = Harness::start().await;
+    let node = ScriptedNode::start().await;
+    node.set_watermark(10);
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    let baseline = harness.bootstrap().await.max_hub_seq;
+    node.hold_bootstrap();
+    let pending = tokio::spawn({
+        let url = harness.url("/api/bootstrap");
+        async move {
+            reqwest::get(url)
+                .await
+                .expect("请求 bootstrap")
+                .json::<hub::HubBootstrap>()
+                .await
+                .expect("解析 bootstrap")
+        }
+    });
+    node.wait_for_bootstrap_request().await;
+
+    let mut probe = EventStream::connect(&harness, baseline).await;
+    node.publish_fact(4242, fact());
+    let event = probe.next_matching(is_fact).await;
+    let fact_seq = seq_of(&event);
+    node.release_bootstrap();
+
+    let bootstrap = pending.await.expect("等待 bootstrap 完成");
+    assert!(
+        bootstrap.max_hub_seq < fact_seq,
+        "水位必须早于快照期间的事实: {} 不小于 {fact_seq}",
+        bootstrap.max_hub_seq
+    );
+
+    let mut client = EventStream::connect(&harness, bootstrap.max_hub_seq).await;
+    let replayed = client
+        .next_matching(|event| matches!(event, hub::HubStreamEvent::Fact { id: 4242, .. }))
+        .await;
+    assert_eq!(
+        seq_of(&replayed),
+        fact_seq,
+        "快照之后必须回放快照期间的事实"
+    );
 }
 
 fn seq_of(event: &hub::HubStreamEvent) -> u64 {
