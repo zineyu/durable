@@ -10,11 +10,19 @@ use tokio::sync::Notify;
 
 use crate::cancel::Cancellation;
 use crate::config::EngineConfig;
-use crate::provider::{ChatChunk, ChatMessage, ChatRole, ChatToolCall, ModelProvider};
+use crate::provider::{
+    ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, ProviderError,
+};
 use crate::tools::{ToolBox, ToolCall, ToolContext};
 
 /// 部分输出的落库节流间隔。
 const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+
+/// 限流退避的上限。供应商不给建议时单次等待不超过它。
+const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
+
+/// 退避翻倍的最大次数。
+const MAX_RETRY_EXPONENT: usize = 5;
 
 const SYSTEM_PROMPT: &str = "你是运行在本机 workspace 根目录中的 coding agent。\
 使用提供的工具读取文件、写入文件、精确编辑文件与执行命令；所有路径都必须位于 workspace 根内。\
@@ -42,6 +50,13 @@ struct RunOutcome {
     failure: Option<RunFailure>,
     text: MessageContent,
     tool_calls: Vec<ToolCallRecord>,
+}
+
+/// 一次模型调用的结果：流、取消，或彻底失败。
+enum StreamOpen {
+    Opened(ChatStream),
+    Cancelled,
+    Failed(ProviderError),
 }
 
 #[derive(Default)]
@@ -212,20 +227,11 @@ impl RunEngine {
                     records,
                 );
             }
-            let stream = tokio::select! {
-                biased;
-                _ = cancellation.cancelled() => return cancelled(text, records),
-                result = self.provider.stream_chat(messages, self.tools.definitions()) => result,
-            };
-            let mut stream = match stream {
-                Ok(stream) => stream,
-                Err(error) => {
-                    return failed(
-                        RunFailureCode::ModelUpstream,
-                        error.to_string(),
-                        text,
-                        records,
-                    );
+            let mut stream = match self.open_stream(&session, &messages, cancellation).await {
+                StreamOpen::Opened(stream) => stream,
+                StreamOpen::Cancelled => return cancelled(text, records),
+                StreamOpen::Failed(error) => {
+                    return failed(failure_code(&error), error.to_string(), text, records);
                 }
             };
             let mut builders: Vec<ToolCallBuilder> = Vec::new();
@@ -360,6 +366,73 @@ impl RunEngine {
         )
     }
 
+    /// 发起一次模型调用；供应商限流时按退避重试。
+    ///
+    /// 重试在本方法内部完成，不改变 run 的生命周期，也不写事实事件。
+    async fn open_stream(
+        &self,
+        session: &SessionId,
+        messages: &[ChatMessage],
+        cancellation: &Cancellation,
+    ) -> StreamOpen {
+        let mut attempt = 0usize;
+        loop {
+            let result = tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return StreamOpen::Cancelled,
+                result = self.provider.stream_chat(messages.to_vec(), self.tools.definitions()) => result,
+            };
+            let error = match result {
+                Ok(stream) => return StreamOpen::Opened(stream),
+                Err(error) => error,
+            };
+            let Some(delay) = self.retry_delay(&error, attempt) else {
+                return StreamOpen::Failed(error);
+            };
+            attempt += 1;
+            tracing::info!(
+                session = %session.as_str(),
+                attempt,
+                limit = self.config.model_retry_limit,
+                delay_ms = delay.as_millis() as u64,
+                error = %error,
+                "供应商限流，等待后重试"
+            );
+            self.bus.publish(StreamEvent::Retry {
+                session_id: session.clone(),
+                attempt: to_u32(attempt),
+                max_attempts: to_u32(self.config.model_retry_limit),
+                delay_ms: delay.as_millis() as u64,
+            });
+            tokio::select! {
+                biased;
+                _ = cancellation.cancelled() => return StreamOpen::Cancelled,
+                _ = tokio::time::sleep(delay) => {}
+            }
+        }
+    }
+
+    /// 本次失败的等待时长。不重试时返回 `None`。
+    fn retry_delay(&self, error: &ProviderError, attempt: usize) -> Option<Duration> {
+        if !error.is_rate_limited() || attempt >= self.config.model_retry_limit {
+            return None;
+        }
+        Some(
+            error
+                .retry_after()
+                .unwrap_or_else(|| self.retry_backoff(attempt)),
+        )
+    }
+
+    /// 指数退避：底数逐次翻倍，不超过 [`MAX_RETRY_BACKOFF`]。
+    fn retry_backoff(&self, attempt: usize) -> Duration {
+        let factor = 1u32 << attempt.min(MAX_RETRY_EXPONENT);
+        self.config
+            .model_retry_backoff
+            .saturating_mul(factor)
+            .min(MAX_RETRY_BACKOFF)
+    }
+
     async fn flush(
         &self,
         assistant_id: durable::MessageId,
@@ -394,6 +467,19 @@ impl RunEngine {
             );
         }
     }
+}
+
+/// 限流用稳定类别；其余上游失败仍是 `ModelUpstream`。
+fn failure_code(error: &ProviderError) -> RunFailureCode {
+    if error.is_rate_limited() {
+        RunFailureCode::ModelRateLimited
+    } else {
+        RunFailureCode::ModelUpstream
+    }
+}
+
+fn to_u32(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
 }
 
 fn cancelled(text: String, tool_calls: Vec<ToolCallRecord>) -> RunOutcome {

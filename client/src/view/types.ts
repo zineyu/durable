@@ -14,6 +14,13 @@ export type IconButtonSize = 'sm' | 'md' | 'lg';
 
 export type MessageState = 'complete' | 'streaming' | 'cancelled' | 'failed';
 
+/// 限流重试的一次等待。仅实时：不落库，刷新后不存在。
+export type RetryState = {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+};
+
 export type ToolState = 'running' | 'succeeded' | 'failed';
 
 export type SessionSummary = {

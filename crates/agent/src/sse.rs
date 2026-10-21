@@ -70,11 +70,11 @@ fn resync_event(skipped: u64) -> StreamEvent {
     }
 }
 
-/// 回放已覆盖的事实事件不再转发；增量不落库，无 id，始终转发。
+/// 回放已覆盖的事实事件不再转发；增量与重试提示不落库，无 id，始终转发。
 fn forwards(event: &StreamEvent, max_replayed: i64) -> bool {
     match event {
         StreamEvent::Fact { id, .. } => *id > max_replayed,
-        StreamEvent::Delta { .. } | StreamEvent::Resync { .. } => true,
+        StreamEvent::Delta { .. } | StreamEvent::Retry { .. } | StreamEvent::Resync { .. } => true,
     }
 }
 
@@ -82,7 +82,9 @@ fn sse_event(event: &StreamEvent) -> Event {
     let data = serde_json::to_string(event).expect("事件可序列化");
     match event {
         StreamEvent::Fact { id, .. } => Event::default().id(id.to_string()).data(data),
-        StreamEvent::Delta { .. } | StreamEvent::Resync { .. } => Event::default().data(data),
+        StreamEvent::Delta { .. } | StreamEvent::Retry { .. } | StreamEvent::Resync { .. } => {
+            Event::default().data(data)
+        }
     }
 }
 

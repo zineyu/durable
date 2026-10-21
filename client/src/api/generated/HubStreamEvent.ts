@@ -9,4 +9,16 @@ import type { SessionId } from "./SessionId";
 /**
  * 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
  */
-export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, text: string, timestamp: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };
+export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
+/**
+ * 即将进行的重试序号，从 1 开始。
+ */
+attempt: number, 
+/**
+ * 重试次数上限。
+ */
+maxAttempts: number, 
+/**
+ * 本次等待时长。
+ */
+delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };

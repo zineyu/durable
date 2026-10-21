@@ -8,6 +8,7 @@ import type { SessionTree } from '../api/generated/SessionTree';
 import {
   applyDelta,
   applyNodeFact,
+  applyRetry,
   emptyNodeState,
   loadNodeBootstrap,
   loadSessionTree,
@@ -148,6 +149,21 @@ export function applyStreamEvent(state: ClientState, event: HubStreamEvent): Cli
       }
       const next = applyDelta(shard, event.sessionId, event.messageId, event.text);
       return next === shard ? state : withShard(state, event.node, next);
+    }
+    case 'retry': {
+      const shard = state.nodes[event.node];
+      if (shard === undefined) {
+        return state;
+      }
+      return withShard(
+        state,
+        event.node,
+        applyRetry(shard, event.sessionId, {
+          attempt: event.attempt,
+          maxAttempts: event.maxAttempts,
+          delayMs: event.delayMs,
+        }),
+      );
     }
     case 'node_registered': {
       const advanced = advanceCursor(state, event.hubSeq);

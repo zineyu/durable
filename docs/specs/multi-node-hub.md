@@ -120,7 +120,7 @@
 
 节点作用域：`/api/n/<node>/<rest>` 转发到该节点 `url` 下的 `/api/<rest>`。方法、查询、请求体与 SSE 全部原样透传，不缓冲、不聚合、不改写。
 
-信封：`hub` 在每条上游事实信封外再包一层，加入 `hub_seq` 与 `node`，保留原信封字段。token 增量不带 `hub_seq`，不推进游标。
+信封：`hub` 在每条上游事实信封外再包一层，加入 `hub_seq` 与 `node`，保留原信封字段。token 增量与限流重试提示不带 `hub_seq`，不推进游标，也不进回放窗口。
 
 `hub` 自身的事实事件走同一条流：`node_registered`、`node_removed`、`node_status_changed`。它们带 `hub_seq`，不带 `node` 字段。节点表变更因此对所有已打开的客户端立即可见，不需要刷新。
 

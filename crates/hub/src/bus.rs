@@ -173,6 +173,24 @@ impl Bus {
         });
     }
 
+    /// 转发重试提示。仅实时，不进回放窗口。
+    pub fn retry(
+        &self,
+        node: NodeName,
+        session_id: SessionId,
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+    ) {
+        let _ = self.sender.send(HubStreamEvent::Retry {
+            node,
+            session_id,
+            attempt,
+            max_attempts,
+            delay_ms,
+        });
+    }
+
     fn publish_fact(&self, build: impl FnOnce(u64) -> HubStreamEvent) {
         let mut state = self.state.lock().expect("bus 锁");
         state.seq += 1;
@@ -191,7 +209,9 @@ fn seq_of(event: &HubStreamEvent) -> u64 {
         | HubStreamEvent::NodeRegistered { hub_seq, .. }
         | HubStreamEvent::NodeRemoved { hub_seq, .. }
         | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
-        HubStreamEvent::Delta { .. } | HubStreamEvent::Resync { .. } => 0,
+        HubStreamEvent::Delta { .. }
+        | HubStreamEvent::Retry { .. }
+        | HubStreamEvent::Resync { .. } => 0,
     }
 }
 
@@ -427,6 +447,12 @@ async fn run_stream(
                         text,
                         timestamp,
                     } => bus.delta(name.clone(), session_id, message_id, text, timestamp),
+                    StreamEvent::Retry {
+                        session_id,
+                        attempt,
+                        max_attempts,
+                        delay_ms,
+                    } => bus.retry(name.clone(), session_id, attempt, max_attempts, delay_ms),
                     StreamEvent::Resync { reason } => {
                         return Err(StreamEnd::Resync(reason));
                     }

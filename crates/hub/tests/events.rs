@@ -173,7 +173,9 @@ fn seq_of(event: &hub::HubStreamEvent) -> u64 {
         | hub::HubStreamEvent::NodeRegistered { hub_seq, .. }
         | hub::HubStreamEvent::NodeRemoved { hub_seq, .. }
         | hub::HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
-        hub::HubStreamEvent::Delta { .. } | hub::HubStreamEvent::Resync { .. } => 0,
+        hub::HubStreamEvent::Delta { .. }
+        | hub::HubStreamEvent::Retry { .. }
+        | hub::HubStreamEvent::Resync { .. } => 0,
     }
 }
 
@@ -182,4 +184,41 @@ fn node_of(event: &hub::HubStreamEvent) -> String {
         hub::HubStreamEvent::Fact { node, .. } => node.as_str().to_owned(),
         other => panic!("不是节点事实事件: {other:?}"),
     }
+}
+
+/// 规格 user story 3：重试提示随合并流到达，带节点名且不推进广播序号。
+#[tokio::test]
+async fn forwards_retry_hint_without_advancing_cursor() {
+    let harness = Harness::start().await;
+    let node = ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    let cursor = harness.bootstrap().await.max_hub_seq;
+    let mut stream = EventStream::connect(&harness, cursor).await;
+    node.publish_retry("s1", 2, 3, 4000);
+
+    let event = stream
+        .next_matching(|event| matches!(event, hub::HubStreamEvent::Retry { .. }))
+        .await;
+    match event {
+        hub::HubStreamEvent::Retry {
+            node,
+            session_id,
+            attempt,
+            max_attempts,
+            delay_ms,
+        } => {
+            assert_eq!(node.as_str(), "laptop");
+            assert_eq!(session_id.as_str(), "s1");
+            assert_eq!((attempt, max_attempts, delay_ms), (2, 3, 4000));
+        }
+        other => panic!("不是重试提示: {other:?}"),
+    }
+    assert_eq!(
+        harness.bootstrap().await.max_hub_seq,
+        cursor,
+        "重试提示不推进广播序号"
+    );
 }

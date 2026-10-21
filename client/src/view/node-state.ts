@@ -8,8 +8,8 @@ import type { SessionTree } from '../api/generated/SessionTree';
 import type { ToolCallRecord } from '../api/generated/ToolCallRecord';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
-import { runFailureLabel } from './labels';
-import type { MessageState, SessionSummary, WorkspaceSummary } from './types';
+import { retryNote, runFailureLabel } from './labels';
+import type { MessageState, RetryState, SessionSummary, WorkspaceSummary } from './types';
 
 /// 已应用的事实。快照可能比已应用的尾部旧，用它补齐快照水位之后的事实。
 type AppliedFact = {
@@ -33,6 +33,8 @@ export type NodeState = {
   workspaces: WorkspaceMetadata[];
   sessions: SessionMetadata[];
   trees: Record<string, SessionTreeState>;
+  /// 按 session 记录的重试等待；仅实时，随进度清除。
+  retries: Record<string, RetryState>;
   /// 已应用的最大事实事件 id；`null` 表示尚未装配快照基线。
   lastEventId: number | null;
   applied: AppliedFact[];
@@ -43,6 +45,7 @@ export const emptyNodeState: NodeState = {
   workspaces: [],
   sessions: [],
   trees: {},
+  retries: {},
   lastEventId: null,
   applied: [],
 };
@@ -108,10 +111,13 @@ export function applyFactEvent(state: NodeState, event: FactEvent): NodeState {
       }));
     case 'run_started':
     case 'run_finished':
-      return withSession(state, event.session, (tree) => ({
-        ...tree,
-        runs: upsertRun(tree.runs, event.run),
-      }));
+      return clearRetry(
+        withSession(state, event.session, (tree) => ({
+          ...tree,
+          runs: upsertRun(tree.runs, event.run),
+        })),
+        event.session.id,
+      );
     case 'queue_item_removed':
       return removeQueueItem(state, event.sessionId, event.itemId);
     case 'session_deleted':
@@ -140,11 +146,27 @@ export function applyDelta(
   const nodes = tree.nodes.map((node, position) =>
     position === index ? { ...node, text: node.text + text } : node,
   );
-  return { ...state, trees: { ...state.trees, [sessionId]: { ...tree, nodes } } };
+  return clearRetry(
+    { ...state, trees: { ...state.trees, [sessionId]: { ...tree, nodes } } },
+    sessionId,
+  );
+}
+
+/// 记录一次限流重试等待。
+export function applyRetry(state: NodeState, sessionId: string, retry: RetryState): NodeState {
+  return { ...state, retries: { ...state.retries, [sessionId]: retry } };
+}
+
+/// 清除某个 session 的重试等待。其它 session 不受影响。
+function clearRetry(state: NodeState, sessionId: string): NodeState {
+  if (state.retries[sessionId] === undefined) {
+    return state;
+  }
+  return { ...state, retries: withoutRetryKey(state.retries, sessionId) };
 }
 
 export function loadSessionTree(state: NodeState, tree: SessionTree): NodeState {
-  return rebase(state, tree.maxEventId, {
+  const loaded = rebase(state, tree.maxEventId, {
     ...state,
     lastEventId: snapshotCursor(state.lastEventId, tree.maxEventId),
     sessions: upsertSession(state.sessions, tree.session),
@@ -158,6 +180,7 @@ export function loadSessionTree(state: NodeState, tree: SessionTree): NodeState 
       },
     },
   });
+  return clearRetry(loaded, tree.session.id);
 }
 
 export function storeSession(state: NodeState, session: SessionMetadata): NodeState {
@@ -203,8 +226,10 @@ export function messageView(
     return { state: 'complete', note: null };
   }
   switch (run.status) {
-    case 'running':
-      return { state: 'streaming', note: null };
+    case 'running': {
+      const retry = state.retries[sessionId];
+      return { state: 'streaming', note: retry === undefined ? null : retryNote(retry) };
+    }
     case 'failed':
       return {
         state: 'failed',
@@ -310,6 +335,7 @@ function removeSession(state: NodeState, sessionId: string): NodeState {
     ...state,
     sessions: state.sessions.filter((session) => session.id !== sessionId),
     trees: withoutKey(state.trees, sessionId),
+    retries: withoutRetryKey(state.retries, sessionId),
   };
 }
 
@@ -318,15 +344,28 @@ function removeWorkspace(state: NodeState, path: string): NodeState {
     state.sessions.filter((session) => session.workspace === path).map((session) => session.id),
   );
   let trees = state.trees;
+  let retries = state.retries;
   for (const id of removed) {
     trees = withoutKey(trees, id);
+    retries = withoutRetryKey(retries, id);
   }
   return {
     ...state,
     workspaces: state.workspaces.filter((workspace) => workspace.path !== path),
     sessions: state.sessions.filter((session) => session.workspace !== path),
     trees,
+    retries,
   };
+}
+
+function withoutRetryKey(
+  retries: Record<string, RetryState>,
+  sessionId: string,
+): Record<string, RetryState> {
+  if (retries[sessionId] === undefined) {
+    return retries;
+  }
+  return Object.fromEntries(Object.entries(retries).filter(([id]) => id !== sessionId));
 }
 
 function withoutKey(

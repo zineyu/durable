@@ -53,6 +53,8 @@ impl std::error::Error for RunStatusError {}
 #[serde(rename_all = "snake_case")]
 pub enum RunFailureCode {
     ModelUpstream,
+    /// 供应商限流（HTTP 429 或带 `Retry-After` 的响应），重试耗尽后仍限流。
+    ModelRateLimited,
     ContextLimitExceeded,
     StepLimitExceeded,
     Interrupted,

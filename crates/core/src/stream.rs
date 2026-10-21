@@ -27,6 +27,17 @@ pub enum StreamEvent {
         #[ts(type = "number")]
         timestamp: i64,
     },
+    /// 供应商限流后的重试等待。仅实时传输：不落库，不推进游标。
+    Retry {
+        session_id: SessionId,
+        /// 即将进行的重试序号，从 1 开始。
+        attempt: u32,
+        /// 重试次数上限。
+        max_attempts: u32,
+        /// 本次等待时长。
+        #[ts(type = "number")]
+        delay_ms: u64,
+    },
     Resync {
         reason: ResyncReason,
     },

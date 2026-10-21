@@ -30,8 +30,11 @@ pub enum Script {
     ToolCalls(Vec<ToolCallSpec>),
     /// 先流式返回文本，再保持连接不结束，用于观察运行中的 run。
     PartialThenHang(String),
-    /// 返回非成功状态。
-    Fail(u16),
+    /// 返回非成功状态。`retry_after` 是 `Retry-After` 头的秒数。
+    Fail {
+        status: u16,
+        retry_after: Option<u64>,
+    },
     /// 永不响应，用于观察运行中的 run。
     Hang,
 }
@@ -120,11 +123,22 @@ async fn chat_completions(State(state): State<ScriptState>, Json(body): Json<Val
     let script = state.scripts.lock().expect("脚本队列锁").pop_front();
     match script {
         None => (StatusCode::INTERNAL_SERVER_ERROR, "没有可用脚本").into_response(),
-        Some(Script::Fail(status)) => (
-            StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-            "上游错误",
-        )
-            .into_response(),
+        Some(Script::Fail {
+            status,
+            retry_after,
+        }) => {
+            let mut response = (
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                "上游错误",
+            )
+                .into_response();
+            if let Some(seconds) = retry_after {
+                response
+                    .headers_mut()
+                    .insert(header::RETRY_AFTER, seconds.into());
+            }
+            response
+        }
         Some(Script::Hang) => std::future::pending::<Response>().await,
         Some(Script::PartialThenHang(text)) => {
             let first = Bytes::from(text_events(&text));
@@ -166,7 +180,7 @@ fn sse_body(script: &Script) -> String {
         Script::ToolCalls(calls) => {
             body.push_str(&tool_call_events(calls));
         }
-        Script::Fail(_) | Script::Hang | Script::PartialThenHang(_) => {}
+        Script::Fail { .. } | Script::Hang | Script::PartialThenHang(_) => {}
     }
     body
 }

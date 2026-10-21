@@ -934,3 +934,125 @@ describe('分片辅助', () => {
     expect(shard.lastEventId).toBe(7);
   });
 });
+
+describe('供应商限流重试', () => {
+  const runningRun: RunRecord = {
+    id: 1,
+    sessionId: 's-1',
+    status: 'running',
+    failure: null,
+    createdAt: 100,
+    updatedAt: 100,
+  };
+
+  function retryEvent(
+    node: string,
+    sessionId: string,
+    attempt = 1,
+    maxAttempts = 3,
+    delayMs = 2000,
+  ): HubStreamEvent {
+    return {
+      type: 'retry',
+      node,
+      sessionId: toSessionId(sessionId),
+      attempt,
+      maxAttempts,
+      delayMs,
+    };
+  }
+
+  function withRunning(): ClientState {
+    const state = withTree(
+      loaded(),
+      nodeA,
+      tree('s-1', 7, 2, [
+        message(1, null, 'user', { text: '问' }),
+        message(2, 1, 'assistant', { runId: 1 }),
+      ]),
+    );
+    return streamed(
+      state,
+      fact(nodeA, 8, 108, {
+        kind: 'run_started',
+        session: session('s-1', '/work/a', 200, { busy: true }),
+        run: runningRun,
+      }),
+    );
+  }
+
+  function assistantOf(state: ClientState): MessageNode {
+    return at(shardOf(state, nodeA).trees['s-1']?.nodes ?? [], 1);
+  }
+
+  it('按节点与 session 记录重试等待，不推进广播游标', () => {
+    const state = withRunning();
+    const cursor = state.hub.cursor;
+
+    const retrying = streamed(state, retryEvent(nodeA, 's-1'));
+
+    expect(shardOf(retrying, nodeA).retries['s-1']).toEqual({
+      attempt: 1,
+      maxAttempts: 3,
+      delayMs: 2000,
+    });
+    expect(shardOf(retrying, nodeB).retries).toEqual({});
+    expect(retrying.hub.cursor).toBe(cursor);
+    expect(streamed(retrying, retryEvent('ghost', 's-1'))).toBe(retrying);
+  });
+
+  it('重试期间 assistant 显示等待说明，文本重新流动后消失', () => {
+    const retrying = streamed(withRunning(), retryEvent(nodeA, 's-1'));
+    expect(messageView(shardOf(retrying, nodeA), 's-1', assistantOf(retrying))).toEqual({
+      state: 'streaming',
+      note: '供应商限流，第 1/3 次重试，等待 2 秒',
+    });
+
+    const streaming = streamed(retrying, delta(nodeA, 's-1', 2, '恢复'));
+    expect(messageView(shardOf(streaming, nodeA), 's-1', assistantOf(streaming))).toEqual({
+      state: 'streaming',
+      note: null,
+    });
+  });
+
+  it('等待时长小于一秒时按毫秒显示', () => {
+    const retrying = streamed(withRunning(), retryEvent(nodeA, 's-1', 2, 3, 250));
+    expect(messageView(shardOf(retrying, nodeA), 's-1', assistantOf(retrying))).toEqual({
+      state: 'streaming',
+      note: '供应商限流，第 2/3 次重试，等待 250 毫秒',
+    });
+  });
+
+  it('run 结束与 session 树重载都会清除重试等待', () => {
+    const retrying = streamed(withRunning(), retryEvent(nodeA, 's-1'));
+    const finished = streamed(
+      retrying,
+      fact(nodeA, 9, 109, {
+        kind: 'run_finished',
+        session: session('s-1', '/work/a', 300),
+        run: {
+          ...runningRun,
+          status: 'failed',
+          failure: { code: 'model_rate_limited', message: '模型返回非成功状态 429: 限流' },
+          updatedAt: 300,
+        },
+      }),
+    );
+
+    expect(shardOf(finished, nodeA).retries['s-1']).toBeUndefined();
+    expect(messageView(shardOf(finished, nodeA), 's-1', assistantOf(finished))).toEqual({
+      state: 'failed',
+      note: '供应商限流：模型返回非成功状态 429: 限流',
+    });
+
+    const reloaded = withTree(
+      retrying,
+      nodeA,
+      tree('s-1', 9, 2, [
+        message(1, null, 'user', { text: '问' }),
+        message(2, 1, 'assistant', { runId: 1 }),
+      ]),
+    );
+    expect(shardOf(reloaded, nodeA).retries['s-1']).toBeUndefined();
+  });
+});

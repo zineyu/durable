@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use futures_util::{StreamExt, stream::BoxStream};
@@ -80,17 +81,56 @@ pub enum ChatChunk {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderError {
     Request(String),
-    Status(u16, String),
+    /// 上游返回非成功状态。`retry_after` 来自 `Retry-After` 头，只解释秒数形式。
+    Status {
+        status: u16,
+        message: String,
+        retry_after: Option<Duration>,
+    },
     Decode(String),
     Upstream(String),
+}
+
+impl ProviderError {
+    /// 限流：`429`，或供应商给了等待建议。
+    pub fn is_rate_limited(&self) -> bool {
+        match self {
+            Self::Status {
+                status,
+                retry_after,
+                ..
+            } => *status == 429 || retry_after.is_some(),
+            _ => false,
+        }
+    }
+
+    /// 供应商建议的等待时长。不限流或没给建议时为 `None`。
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            Self::Status { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for ProviderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Request(message) => write!(formatter, "模型请求失败: {message}"),
-            Self::Status(status, message) => {
-                write!(formatter, "模型返回非成功状态 {status}: {message}")
+            Self::Status {
+                status,
+                message,
+                retry_after,
+            } => {
+                write!(formatter, "模型返回非成功状态 {status}: {message}")?;
+                if let Some(delay) = retry_after {
+                    write!(
+                        formatter,
+                        "（供应商建议等待 {} 毫秒后重试）",
+                        delay.as_millis()
+                    )?;
+                }
+                Ok(())
             }
             Self::Decode(message) => write!(formatter, "模型响应解析失败: {message}"),
             Self::Upstream(message) => write!(formatter, "模型上游错误: {message}"),
@@ -162,14 +202,29 @@ impl ModelProvider for OpenAiProvider {
             .map_err(|error| ProviderError::Request(error.to_string()))?;
         let status = response.status();
         if !status.is_success() {
+            let retry_after = retry_after(&response);
             let message = response
                 .text()
                 .await
                 .unwrap_or_else(|error| error.to_string());
-            return Err(ProviderError::Status(status.as_u16(), message));
+            return Err(ProviderError::Status {
+                status: status.as_u16(),
+                message,
+                retry_after,
+            });
         }
         Ok(parse_stream(response))
     }
+}
+
+/// 读取 `Retry-After` 头的秒数形式。HTTP 日期形式不被支持，当作没有建议。
+fn retry_after(response: &reqwest::Response) -> Option<Duration> {
+    let value = response
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?;
+    value.trim().parse::<u64>().ok().map(Duration::from_secs)
 }
 
 /// 把 SSE 响应体解析为增量与工具调用片段。

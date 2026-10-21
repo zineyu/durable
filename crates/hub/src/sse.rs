@@ -68,7 +68,9 @@ fn sse_event(event: &HubStreamEvent) -> Event {
         | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => {
             Event::default().id(hub_seq.to_string()).data(data)
         }
-        HubStreamEvent::Delta { .. } | HubStreamEvent::Resync { .. } => Event::default().data(data),
+        HubStreamEvent::Delta { .. }
+        | HubStreamEvent::Retry { .. }
+        | HubStreamEvent::Resync { .. } => Event::default().data(data),
     }
 }
 
@@ -138,7 +140,9 @@ mod tests {
             | HubStreamEvent::NodeRegistered { hub_seq, .. }
             | HubStreamEvent::NodeRemoved { hub_seq, .. }
             | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
-            HubStreamEvent::Delta { .. } | HubStreamEvent::Resync { .. } => 0,
+            HubStreamEvent::Delta { .. }
+            | HubStreamEvent::Retry { .. }
+            | HubStreamEvent::Resync { .. } => 0,
         }
     }
 }

@@ -1,14 +1,19 @@
 use std::env::{VarError, var};
 use std::fmt;
+use std::time::Duration;
 
 pub const MODEL_BASE_URL: &str = "DURABLE_MODEL_BASE_URL";
 pub const MODEL_API_KEY: &str = "DURABLE_MODEL_API_KEY";
 pub const MODEL_NAME: &str = "DURABLE_MODEL_NAME";
 pub const CONTEXT_CHAR_LIMIT: &str = "DURABLE_CONTEXT_CHAR_LIMIT";
 pub const MAX_STEPS: &str = "DURABLE_MAX_STEPS";
+pub const MODEL_RETRY_LIMIT: &str = "DURABLE_MODEL_RETRY_LIMIT";
+pub const MODEL_RETRY_BACKOFF_MS: &str = "DURABLE_MODEL_RETRY_BACKOFF_MS";
 
 const DEFAULT_CONTEXT_CHAR_LIMIT: usize = 200_000;
 const DEFAULT_MAX_STEPS: usize = 50;
+const DEFAULT_MODEL_RETRY_LIMIT: usize = 3;
+const DEFAULT_MODEL_RETRY_BACKOFF_MS: usize = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelConfig {
@@ -22,6 +27,10 @@ pub struct ModelConfig {
 pub struct EngineConfig {
     pub context_char_limit: usize,
     pub max_steps: usize,
+    /// 供应商限流时的重试次数上限。`0` 表示不重试。
+    pub model_retry_limit: usize,
+    /// 限流重试的退避底数，逐次翻倍。
+    pub model_retry_backoff: Duration,
 }
 
 impl Default for EngineConfig {
@@ -29,6 +38,8 @@ impl Default for EngineConfig {
         Self {
             context_char_limit: DEFAULT_CONTEXT_CHAR_LIMIT,
             max_steps: DEFAULT_MAX_STEPS,
+            model_retry_limit: DEFAULT_MODEL_RETRY_LIMIT,
+            model_retry_backoff: Duration::from_millis(DEFAULT_MODEL_RETRY_BACKOFF_MS as u64),
         }
     }
 }
@@ -81,12 +92,17 @@ pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
 
 /// 从进程环境读取 run 引擎配置。未设置时使用默认值。
 ///
-/// 失败：已设置的配置无法解析为 UTF-8，或不是正整数。
+/// 失败：已设置的配置无法解析为 UTF-8，或不是正整数（重试次数允许 `0`）。
 pub fn engine_config_from_env() -> Result<EngineConfig, ConfigError> {
     let defaults = EngineConfig::default();
     Ok(EngineConfig {
         context_char_limit: read_positive(CONTEXT_CHAR_LIMIT, defaults.context_char_limit)?,
         max_steps: read_positive(MAX_STEPS, defaults.max_steps)?,
+        model_retry_limit: read_count(MODEL_RETRY_LIMIT, defaults.model_retry_limit)?,
+        model_retry_backoff: Duration::from_millis(read_positive(
+            MODEL_RETRY_BACKOFF_MS,
+            defaults.model_retry_backoff.as_millis() as usize,
+        )? as u64),
     })
 }
 
@@ -100,14 +116,27 @@ fn read_required(name: &'static str) -> Result<Option<String>, ConfigError> {
 }
 
 fn read_positive(name: &'static str, default: usize) -> Result<usize, ConfigError> {
-    let Some(raw) = read_required(name)? else {
+    let Some((value, raw)) = read_number(name)? else {
         return Ok(default);
     };
-    let value: usize = raw
-        .parse()
-        .map_err(|_| ConfigError::InvalidNumber(name, raw.clone()))?;
     if value == 0 {
         return Err(ConfigError::InvalidNumber(name, raw));
     }
     Ok(value)
+}
+
+/// 允许 `0` 的计数：用于「关掉」某项功能的重试次数。
+fn read_count(name: &'static str, default: usize) -> Result<usize, ConfigError> {
+    Ok(read_number(name)?.map_or(default, |(value, _)| value))
+}
+
+/// 读取整数配置。未设置时返回 `None`；错误说明里保留原文。
+fn read_number(name: &'static str) -> Result<Option<(usize, String)>, ConfigError> {
+    let Some(raw) = read_required(name)? else {
+        return Ok(None);
+    };
+    match raw.parse() {
+        Ok(value) => Ok(Some((value, raw))),
+        Err(_) => Err(ConfigError::InvalidNumber(name, raw)),
+    }
 }

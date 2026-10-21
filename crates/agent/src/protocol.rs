@@ -10,7 +10,7 @@ pub enum HealthStatus {
 }
 
 /// 协议版本。任何不兼容的协议改动都递增它。
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

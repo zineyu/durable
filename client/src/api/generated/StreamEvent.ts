@@ -6,4 +6,16 @@ import type { SessionId } from "./SessionId";
 /**
  * 事件流的统一载荷：已持久化的事实事件与仅实时传输的 token 增量。
  */
-export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, messageId: number, text: string, timestamp: number, } | { "type": "resync", reason: ResyncReason, };
+export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, messageId: number, text: string, timestamp: number, } | { "type": "retry", sessionId: SessionId, 
+/**
+ * 即将进行的重试序号，从 1 开始。
+ */
+attempt: number, 
+/**
+ * 重试次数上限。
+ */
+maxAttempts: number, 
+/**
+ * 本次等待时长。
+ */
+delayMs: number, } | { "type": "resync", reason: ResyncReason, };

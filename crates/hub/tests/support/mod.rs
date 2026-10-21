@@ -501,6 +501,25 @@ pub mod scripted {
             self.inner.after.lock().expect("after 锁").clone()
         }
 
+        /// 推送一条重试提示。仅实时，像 `agent` 一样不进入回放历史。
+        pub fn publish_retry(
+            &self,
+            session_id: &str,
+            attempt: u32,
+            max_attempts: u32,
+            delay_ms: u64,
+        ) {
+            self.inner
+                .facts
+                .send(durable::StreamEvent::Retry {
+                    session_id: durable::SessionId::parse(session_id).expect("合法 session id"),
+                    attempt,
+                    max_attempts,
+                    delay_ms,
+                })
+                .expect("推送重试提示需要上游事件流已订阅");
+        }
+
         /// 向上游推送一条事实。
         pub fn publish_fact(&self, id: i64, event: durable::FactEvent) {
             self.publish(durable::StreamEvent::Fact {
@@ -601,7 +620,9 @@ pub mod scripted {
     fn event_id(event: &durable::StreamEvent) -> Option<i64> {
         match event {
             durable::StreamEvent::Fact { id, .. } => Some(*id),
-            durable::StreamEvent::Delta { .. } | durable::StreamEvent::Resync { .. } => None,
+            durable::StreamEvent::Delta { .. }
+            | durable::StreamEvent::Retry { .. }
+            | durable::StreamEvent::Resync { .. } => None,
         }
     }
 
