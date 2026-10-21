@@ -1,0 +1,13 @@
+msrv = "1.98.0"
+avoid-breaking-exported-api = false
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = false
+allow-print-in-tests = false
+
+disallowed-methods = [
+  { path = "std::process::exit", reason = "退出必须由调用方决定，使用 Result 传播失败。" },
+  { path = "std::thread::sleep", reason = "阻塞运行时线程，使用 tokio::time::sleep。" },
+]

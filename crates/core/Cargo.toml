@@ -2,6 +2,7 @@
 name = "durable"
 version.workspace = true
 edition.workspace = true
+publish = false
 
 [dependencies]
 jiff.workspace = true

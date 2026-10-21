@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 ///
 /// 用例清除 `runtime::dirs::VARIABLES` 中的全部变量后只设置 `HOME`：三个平台在各自的
 /// 原生变量缺失时都回退到 `HOME`，因此期望值可从同一份 `Env` 推导。
-#[test]
-fn uses_standard_locations_when_paths_are_omitted() {
+#[tokio::test]
+async fn uses_standard_locations_when_paths_are_omitted() {
     let directory = tempfile::tempdir().expect("创建临时目录");
     let home = directory.path().join("home");
     std::fs::create_dir_all(&home).expect("创建 HOME");
@@ -44,7 +44,7 @@ fn uses_standard_locations_when_paths_are_omitted() {
         database.display()
     );
 
-    let record = wait_for_startup_log(&dirs.logs);
+    let record = wait_for_startup_log(&dirs.logs).await;
     assert_eq!(record["database"], database.display().to_string());
     assert_eq!(record["log_directory"], dirs.logs.display().to_string());
 
@@ -71,13 +71,13 @@ fn first_line(child: &mut std::process::Child) -> String {
 }
 
 /// 在标准日志目录中等待带指定消息的 JSON 记录。
-fn wait_for_startup_log(log_directory: &Path) -> serde_json::Value {
+async fn wait_for_startup_log(log_directory: &Path) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         if let Some(record) = startup_log_record(log_directory, "hub 启动") {
             return record;
         }
-        std::thread::sleep(Duration::from_millis(50));
+        tokio::time::sleep(Duration::from_millis(50)).await;
     }
     panic!("未在 {} 找到启动日志", log_directory.display());
 }
@@ -86,7 +86,10 @@ fn startup_log_record(log_directory: &Path, message: &str) -> Option<serde_json:
     for entry in std::fs::read_dir(log_directory).ok()?.flatten() {
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
-        if !(name.starts_with("hub.") && name.ends_with(".log")) {
+        let is_log = Path::new(name)
+            .extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("log"));
+        if !(name.starts_with("hub.") && is_log) {
             continue;
         }
         let body = std::fs::read_to_string(entry.path()).ok()?;
@@ -94,7 +97,7 @@ fn startup_log_record(log_directory: &Path, message: &str) -> Option<serde_json:
             let Ok(record) = serde_json::from_str::<serde_json::Value>(line) else {
                 continue;
             };
-            if record["message"] == message {
+            if record.get("message").and_then(serde_json::Value::as_str) == Some(message) {
                 return Some(record);
             }
         }

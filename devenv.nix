@@ -2,11 +2,18 @@
 
 {
   packages = with pkgs; [
+    actionlint
     cargo
-    rustc
+    cargo-deny
+    cargo-machete
     clippy
-    rustfmt
     nodejs
+    nixfmt
+    rustc
+    rustfmt
+    shellcheck
+    taplo
+    typos
   ];
 
   scripts.build.exec = "durable-build";
