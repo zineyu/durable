@@ -35,15 +35,15 @@
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
     cargo test --workspace
-    cargo run --quiet -p agent --bin export-types
-    cargo run --quiet -p hub --bin export-types
+    cargo run --quiet -p agent --bin export-types-agent
+    cargo run --quiet -p hub --bin export-types-hub
     git add --intent-to-add -- client/src/api/generated
     git diff --exit-code -- client/src/api/generated
   '';
 
   scripts.durable-typegen.exec = ''
-    cargo run --quiet -p agent --bin export-types
-    cargo run --quiet -p hub --bin export-types
+    cargo run --quiet -p agent --bin export-types-agent
+    cargo run --quiet -p hub --bin export-types-hub
   '';
 
   scripts.storybook.exec = ''
