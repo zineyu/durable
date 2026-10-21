@@ -16,7 +16,62 @@
 | `crates/agent` | agent 二进制；HTTP/SSE 协议与 `ts-rs` 导出入口 |
 | `crates/hub` | hub 二进制；编译期内嵌 `client/dist` |
 | `client` | React + Vite + TypeScript 客户端 |
-| `docs` | 规格、ADR、术语表 |
+| `docs` | 规格、ADR（索引见 `docs/adr/README.md`）、术语表 |
+| `scripts` | 门禁与检查脚本；编辑时跑 `bash scripts/lint-fast.sh` |
+
+## crate 导航
+
+`core`（包名 `durable`）：
+
+| 模块 | 职责 |
+| --- | --- |
+| `id.rs` | 强类型 id，`WorkspacePath` 与 `SessionTitle` 的解析校验 |
+| `message.rs` | 消息正文、角色与 `MessageNode` 的父子指针 |
+| `session.rs` | session 元数据、`SessionTree` 快照与自动标题 |
+| `queue.rs` | 待执行队列项与锚点 |
+| `run.rs` | 运行实体、状态与失败码 |
+| `tool.rs` | 工具调用记录、结果与错误码 |
+| `workspace.rs` | workspace 元数据 |
+| `node.rs` | 节点名与节点元数据 |
+| `event.rs` | `FactEvent` 领域事实枚举 |
+| `change.rs` | 一次事务内的变更清单 |
+| `stream.rs` | `StreamEvent` 与进程内广播 |
+| `store.rs` | 唯一写入线：读写入口、事务与事件发布 |
+| `storage/` | 快照查询与全部 SQL |
+
+`runtime`：`dirs.rs` 跨平台标准目录与启动路径；`logging.rs` 日志双写与轮转。
+
+`agent`：
+
+| 模块 | 职责 |
+| --- | --- |
+| `api.rs` | HTTP 路由与处理器 |
+| `engine.rs` | run 引擎：session 内串行、流式落库、工具循环、限流重试与取消 |
+| `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
+| `tools/` | 工具注册表与四个工具；`paths.rs` 管 workspace 边界 |
+| `sse.rs` | 单一全局事件流：回放、实时与 resync |
+| `protocol.rs` | 对外协议 DTO 与协议版本 |
+| `config.rs`、`error.rs`、`cancel.rs` | 配置解析、HTTP 错误信封、取消信号 |
+
+`hub`：`lib.rs` 路由、节点增删改、节点作用域转发与静态资源；`bus.rs` 广播序号、回放窗口、节点视图与上游 watcher；`sse.rs` 合并事件流；`node_probe.rs` 上游探测；`protocol.rs` 与 `error.rs`。
+
+`client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer 与状态推导；`components/`、`stories/`、`styles/`。
+
+## 任务 → 文件
+
+| 我要改… | 从这里开始 |
+| --- | --- |
+| agent 的 HTTP 接口 | `crates/agent/src/api.rs` 的路由表与处理器，DTO 在 `protocol.rs` |
+| SSE 事件载荷 | `crates/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
+| 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store.rs` 与 `change.rs` |
+| 新的 LLM 工具 | `crates/agent/src/tools/` 新文件，并在 `tools/mod.rs` 的 `ToolBox` 实现里登记 `definitions()` 与 `execute()` |
+| 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite.rs` |
+| hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus.rs` |
+| 协议类型与 TS 生成 | `crates/agent/src/lib.rs`、`crates/hub/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
+| 客户端状态推导 | `client/src/view/reducer.ts` 与 `node-state.ts` |
+| 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
+| 集成测试 | `crates/*/tests/`，脚手架在 `tests/support/` |
+| 浏览器端到端测试 | `client/e2e/` |
 
 ## 命令
 
