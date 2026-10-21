@@ -2,8 +2,16 @@
 //!
 //! 每个集成测试目标是独立 crate，会单独编译本模块，因此这里允许未被该目标使用的条目。
 
-#![allow(dead_code)]
-#![allow(unused_imports)]
+#![expect(
+    dead_code,
+    unused_imports,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::let_underscore_must_use,
+    let_underscore_drop,
+    reason = "测试脚手架用 expect 与 panic 直接报告夹具与断言失败：夹具失败必须立刻暴露。\
+              本模块被每个集成测试目标独立编译，条目与导入未必都被使用。"
+)]
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
@@ -14,31 +22,31 @@ use axum::routing::get;
 use axum::{Json, Router};
 use tempfile::TempDir;
 
-pub use agent_handle::AgentHandle;
+pub(crate) use agent_handle::AgentHandle;
 
 /// 进程内的 hub 实例，持有临时数据库并监听随机回环端口。
-pub struct Harness {
+pub(crate) struct Harness {
     pub directory: TempDir,
     pub address: SocketAddr,
     task: tokio::task::JoinHandle<()>,
 }
 
 impl Harness {
-    pub async fn start() -> Self {
+    pub(crate) async fn start() -> Self {
         Self::start_with(tempfile::tempdir().expect("创建临时目录")).await
     }
 
     /// 用较小的总线容量启动，用于覆盖落后与窗口外游标。
-    pub async fn start_with_options(options: hub::HubOptions) -> Self {
+    pub(crate) async fn start_with_options(options: hub::HubOptions) -> Self {
         Self::start_options(tempfile::tempdir().expect("创建临时目录"), options).await
     }
 
     /// 在给定临时目录上启动 hub。复用目录即重启场景。
-    pub async fn start_with(directory: TempDir) -> Self {
+    pub(crate) async fn start_with(directory: TempDir) -> Self {
         Self::start_options(directory, hub::HubOptions::default()).await
     }
 
-    pub async fn start_options(directory: TempDir, options: hub::HubOptions) -> Self {
+    pub(crate) async fn start_options(directory: TempDir, options: hub::HubOptions) -> Self {
         let store = durable::Store::open(&database_path(&directory))
             .await
             .expect("打开 hub 数据库");
@@ -49,7 +57,7 @@ impl Harness {
         let task = tokio::spawn(async move {
             hub::serve_with(listener, Arc::new(store), options)
                 .await
-                .expect("hub 服务运行")
+                .expect("hub 服务运行");
         });
         Self {
             directory,
@@ -61,21 +69,21 @@ impl Harness {
     /// 结束本实例并取回临时目录，用于在同一数据库上重启 hub。
     ///
     /// 必须等任务真正退出：否则旧实例仍持有 SQLite 连接与监听端口，重启会与之竞争。
-    pub async fn stop(self) -> TempDir {
+    pub(crate) async fn stop(self) -> TempDir {
         self.task.abort();
         let _ = self.task.await;
         self.directory
     }
 
-    pub fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("http://{}{path}", self.address)
     }
 
-    pub fn database(&self) -> PathBuf {
+    pub(crate) fn database(&self) -> PathBuf {
         database_path(&self.directory)
     }
 
-    pub async fn register_node(&self, name: &str, url: &str) -> reqwest::Response {
+    pub(crate) async fn register_node(&self, name: &str, url: &str) -> reqwest::Response {
         reqwest::Client::new()
             .post(self.url("/api/nodes"))
             .json(&serde_json::json!({ "name": name, "url": url }))
@@ -84,7 +92,7 @@ impl Harness {
             .expect("请求注册节点")
     }
 
-    pub async fn rename_node(&self, name: &str, next: &str) -> reqwest::Response {
+    pub(crate) async fn rename_node(&self, name: &str, next: &str) -> reqwest::Response {
         reqwest::Client::new()
             .patch(self.url(&format!("/api/nodes/{name}")))
             .json(&serde_json::json!({ "name": next }))
@@ -93,7 +101,7 @@ impl Harness {
             .expect("请求重命名节点")
     }
 
-    pub async fn remove_node(&self, name: &str) -> reqwest::Response {
+    pub(crate) async fn remove_node(&self, name: &str) -> reqwest::Response {
         reqwest::Client::new()
             .delete(self.url(&format!("/api/nodes/{name}")))
             .send()
@@ -101,7 +109,7 @@ impl Harness {
             .expect("请求删除节点")
     }
 
-    pub async fn bootstrap(&self) -> hub::HubBootstrap {
+    pub(crate) async fn bootstrap(&self) -> hub::HubBootstrap {
         reqwest::get(self.url("/api/bootstrap"))
             .await
             .expect("请求 bootstrap")
@@ -111,7 +119,11 @@ impl Harness {
     }
 
     /// 轮询等待某个节点到达指定状态。上游状态由总线异步更新。
-    pub async fn wait_for_status(&self, name: &str, status: hub::NodeStatus) -> hub::NodeSnapshot {
+    pub(crate) async fn wait_for_status(
+        &self,
+        name: &str,
+        status: hub::NodeStatus,
+    ) -> hub::NodeSnapshot {
         for _ in 0..500 {
             let snapshot = self.snapshot(name).await;
             if snapshot.status == status {
@@ -123,7 +135,7 @@ impl Harness {
     }
 
     /// 等待广播序号推进到 `target` 之后。
-    pub async fn wait_for_seq_after(&self, target: u64) -> u64 {
+    pub(crate) async fn wait_for_seq_after(&self, target: u64) -> u64 {
         for _ in 0..500 {
             let seq = self.bootstrap().await.max_hub_seq;
             if seq > target {
@@ -135,7 +147,7 @@ impl Harness {
     }
 
     /// 按名称取出 bootstrap 中的节点快照。
-    pub async fn snapshot(&self, name: &str) -> hub::NodeSnapshot {
+    pub(crate) async fn snapshot(&self, name: &str) -> hub::NodeSnapshot {
         self.bootstrap()
             .await
             .nodes
@@ -156,13 +168,13 @@ mod agent_handle {
     use tempfile::TempDir;
 
     /// 进程内的真实 agent：临时 workspace 与 SQLite，模型指向不可用端点。
-    pub struct AgentHandle {
+    pub(crate) struct AgentHandle {
         pub directory: TempDir,
         pub url: String,
     }
 
     impl AgentHandle {
-        pub async fn start() -> Self {
+        pub(crate) async fn start() -> Self {
             let directory = tempfile::tempdir().expect("创建临时目录");
             let store = agent::Store::open(&directory.path().join("agent.sqlite"))
                 .await
@@ -187,7 +199,7 @@ mod agent_handle {
                 .expect("绑定 agent 端口");
             let address = listener.local_addr().expect("读取 agent 地址");
             tokio::spawn(async move {
-                agent::serve(listener, state).await.expect("agent 服务运行")
+                agent::serve(listener, state).await.expect("agent 服务运行");
             });
             Self {
                 directory,
@@ -196,7 +208,7 @@ mod agent_handle {
         }
 
         /// 直接向该 agent 注册一个 workspace，用于准备 bootstrap 数据。
-        pub async fn register_workspace(&self, path: &str) -> reqwest::Response {
+        pub(crate) async fn register_workspace(&self, path: &str) -> reqwest::Response {
             reqwest::Client::new()
                 .post(format!("{}/api/workspaces", self.url))
                 .json(&serde_json::json!({ "path": path }))
@@ -208,7 +220,7 @@ mod agent_handle {
 }
 
 /// 只实现 health 与 bootstrap 的假 agent，用于构造协议版本不匹配的场景。
-pub async fn start_fake_agent(protocol_version: u32) -> String {
+pub(crate) async fn start_fake_agent(protocol_version: u32) -> String {
     let router = Router::new()
         .route(
             "/api/health",
@@ -235,23 +247,29 @@ pub async fn start_fake_agent(protocol_version: u32) -> String {
         .await
         .expect("绑定假 agent 端口");
     let address = listener.local_addr().expect("读取假 agent 地址");
-    tokio::spawn(async move { axum::serve(listener, router).await.expect("假 agent 运行") });
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.expect("假 agent 运行");
+    });
     format!("http://{address}")
 }
 
 /// hub 合并事件流的测试客户端。
-pub struct EventStream {
+pub(crate) struct EventStream {
     stream:
         std::pin::Pin<Box<dyn futures_util::Stream<Item = reqwest::Result<bytes::Bytes>> + Send>>,
     buffer: Vec<u8>,
 }
 
 impl EventStream {
-    pub async fn connect(harness: &Harness, after: u64) -> Self {
+    pub(crate) async fn connect(harness: &Harness, after: u64) -> Self {
         let response = reqwest::get(harness.url(&format!("/api/events?after={after}")))
             .await
             .expect("订阅合并事件流");
-        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(
+            response.status(),
+            reqwest::StatusCode::OK,
+            "订阅合并事件流应返回 200"
+        );
         Self {
             stream: Box::pin(response.bytes_stream()),
             buffer: Vec::new(),
@@ -259,7 +277,7 @@ impl EventStream {
     }
 
     /// 读取下一条事件。
-    pub async fn next_event(&mut self) -> hub::HubStreamEvent {
+    pub(crate) async fn next_event(&mut self) -> hub::HubStreamEvent {
         use futures_util::StreamExt;
 
         let read = async {
@@ -290,7 +308,7 @@ impl EventStream {
     }
 
     /// 读取事件直到满足条件。
-    pub async fn next_matching(
+    pub(crate) async fn next_matching(
         &mut self,
         mut predicate: impl FnMut(&hub::HubStreamEvent) -> bool,
     ) -> hub::HubStreamEvent {
@@ -311,7 +329,7 @@ impl EventStream {
 /// - `/api/events` 记录收到的 `after`，先回放该游标之后的事实，再接实时推送；
 ///   广播落后时像 `agent` 一样发一条 `resync` 并结束该流。
 /// - 其余路径永不响应，用于覆盖命令转发超时。
-pub mod scripted {
+pub(crate) mod scripted {
     use std::convert::Infallible;
     use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
@@ -328,7 +346,7 @@ pub mod scripted {
 
     /// 事件流的行为。
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum EventsMode {
+    pub(crate) enum EventsMode {
         /// 按脚本推送事实。
         Scripted,
         /// 连接后立即结束。
@@ -339,7 +357,7 @@ pub mod scripted {
 
     /// hub 的订阅请求。记录游标是否为缺失，因此能区分「没带游标」与「带 0」。
     #[derive(Debug, serde::Deserialize)]
-    pub struct EventsQuery {
+    pub(crate) struct EventsQuery {
         pub after: Option<i64>,
     }
 
@@ -356,7 +374,7 @@ pub mod scripted {
         bootstrap_started: Notify,
     }
 
-    pub struct ScriptedNode {
+    pub(crate) struct ScriptedNode {
         pub url: String,
         address: SocketAddr,
         inner: Arc<Inner>,
@@ -364,7 +382,7 @@ pub mod scripted {
     }
 
     impl ScriptedNode {
-        pub async fn start() -> Self {
+        pub(crate) async fn start() -> Self {
             Self::start_with_fact_capacity(64).await
         }
 
@@ -372,7 +390,7 @@ pub mod scripted {
         ///
         /// 容量小于一次推送的事实数时，hub 的订阅会收到 `Lagged`，从而模拟
         /// 「hub 落后于 agent 的内存广播」这一真实场景。
-        pub async fn start_with_fact_capacity(capacity: usize) -> Self {
+        pub(crate) async fn start_with_fact_capacity(capacity: usize) -> Self {
             let inner = Arc::new(Inner {
                 watermark: AtomicI64::new(0),
                 mode: Mutex::new(EventsMode::Scripted),
@@ -451,7 +469,7 @@ pub mod scripted {
                 .expect("绑定假节点端口");
             let address = listener.local_addr().expect("读取假节点地址");
             let task = tokio::spawn(async move {
-                axum::serve(listener, router).await.expect("假节点运行")
+                axum::serve(listener, router).await.expect("假节点运行");
             });
             Self {
                 url: format!("http://{address}"),
@@ -462,22 +480,22 @@ pub mod scripted {
         }
 
         /// 设定 bootstrap 返回的 `maxEventId`，即上游水位。
-        pub fn set_watermark(&self, value: i64) {
+        pub(crate) fn set_watermark(&self, value: i64) {
             self.inner.watermark.store(value, Ordering::SeqCst);
         }
 
         /// 停止监听。之后对该端口的连接被拒绝，用于构造「连接失败」这一类原因。
-        pub fn stop(&self) {
+        pub(crate) fn stop(&self) {
             self.task.abort();
         }
 
         /// 让 bootstrap 只返回响应头、body 永不结束，用于覆盖探测的读体时限。
-        pub fn stall_bootstrap_body(&self) {
+        pub(crate) fn stall_bootstrap_body(&self) {
             self.inner.bootstrap_stall.store(true, Ordering::SeqCst);
         }
 
         /// 等待端口真正拒绝连接。stop 的 abort 是异步生效的。
-        pub async fn wait_until_refused(&self) {
+        pub(crate) async fn wait_until_refused(&self) {
             for _ in 0..200 {
                 if tokio::net::TcpStream::connect(self.address).await.is_err() {
                     return;
@@ -488,21 +506,21 @@ pub mod scripted {
         }
 
         /// 让健康检查返回指定原文。原文按 JSON 反序列化，非法内容触发「health 响应无法解析」。
-        pub fn set_health_body(&self, body: &str) {
+        pub(crate) fn set_health_body(&self, body: &str) {
             *self.inner.health_body.lock().expect("健康说明锁") = Some(body.to_owned());
         }
 
-        pub fn set_events_mode(&self, mode: EventsMode) {
+        pub(crate) fn set_events_mode(&self, mode: EventsMode) {
             *self.inner.mode.lock().expect("模式锁") = mode;
         }
 
         /// 上游收到的全部游标。缺失游标的请求记为 None。
-        pub fn after_requests(&self) -> Vec<Option<i64>> {
+        pub(crate) fn after_requests(&self) -> Vec<Option<i64>> {
             self.inner.after.lock().expect("after 锁").clone()
         }
 
         /// 推送一条重试提示。仅实时，像 `agent` 一样不进入回放历史。
-        pub fn publish_retry(
+        pub(crate) fn publish_retry(
             &self,
             session_id: &str,
             attempt: u32,
@@ -521,7 +539,7 @@ pub mod scripted {
         }
 
         /// 向上游推送一条事实。
-        pub fn publish_fact(&self, id: i64, event: durable::FactEvent) {
+        pub(crate) fn publish_fact(&self, id: i64, event: durable::FactEvent) {
             self.publish(durable::StreamEvent::Fact {
                 id,
                 session_id: None,
@@ -544,7 +562,7 @@ pub mod scripted {
         }
 
         /// 挂起下一次 bootstrap 响应，直到 `release_bootstrap`。
-        pub fn hold_bootstrap(&self) {
+        pub(crate) fn hold_bootstrap(&self) {
             let (sender, receiver) = oneshot::channel();
             {
                 let mut waiting = self.inner.bootstrap_wait.lock().expect("闸门锁");
@@ -555,11 +573,11 @@ pub mod scripted {
         }
 
         /// 等待被挂起的 bootstrap 请求到达。
-        pub async fn wait_for_bootstrap_request(&self) {
+        pub(crate) async fn wait_for_bootstrap_request(&self) {
             self.inner.bootstrap_started.notified().await;
         }
 
-        pub fn release_bootstrap(&self) {
+        pub(crate) fn release_bootstrap(&self) {
             let sender = self
                 .inner
                 .bootstrap_release
@@ -572,14 +590,14 @@ pub mod scripted {
     }
 
     /// 一条事实事件，用于验证上游事实进入合并流。
-    pub fn fact() -> durable::FactEvent {
+    pub(crate) fn fact() -> durable::FactEvent {
         durable::FactEvent::SessionDeleted {
             session_id: durable::SessionId::parse("s1").expect("合法 session id"),
         }
     }
 
     /// 等待上游以指定游标订阅。
-    pub async fn wait_for_after(node: &ScriptedNode, expected: i64) {
+    pub(crate) async fn wait_for_after(node: &ScriptedNode, expected: i64) {
         for _ in 0..500 {
             if node.after_requests().last().copied().flatten() == Some(expected) {
                 return;
@@ -593,7 +611,7 @@ pub mod scripted {
     }
 
     /// 等待上游事件流建立。请求到达即代表订阅已注册。
-    pub async fn wait_for_upstream(node: &ScriptedNode) {
+    pub(crate) async fn wait_for_upstream(node: &ScriptedNode) {
         for _ in 0..500 {
             if !node.after_requests().is_empty() {
                 return;

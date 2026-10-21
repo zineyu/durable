@@ -44,6 +44,7 @@ pub struct NodeSnapshot {
 }
 
 impl NodeSnapshot {
+    #[must_use]
     pub fn ok(node: NodeMetadata, bootstrap: BootstrapResponse) -> Self {
         Self {
             name: node.name,
@@ -54,6 +55,7 @@ impl NodeSnapshot {
         }
     }
 
+    #[must_use]
     pub fn failed(node: NodeMetadata, status: NodeStatus, detail: String) -> Self {
         Self {
             name: node.name,

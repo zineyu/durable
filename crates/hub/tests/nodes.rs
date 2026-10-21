@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "测试脚手架用 expect 直接报告夹具失败：夹具失败必须立刻暴露。"
+)]
+
 mod support;
 
 use reqwest::StatusCode;

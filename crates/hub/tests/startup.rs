@@ -1,3 +1,12 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::let_underscore_must_use,
+    let_underscore_drop,
+    reason = "测试脚手架用 expect 与 panic 直接报告夹具与断言失败；子进程读线程丢弃读取结果\
+              与发送结果，因为主线程已按超时决定成败。"
+)]
+
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use std::process::{Command, Stdio};

@@ -142,7 +142,7 @@ fn required_agent_protocol_version_matches_agent() {
     );
 }
 
-/// 规格 user story 4：节点卡住时命令得到显式的 node_unavailable，而不是无限等待。
+/// 规格 user story 4：节点卡住时命令得到显式的 `node_unavailable`，而不是无限等待。
 #[tokio::test]
 async fn times_out_hung_command_with_node_unavailable() {
     let harness = Harness::start_with_options(hub::HubOptions {
@@ -229,7 +229,7 @@ async fn forwards_event_stream_beyond_command_timeout() {
     assert!(ended.is_ok(), "空闲超过超时后转发的流必须结束");
 }
 
-/// 命令在响应头之后卡住时同样按时限返回 node_unavailable。
+/// 命令在响应头之后卡住时同样按时限返回 `node_unavailable`。
 #[tokio::test]
 async fn times_out_command_with_stalled_body() {
     let harness = Harness::start_with_options(hub::HubOptions {

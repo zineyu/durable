@@ -1,3 +1,9 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    reason = "测试脚手架用 expect 与 panic 直接报告夹具与断言失败：工作目录创建失败必须立刻暴露。"
+)]
+
 mod support;
 
 use support::scripted::{ScriptedNode, fact, wait_for_upstream};

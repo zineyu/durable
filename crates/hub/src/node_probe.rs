@@ -6,7 +6,7 @@ use durable::NodeMetadata;
 /// 读取节点的 bootstrap 元数据。状态由总线负责，这里只管取数据。
 ///
 /// timeout 是「发送 + 读体」的总时限：探测卡在响应体上也不会挂住调用方。
-pub async fn fetch_bootstrap(
+pub(crate) async fn fetch_bootstrap(
     client: &reqwest::Client,
     node: &NodeMetadata,
     timeout: Duration,
@@ -27,6 +27,6 @@ pub async fn fetch_bootstrap(
         .map_err(|error| format!("bootstrap 响应无法解析: {error}"))
 }
 
-pub fn base_url(node: &NodeMetadata) -> String {
+pub(crate) fn base_url(node: &NodeMetadata) -> String {
     node.url.trim_end_matches('/').to_owned()
 }

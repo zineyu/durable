@@ -1,16 +1,18 @@
 use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use agent::HealthResponse;
+use axum::body::Bytes;
 use durable::{NodeMetadata, NodeName, ResyncReason, SessionId, StreamEvent};
+use futures_util::StreamExt;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use crate::HubOptions;
 use crate::node_probe;
 use crate::protocol::{HubStreamEvent, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION};
+use crate::{ApiError, HubOptions};
 
 /// 一个客户端订阅时得到的内容：可回放的事件、实时接收端，或一条 resync 指示。
 pub struct Subscription {
@@ -39,6 +41,7 @@ struct BusState {
 }
 
 impl Bus {
+    #[must_use]
     pub fn new(broadcast_capacity: usize, replay_window: usize) -> Self {
         let (sender, _) = broadcast::channel(broadcast_capacity);
         Self {
@@ -52,27 +55,48 @@ impl Bus {
         }
     }
 
-    /// 当前最大广播序号。客户端用它作为续传游标的起点。
-    pub fn max_seq(&self) -> u64 {
-        self.state.lock().expect("bus 锁").seq
-    }
-
-    pub fn view(&self, name: &NodeName) -> NodeView {
+    /// 取总线状态锁。
+    ///
+    /// 持锁线程 panic 会毒化锁。毒化之后共享状态不再可信，所以作为内部错误上报，而不是恢复使用。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    fn state(&self) -> Result<MutexGuard<'_, BusState>, ApiError> {
         self.state
             .lock()
-            .expect("bus 锁")
-            .views
-            .get(name)
-            .cloned()
-            .unwrap_or(NodeView {
-                status: NodeStatus::Unreachable,
-                detail: Some("尚未连接".to_owned()),
-            })
+            .map_err(|_| ApiError::internal("bus 状态锁已毒化".to_owned()))
+    }
+
+    /// 当前最大广播序号。客户端用它作为续传游标的起点。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    pub fn max_seq(&self) -> Result<u64, ApiError> {
+        Ok(self.state()?.seq)
+    }
+
+    /// 节点视图。没有记录的节点按「尚未连接」的不可达处理。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    pub fn view(&self, name: &NodeName) -> Result<NodeView, ApiError> {
+        let state = self.state()?;
+        Ok(state.views.get(name).cloned().unwrap_or(NodeView {
+            status: NodeStatus::Unreachable,
+            detail: Some("尚未连接".to_owned()),
+        }))
     }
 
     /// 订阅广播。`after` 落在回放窗口之外时返回 resync，而不是回放。
-    pub fn subscribe(&self, after: u64) -> Subscription {
-        let state = self.state.lock().expect("bus 锁");
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    pub fn subscribe(&self, after: u64) -> Result<Subscription, ApiError> {
+        let state = self.state()?;
         let seq = state.seq;
         let window_start = match state.window.front() {
             Some(event) => seq_of(event),
@@ -81,13 +105,13 @@ impl Bus {
         let outside = after > seq || (after + 1 < window_start);
         let receiver = self.sender.subscribe();
         if outside {
-            return Subscription {
+            return Ok(Subscription {
                 replay: Vec::new(),
                 receiver: None,
                 resync: Some(ResyncReason::Lagged {
                     skipped: seq.saturating_sub(after),
                 }),
-            };
+            });
         }
         let replay = state
             .window
@@ -95,22 +119,22 @@ impl Bus {
             .filter(|event| seq_of(event) > after)
             .cloned()
             .collect();
-        Subscription {
+        Ok(Subscription {
             replay,
             receiver: Some(receiver),
             resync: None,
-        }
+        })
     }
 
-    pub fn set_view(&self, name: NodeName, view: NodeView) {
-        let previous = self
-            .state
-            .lock()
-            .expect("bus 锁")
-            .views
-            .insert(name.clone(), view.clone());
+    /// 写入节点视图。只有视图真的变了才广播。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    pub fn set_view(&self, name: NodeName, view: NodeView) -> Result<(), ApiError> {
+        let previous = self.state()?.views.insert(name.clone(), view.clone());
         if previous.as_ref() == Some(&view) {
-            return;
+            return Ok(());
         }
         match view.status {
             NodeStatus::Ok => tracing::info!(node = %name, "节点可用"),
@@ -126,18 +150,33 @@ impl Bus {
             name,
             status: view.status,
             detail: view.detail,
-        });
+        })
     }
 
-    pub fn node_registered(&self, node: NodeMetadata) {
-        self.publish_fact(|hub_seq| HubStreamEvent::NodeRegistered { hub_seq, node });
+    /// 记录节点登记并广播。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    pub fn node_registered(&self, node: NodeMetadata) -> Result<(), ApiError> {
+        self.publish_fact(|hub_seq| HubStreamEvent::NodeRegistered { hub_seq, node })
     }
 
-    pub fn node_removed(&self, name: NodeName) {
-        self.state.lock().expect("bus 锁").views.remove(&name);
-        self.publish_fact(|hub_seq| HubStreamEvent::NodeRemoved { hub_seq, name });
+    /// 清除节点视图并广播删除。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    pub fn node_removed(&self, name: NodeName) -> Result<(), ApiError> {
+        self.state()?.views.remove(&name);
+        self.publish_fact(|hub_seq| HubStreamEvent::NodeRemoved { hub_seq, name })
     }
 
+    /// 广播一条事实事件。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
     pub fn node_fact(
         &self,
         node: NodeName,
@@ -145,7 +184,7 @@ impl Bus {
         session_id: Option<SessionId>,
         timestamp: i64,
         event: durable::FactEvent,
-    ) {
+    ) -> Result<(), ApiError> {
         self.publish_fact(|hub_seq| HubStreamEvent::Fact {
             hub_seq,
             node,
@@ -153,9 +192,10 @@ impl Bus {
             session_id,
             timestamp,
             event,
-        });
+        })
     }
 
+    /// 转发增量。仅实时，不进回放窗口。
     pub fn delta(
         &self,
         node: NodeName,
@@ -164,7 +204,7 @@ impl Bus {
         text: String,
         timestamp: i64,
     ) {
-        let _ = self.sender.send(HubStreamEvent::Delta {
+        self.broadcast(HubStreamEvent::Delta {
             node,
             session_id,
             message_id,
@@ -182,7 +222,7 @@ impl Bus {
         max_attempts: u32,
         delay_ms: u64,
     ) {
-        let _ = self.sender.send(HubStreamEvent::Retry {
+        self.broadcast(HubStreamEvent::Retry {
             node,
             session_id,
             attempt,
@@ -191,15 +231,26 @@ impl Bus {
         });
     }
 
-    fn publish_fact(&self, build: impl FnOnce(u64) -> HubStreamEvent) {
-        let mut state = self.state.lock().expect("bus 锁");
+    /// 分配广播序号，进入回放窗口后广播。
+    ///
+    /// # Errors
+    ///
+    /// - `ApiError::internal`：hub 的状态锁已被毒化。
+    fn publish_fact(&self, build: impl FnOnce(u64) -> HubStreamEvent) -> Result<(), ApiError> {
+        let mut state = self.state()?;
         state.seq += 1;
         let event = build(state.seq);
         state.window.push_back(event.clone());
         while state.window.len() > self.replay_window {
             state.window.pop_front();
         }
-        let _ = self.sender.send(event);
+        self.broadcast(event);
+        Ok(())
+    }
+
+    /// 尽力广播。没有订阅者时 `send` 返回错误，这不是失败路径，因此只记录接收者数量。
+    fn broadcast(&self, event: HubStreamEvent) {
+        let _receivers = self.sender.send(event);
     }
 }
 
@@ -216,12 +267,12 @@ fn seq_of(event: &HubStreamEvent) -> u64 {
 }
 
 /// 为单个节点维持常驻上游事件流，带指数退避重连。
-pub struct NodeWatcher {
+pub(crate) struct NodeWatcher {
     handle: JoinHandle<()>,
 }
 
 impl NodeWatcher {
-    pub fn start(
+    pub(crate) fn start(
         bus: Arc<Bus>,
         node: NodeMetadata,
         client: reqwest::Client,
@@ -244,13 +295,29 @@ async fn watch_forever(
     client: reqwest::Client,
     options: HubOptions,
 ) {
+    match watch_loop(&bus, &node, &client, options).await {
+        Ok(never) => match never {},
+        Err(error) => {
+            tracing::error!(node = %node.name, error = %error, "总线状态不可用，停止该节点的上游订阅");
+        }
+    }
+}
+
+/// 常驻订阅循环：上游每结束一次就按退避重连。总线状态不可用时返回错误。
+async fn watch_loop(
+    bus: &Bus,
+    node: &NodeMetadata,
+    client: &reqwest::Client,
+    options: HubOptions,
+) -> Result<Infallible, ApiError> {
     let mut last_id: Option<i64> = None;
     let mut attempt = 0u32;
     loop {
-        let was_ok = bus.view(&node.name).status == NodeStatus::Ok;
-        let end = match run_stream(&bus, &client, &node, &mut last_id, options).await {
+        let was_ok = bus.view(&node.name)?.status == NodeStatus::Ok;
+        let end = match run_stream(bus, client, node, &mut last_id, options).await {
             Ok(never) => match never {},
-            Err(end) => end,
+            Err(WatchError::End(end)) => end,
+            Err(WatchError::Bus(error)) => return Err(error),
         };
         if let StreamEnd::Failure(failure) = &end {
             bus.set_view(
@@ -259,7 +326,7 @@ async fn watch_forever(
                     status: failure.status,
                     detail: Some(failure.detail.clone()),
                 },
-            );
+            )?;
         }
         if let StreamEnd::Resync(reason) = &end {
             tracing::debug!(node = %node.name, ?reason, "上游要求重连");
@@ -300,7 +367,12 @@ fn jitter(node: &NodeName, attempt: u32) -> f64 {
     }
     hash ^= u64::from(attempt);
     hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    0.8 + 0.4 * (hash % 1001) as f64 / 1000.0
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "取模 1001 之后小于 1001，f64 可精确表示。"
+    )]
+    let permille = (hash % 1001) as f64;
+    0.8 + 0.4 * permille / 1000.0
 }
 
 /// 一次上游订阅的结束原因。
@@ -315,14 +387,32 @@ enum StreamEnd {
     Resync(ResyncReason),
 }
 
-impl From<Failure> for StreamEnd {
-    fn from(failure: Failure) -> Self {
-        Self::Failure(failure)
+impl From<StreamEnd> for WatchError {
+    fn from(end: StreamEnd) -> Self {
+        Self::End(end)
     }
 }
 
+impl From<Failure> for WatchError {
+    fn from(failure: Failure) -> Self {
+        Self::End(StreamEnd::Failure(failure))
+    }
+}
+
+impl From<ApiError> for WatchError {
+    fn from(error: ApiError) -> Self {
+        Self::Bus(error)
+    }
+}
+
+/// 订阅循环的错误：要么一次上游订阅结束，要么总线状态不可用。
+enum WatchError {
+    End(StreamEnd),
+    Bus(ApiError),
+}
+
 /// 上游订阅只以错误结束：上游关闭事件流也按一次失败处理。
-type StreamResult = Result<Infallible, StreamEnd>;
+type StreamResult = Result<Infallible, WatchError>;
 
 /// 探测或订阅失败。状态由失败本身决定，避免上层把它抹平成不可达。
 struct Failure {
@@ -347,7 +437,7 @@ impl Failure {
 }
 
 async fn run_stream(
-    bus: &Arc<Bus>,
+    bus: &Bus,
     client: &reqwest::Client,
     node: &NodeMetadata,
     last_id: &mut Option<i64>,
@@ -366,10 +456,11 @@ async fn run_stream(
         .await
         .map_err(|error| Failure::unreachable(format!("health 响应无法解析: {error}")))?;
     if health.protocol_version != REQUIRED_AGENT_PROTOCOL_VERSION {
-        return Err(StreamEnd::from(Failure::incompatible(format!(
+        return Err(Failure::incompatible(format!(
             "agent 协议版本 {} 与 hub 要求的 {} 不一致",
             health.protocol_version, REQUIRED_AGENT_PROTOCOL_VERSION
-        ))));
+        ))
+        .into());
     }
     bus.set_view(
         name.clone(),
@@ -377,20 +468,19 @@ async fn run_stream(
             status: NodeStatus::Ok,
             detail: None,
         },
-    );
+    )?;
 
     // 水位探测失败必须降级，不能退回 after=0 继续订阅：那会把节点的全部历史重新灌进
     // 合并流，正是本决策要消除的行为（ADR 0027）。拿不到水位就意味着拿不到该节点的快照，
     // 此时让它保持不可达，比让客户端收到一份没有快照支撑的事实流更诚实。
-    let after = match *last_id {
-        Some(id) => id,
-        None => {
-            let bootstrap = node_probe::fetch_bootstrap(client, node, options.connect_timeout)
-                .await
-                .map_err(|detail| Failure::unreachable(format!("读取节点水位失败: {detail}")))?;
-            *last_id = Some(bootstrap.max_event_id);
-            bootstrap.max_event_id
-        }
+    let after = if let Some(id) = *last_id {
+        id
+    } else {
+        let bootstrap = node_probe::fetch_bootstrap(client, node, options.connect_timeout)
+            .await
+            .map_err(|detail| Failure::unreachable(format!("读取节点水位失败: {detail}")))?;
+        *last_id = Some(bootstrap.max_event_id);
+        bootstrap.max_event_id
     };
     // 只给「等响应头」加时限。请求级 timeout 会覆盖到响应体读完，从而杀死整条常驻事件流。
     let response = tokio::time::timeout(
@@ -403,26 +493,39 @@ async fn run_stream(
     .map_err(|_| Failure::unreachable("等待事件流响应超时"))?
     .map_err(|error| Failure::unreachable(format!("订阅事件流失败: {error}")))?;
     if !response.status().is_success() {
-        return Err(StreamEnd::from(Failure::unreachable(format!(
-            "事件流返回 {}",
-            response.status()
-        ))));
+        return Err(Failure::unreachable(format!("事件流返回 {}", response.status())).into());
     }
-    let mut stream = response.bytes_stream();
+    read_events(
+        response.bytes_stream(),
+        name,
+        last_id,
+        bus,
+        options.stream_idle_timeout,
+    )
+    .await
+}
+
+/// 逐块读取事件流：按空行切帧，把每帧的 `data:` 行交给 [`dispatch`]。
+async fn read_events(
+    stream: impl futures_util::Stream<Item = reqwest::Result<Bytes>>,
+    name: &NodeName,
+    last_id: &mut Option<i64>,
+    bus: &Bus,
+    idle: Duration,
+) -> StreamResult {
+    let mut stream = Box::pin(stream);
     let mut buffer: Vec<u8> = Vec::new();
     loop {
-        use futures_util::StreamExt;
-        let chunk = match tokio::time::timeout(options.stream_idle_timeout, stream.next()).await {
-            Err(_) => return Err(Failure::unreachable("事件流空闲超时").into()),
+        let chunk = match tokio::time::timeout(idle, stream.next()).await {
             Ok(Some(Ok(chunk))) => chunk,
             Ok(Some(Err(error))) => {
                 return Err(Failure::unreachable(format!("读取事件流失败: {error}")).into());
             }
             Ok(None) => return Err(Failure::unreachable("事件流结束").into()),
+            Err(_) => return Err(Failure::unreachable("事件流空闲超时").into()),
         };
         buffer.extend_from_slice(&chunk);
-        while let Some(end) = buffer.windows(2).position(|window| window == b"\n\n") {
-            let frame: Vec<u8> = buffer.drain(..end + 2).collect();
+        while let Some(frame) = take_frame(&mut buffer) {
             let text = String::from_utf8_lossy(&frame);
             for line in text.lines() {
                 let Some(payload) = line.strip_prefix("data: ") else {
@@ -431,35 +534,50 @@ async fn run_stream(
                 let Ok(event) = serde_json::from_str::<StreamEvent>(payload) else {
                     continue;
                 };
-                match event {
-                    StreamEvent::Fact {
-                        id,
-                        session_id,
-                        timestamp,
-                        event,
-                    } => {
-                        *last_id = Some(id);
-                        bus.node_fact(name.clone(), id, session_id, timestamp, event);
-                    }
-                    StreamEvent::Delta {
-                        session_id,
-                        message_id,
-                        text,
-                        timestamp,
-                    } => bus.delta(name.clone(), session_id, message_id, text, timestamp),
-                    StreamEvent::Retry {
-                        session_id,
-                        attempt,
-                        max_attempts,
-                        delay_ms,
-                    } => bus.retry(name.clone(), session_id, attempt, max_attempts, delay_ms),
-                    StreamEvent::Resync { reason } => {
-                        return Err(StreamEnd::Resync(reason));
-                    }
-                }
+                dispatch(event, name, last_id, bus)?;
             }
         }
     }
+}
+
+/// 从缓冲区切出一帧（到空行为止）。
+fn take_frame(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let end = buffer.windows(2).position(|window| window == b"\n\n")?;
+    Some(buffer.drain(..end + 2).collect())
+}
+
+/// 把一条上游事件交给总线。`Resync` 结束本次订阅，由上层重连。
+fn dispatch(
+    event: StreamEvent,
+    name: &NodeName,
+    last_id: &mut Option<i64>,
+    bus: &Bus,
+) -> Result<(), WatchError> {
+    match event {
+        StreamEvent::Fact {
+            id,
+            session_id,
+            timestamp,
+            event,
+        } => {
+            *last_id = Some(id);
+            bus.node_fact(name.clone(), id, session_id, timestamp, event)?;
+        }
+        StreamEvent::Delta {
+            session_id,
+            message_id,
+            text,
+            timestamp,
+        } => bus.delta(name.clone(), session_id, message_id, text, timestamp),
+        StreamEvent::Retry {
+            session_id,
+            attempt,
+            max_attempts,
+            delay_ms,
+        } => bus.retry(name.clone(), session_id, attempt, max_attempts, delay_ms),
+        StreamEvent::Resync { reason } => return Err(StreamEnd::Resync(reason).into()),
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -556,14 +674,21 @@ mod tests {
         bus.set_view(
             laptop.clone(),
             view(NodeStatus::Unreachable, "连接节点失败"),
-        );
+        )
+        .expect("写入视图");
         bus.set_view(
             laptop.clone(),
             view(NodeStatus::Unreachable, "连接节点失败"),
-        );
-        bus.set_view(laptop.clone(), view(NodeStatus::Unreachable, "事件流结束"));
+        )
+        .expect("写入视图");
+        bus.set_view(laptop.clone(), view(NodeStatus::Unreachable, "事件流结束"))
+            .expect("写入视图");
 
-        assert_eq!(bus.max_seq(), 2, "相同的 (status, detail) 只广播一次");
+        assert_eq!(
+            bus.max_seq().expect("取最大序号"),
+            2,
+            "相同的 (status, detail) 只广播一次"
+        );
 
         let mut details = Vec::new();
         while let Ok(HubStreamEvent::NodeStatusChanged { detail, .. }) = receiver.try_recv() {

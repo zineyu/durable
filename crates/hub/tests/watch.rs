@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "测试脚手架用 panic 直接报告断言失败：事件类型不符必须立刻暴露。"
+)]
+
 mod support;
 
 use std::time::Duration;

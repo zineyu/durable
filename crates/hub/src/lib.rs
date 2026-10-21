@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
@@ -89,6 +89,10 @@ pub struct HubState {
 
 impl HubState {
     /// 打开状态并为节点表中已有的节点启动上游订阅。
+    ///
+    /// # Errors
+    ///
+    /// - [`std::io::Error`]：HTTP client 无法建立、节点表读取失败，或 watcher 表的状态锁已被毒化。
     pub async fn start(store: Arc<Store>, options: HubOptions) -> std::io::Result<Self> {
         let bus = Arc::new(Bus::new(options.broadcast_capacity, options.replay_window));
         let client = reqwest::Client::builder()
@@ -110,26 +114,32 @@ impl HubState {
         };
         tracing::info!(nodes = nodes.len(), "恢复节点订阅");
         for node in nodes {
-            state.watch(node);
+            state.watch(node).map_err(std::io::Error::other)?;
         }
         Ok(state)
     }
 
-    fn watch(&self, node: NodeMetadata) {
+    fn watch(&self, node: NodeMetadata) -> Result<(), ApiError> {
         let watcher = bus::NodeWatcher::start(
             Arc::clone(&self.bus),
             node.clone(),
             self.client.clone(),
             self.options,
         );
-        self.watchers
-            .lock()
-            .expect("watchers 锁")
-            .insert(node.name, watcher);
+        self.watchers()?.insert(node.name, watcher);
+        Ok(())
     }
 
-    fn unwatch(&self, name: &NodeName) {
-        self.watchers.lock().expect("watchers 锁").remove(name);
+    fn unwatch(&self, name: &NodeName) -> Result<(), ApiError> {
+        self.watchers()?.remove(name);
+        Ok(())
+    }
+
+    /// 取 watcher 表的锁。毒化之后共享状态不再可信，只能作为内部错误上报。
+    fn watchers(&self) -> Result<MutexGuard<'_, HashMap<NodeName, bus::NodeWatcher>>, ApiError> {
+        self.watchers
+            .lock()
+            .map_err(|_| ApiError::internal("watchers 状态锁已毒化".to_owned()))
     }
 }
 
@@ -150,6 +160,12 @@ impl fmt::Display for ListenAddressError {
 
 impl std::error::Error for ListenAddressError {}
 
+/// 解析监听地址，只接受回环地址。
+///
+/// # Errors
+///
+/// - [`ListenAddressError::Invalid`]：字符串不是合法的 `SocketAddr`。
+/// - [`ListenAddressError::NotLoopback`]：地址不是回环地址。
 pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError> {
     let address: SocketAddr = raw
         .parse()
@@ -173,10 +189,20 @@ pub fn router(state: HubState) -> Router {
         .with_state(state)
 }
 
+/// 用默认参数启动 hub 并开始监听。
+///
+/// # Errors
+///
+/// - [`std::io::Error`]：状态初始化失败，或监听或服务过程出错。
 pub async fn serve(listener: tokio::net::TcpListener, store: Arc<Store>) -> std::io::Result<()> {
     serve_with(listener, store, HubOptions::default()).await
 }
 
+/// 用给定参数启动 hub 并开始监听。
+///
+/// # Errors
+///
+/// - [`std::io::Error`]：状态初始化失败，或监听或服务过程出错。
 pub async fn serve_with(
     listener: tokio::net::TcpListener,
     store: Arc<Store>,
@@ -186,6 +212,12 @@ pub async fn serve_with(
     axum::serve(listener, router(state)).await
 }
 
+/// 把协议类型导出为 TypeScript 定义。
+///
+/// # Errors
+///
+/// - [`std::io::Error`]：输出目录无法建立。
+/// - [`ts_rs::ExportError`]：某个类型无法导出。
 pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(directory)?;
     let config = ts_rs::Config::new().with_out_dir(directory);
@@ -212,9 +244,12 @@ async fn health() -> Json<HubHealth> {
 }
 
 async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, ApiError> {
-    let max_hub_seq = state.bus.max_seq();
+    let max_hub_seq = state.bus.max_seq()?;
     let nodes = state.store.nodes().await?;
-    let snapshots = join_all(nodes.into_iter().map(|node| snapshot_of(&state, node))).await;
+    let snapshots = join_all(nodes.into_iter().map(|node| snapshot_of(&state, node)))
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(HubBootstrap {
         nodes: snapshots,
         max_hub_seq,
@@ -225,9 +260,9 @@ async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, 
 ///
 /// 探测失败只体现在这次快照里，不回写总线视图：节点状态的唯一写入者是 watcher
 /// （ADR 0028）。「这次能否取到元数据」与「上游事件流是否通」是两个观测，允许短暂不一致。
-async fn snapshot_of(state: &HubState, node: NodeMetadata) -> NodeSnapshot {
-    let view = state.bus.view(&node.name);
-    match view.status {
+async fn snapshot_of(state: &HubState, node: NodeMetadata) -> Result<NodeSnapshot, ApiError> {
+    let view = state.bus.view(&node.name)?;
+    Ok(match view.status {
         NodeStatus::Ok => {
             match node_probe::fetch_bootstrap(&state.client, &node, state.options.connect_timeout)
                 .await
@@ -241,7 +276,7 @@ async fn snapshot_of(state: &HubState, node: NodeMetadata) -> NodeSnapshot {
             status,
             view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
         ),
-    }
+    })
 }
 
 async fn register_node(
@@ -257,8 +292,8 @@ async fn register_node(
         ));
     }
     let node = state.store.register_node(name, url.to_owned()).await?;
-    state.bus.node_registered(node.clone());
-    state.watch(node.clone());
+    state.bus.node_registered(node.clone())?;
+    state.watch(node.clone())?;
     tracing::info!(node = %node.name, url = %node.url, "注册节点");
     Ok((
         StatusCode::CREATED,
@@ -281,10 +316,10 @@ async fn rename_node(
     let node = state.store.rename_node(&name, next).await?;
     tracing::info!(from = %name, to = %node.name, "重命名节点");
     if node.name != name {
-        state.unwatch(&name);
-        state.bus.node_removed(name);
-        state.bus.node_registered(node.clone());
-        state.watch(node.clone());
+        state.unwatch(&name)?;
+        state.bus.node_removed(name)?;
+        state.bus.node_registered(node.clone())?;
+        state.watch(node.clone())?;
     }
     Ok(Json(NodeSnapshot::failed(
         node,
@@ -300,8 +335,8 @@ async fn remove_node(
     let name = NodeName::parse(&name)?;
     state.store.remove_node(&name).await?;
     tracing::info!(node = %name, "移除节点");
-    state.unwatch(&name);
-    state.bus.node_removed(name);
+    state.unwatch(&name)?;
+    state.bus.node_removed(name)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -314,7 +349,7 @@ async fn forward_node(
     let (raw_name, rest) = split_node_path(uri.path())?;
     let name = NodeName::parse(raw_name)?;
     let node = lookup(&state, &name).await?;
-    let view = state.bus.view(&name);
+    let view = state.bus.view(&name)?;
     if view.status != NodeStatus::Ok {
         return Err(ApiError::node_unavailable(
             view.detail.unwrap_or_else(|| format!("节点不可用: {name}")),
@@ -334,7 +369,7 @@ async fn forward_node(
     );
 
     let mut upstream = state.client.request(method, target);
-    for (name, value) in headers.iter() {
+    for (name, value) in &headers {
         if is_hop_by_hop(name.as_str()) || name == header::HOST {
             continue;
         }
@@ -361,7 +396,7 @@ async fn forward_node(
     let response_headers = response.headers().clone();
 
     let mut builder = Response::builder().status(status);
-    for (name, value) in response_headers.iter() {
+    for (name, value) in &response_headers {
         if is_hop_by_hop(name.as_str()) {
             continue;
         }
@@ -435,7 +470,7 @@ fn split_node_path(path: &str) -> Result<(&str, &str), ApiError> {
         .strip_prefix("/api/n/")
         .ok_or_else(|| ApiError::unknown_node(format!("不是节点作用域路径: {path}")))?;
     match remainder.find('/') {
-        Some(index) => Ok((&remainder[..index], &remainder[index..])),
+        Some(index) => Ok(remainder.split_at(index)),
         None => Ok((remainder, "")),
     }
 }

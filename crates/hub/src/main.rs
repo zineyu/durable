@@ -33,17 +33,11 @@ async fn main() -> ExitCode {
     let arguments = Arguments::parse();
     let prepared = match prepare(&arguments) {
         Ok(prepared) => prepared,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
+        Err(error) => return startup_failure(error),
     };
     let _log = match init(&prepared.log) {
         Ok(guard) => guard,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
+        Err(error) => return startup_failure(error),
     };
     match run(prepared).await {
         Ok(()) => ExitCode::SUCCESS,
@@ -52,6 +46,16 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// 在日志可用之前报告启动错误。
+#[expect(
+    clippy::print_stderr,
+    reason = "启动路径上日志尚未可用（未初始化或初始化失败），只能写标准错误。"
+)]
+fn startup_failure(error: impl std::fmt::Display) -> ExitCode {
+    eprintln!("{error}");
+    ExitCode::FAILURE
 }
 
 fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>> {
@@ -68,6 +72,10 @@ fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>
     })
 }
 
+#[expect(
+    clippy::print_stdout,
+    reason = "这一行是启动测试与 client e2e 约定的就绪信号，必须写标准输出。"
+)]
 async fn run(prepared: Prepared) -> Result<(), Box<dyn std::error::Error>> {
     let store = Arc::new(durable::Store::open(&prepared.database).await?);
     let listener = tokio::net::TcpListener::bind(prepared.address).await?;
