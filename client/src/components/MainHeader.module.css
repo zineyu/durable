@@ -82,19 +82,19 @@
   font-weight: var(--weight-medium);
 }
 
-@media (max-width: 900px) {
+@media (width <= 900px) {
   .workspace {
     display: none;
   }
 }
 
-@media (max-width: 720px) {
+@media (width <= 720px) {
   .state {
     display: none;
   }
 }
 
-@media (max-height: 720px) {
+@media (height <= 720px) {
   .header {
     height: calc(var(--header-height) - var(--space-2));
   }

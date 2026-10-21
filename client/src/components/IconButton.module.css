@@ -51,13 +51,14 @@
   color: var(--color-primary-text);
 }
 
+.primary:disabled {
+  background: var(--color-surface-2);
+  color: var(--color-text-tertiary);
+}
+
 .primary:hover:not(:disabled),
 .primary:active:not(:disabled) {
   background: var(--color-primary-fill-hover);
   color: var(--color-primary-text);
 }
 
-.primary:disabled {
-  background: var(--color-surface-2);
-  color: var(--color-text-tertiary);
-}

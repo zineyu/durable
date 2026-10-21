@@ -15,7 +15,7 @@
   gap: var(--space-3);
 }
 
-@media (max-height: 720px) {
+@media (height <= 720px) {
   .inner {
     padding: var(--space-3) 0 var(--space-4);
     gap: var(--space-2);

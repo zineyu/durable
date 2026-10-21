@@ -68,7 +68,7 @@
   display: block;
   min-width: 0;
   overflow: hidden;
-  mask-image: linear-gradient(to right, currentColor calc(100% - var(--control-height-2xs)), transparent);
+  mask-image: linear-gradient(to right, currentcolor calc(100% - var(--control-height-2xs)), transparent);
   font-size: var(--text-sm);
   line-height: var(--leading-sm);
   font-weight: var(--weight-medium);
@@ -89,6 +89,7 @@
   from {
     transform: translateX(0);
   }
+
   to {
     transform: translateX(calc(min(100cqw, 100%) - 100%));
   }

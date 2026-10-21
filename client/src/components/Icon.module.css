@@ -3,7 +3,7 @@
   height: var(--icon-size);
   flex: none;
   fill: none;
-  stroke: currentColor;
+  stroke: currentcolor;
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;

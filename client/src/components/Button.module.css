@@ -35,11 +35,6 @@
   background: var(--color-surface-hover);
 }
 
-.secondary:active:not(:disabled),
-.ghost:active:not(:disabled) {
-  background: var(--color-surface-active);
-}
-
 .ghost {
   background: transparent;
   color: var(--color-text-secondary);
@@ -48,6 +43,11 @@
 .ghost:hover:not(:disabled) {
   background: var(--color-surface-hover);
   color: var(--color-text);
+}
+
+.secondary:active:not(:disabled),
+.ghost:active:not(:disabled) {
+  background: var(--color-surface-active);
 }
 
 .danger {

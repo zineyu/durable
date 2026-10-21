@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --max-warnings=0",
+    "lint:css": "stylelint \"src/**/*.css\" --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "storybook": "storybook dev -p 6006",
