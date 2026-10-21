@@ -116,6 +116,12 @@
 
 门禁本身不写在检查脚本里：`.github/workflows/gate-watch.yml` 在 PR 上比对门禁文件与 `.github/` 的改动，命中时评论提醒审查者，不阻断合并。
 
+## 契约一致性
+
+- 规格追溯：代码与测试里的 `规格 user story N` 必须对应 `docs/specs/*.md` 里存在的编号；未被引用的编号只打印清单，不阻断。脚本 `scripts/check-spec-links.sh`。
+- 类型清单：`docs/api/types.md` 与 TS 类型同一来源、同一命令生成，`durable-test` 比对两者，见「生成物」。
+- 术语表：`docs/glossary.md` 里标识符形状的反引号术语必须能在 `crates/` 或 `client/` 里找到，否则视为过时。脚本 `scripts/check-glossary.sh`。
+
 ## 日志与路径
 
 `--database` 与 `--log-dir` 可省略：省略时使用平台标准目录（见 `docs/adr/0026-logging-and-default-paths.md`）。日志同时写入标准错误（pretty 格式）与每日轮转的 JSON Lines 文件，保留 14 天。`DURABLE_LOG` 控制过滤，默认 `info`。测试必须传 `--log-dir`，避免写入用户的标准日志目录。
@@ -126,7 +132,7 @@
 
 ## 生成物
 
-`client/src/api/generated/` 由 agent 的 `ts-rs` 导出生成，不手写。Rust 协议类型变更后运行 `devenv shell -- durable-typegen`，并把生成文件的变更一并提交。
+`client/src/api/generated/` 与 `docs/api/types.md` 由 `ts-rs` 导出生成，不手写。Rust 协议类型变更后运行 `devenv shell -- durable-typegen`，并把生成文件的变更一并提交。`durable-typegen` 的实现是 `scripts/typegen.sh`，`durable-test` 会重新生成后比对这两个路径。
 
 ## 前端约定
 

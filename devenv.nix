@@ -44,10 +44,13 @@
     durable-lint
     cd client && npm run test && cd ..
     cargo test --workspace
-    cargo run --quiet -p agent --bin export-types-agent
-    cargo run --quiet -p hub --bin export-types-hub
-    git add --intent-to-add -- client/src/api/generated
-    git diff --exit-code -- client/src/api/generated
+    snapshot=$(mktemp -d)
+    trap 'rm -rf "$snapshot"' EXIT
+    cp -R client/src/api/generated "$snapshot/generated"
+    cp docs/api/types.md "$snapshot/types.md"
+    bash scripts/typegen.sh
+    diff -ru "$snapshot/generated" client/src/api/generated
+    diff -u "$snapshot/types.md" docs/api/types.md
   '';
 
   scripts.durable-e2e.exec = ''
@@ -61,8 +64,8 @@
   '';
 
   scripts.durable-typegen.exec = ''
-    cargo run --quiet -p agent --bin export-types-agent
-    cargo run --quiet -p hub --bin export-types-hub
+    set -e
+    bash scripts/typegen.sh
   '';
 
   scripts.storybook.exec = ''
