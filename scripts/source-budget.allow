@@ -7,7 +7,6 @@
 
 crates/agent/src/engine.rs 663
 crates/core/src/storage/sqlite.rs 828
-crates/core/src/store.rs 1216
 crates/hub/src/bus.rs 705
 client/src/App.tsx 811
 client/src/view/node-state.ts 446

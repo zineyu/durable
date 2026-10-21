@@ -36,7 +36,7 @@
 | `event.rs` | `FactEvent` 领域事实枚举 |
 | `change.rs` | 一次事务内的变更清单 |
 | `stream.rs` | `StreamEvent` 与进程内广播 |
-| `store.rs` | 唯一写入线：读写入口、事务与事件发布 |
+| `store/` | 唯一写入线：`mod.rs` 门面与提交入口、其余子模块按对象分写入命令 |
 | `storage/` | 快照查询与全部 SQL |
 
 `runtime`：`dirs.rs` 跨平台标准目录与启动路径；`logging.rs` 日志双写与轮转。
@@ -63,7 +63,7 @@
 | --- | --- |
 | agent 的 HTTP 接口 | `crates/agent/src/api.rs` 的路由表与处理器，DTO 在 `protocol.rs` |
 | SSE 事件载荷 | `crates/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
-| 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store.rs` 与 `change.rs` |
+| 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `change.rs` |
 | 新的 LLM 工具 | `crates/agent/src/tools/` 新文件，并在 `tools/mod.rs` 的 `ToolBox` 实现里登记 `definitions()` 与 `execute()` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite.rs` |
 | hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus.rs` |
