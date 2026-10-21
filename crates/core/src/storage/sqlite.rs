@@ -3,8 +3,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteQueryResult, SqliteRow,
-    SqliteSynchronous,
+    SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePoolOptions,
+    SqliteQueryResult, SqliteRow, SqliteSynchronous,
 };
 use sqlx::{Row, SqlitePool};
 
@@ -21,7 +21,7 @@ use crate::storage::{SessionSnapshot, Snapshot};
 use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
-pub struct SqliteStorage {
+pub(crate) struct SqliteStorage {
     pool: SqlitePool,
 }
 
@@ -30,7 +30,7 @@ impl SqliteStorage {
     ///
     /// 失败：数据库无法打开、连接参数被拒绝或迁移失败。
     /// 副作用：创建数据库文件与表。
-    pub async fn open(path: &Path) -> Result<Self, StoreError> {
+    pub(crate) async fn open(path: &Path) -> Result<Self, StoreError> {
         create_parent_directory(path).await?;
         let options = SqliteConnectOptions::new()
             .filename(path)
@@ -47,7 +47,7 @@ impl SqliteStorage {
         Ok(Self { pool })
     }
 
-    pub async fn snapshot(&self) -> Result<Snapshot, StoreError> {
+    pub(crate) async fn snapshot(&self) -> Result<Snapshot, StoreError> {
         let mut transaction = self.pool.begin().await?;
         let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
             .fetch_one(&mut *transaction)
@@ -79,7 +79,7 @@ impl SqliteStorage {
         })
     }
 
-    pub async fn workspace(
+    pub(crate) async fn workspace(
         &self,
         path: &WorkspacePath,
     ) -> Result<Option<WorkspaceMetadata>, StoreError> {
@@ -93,7 +93,7 @@ impl SqliteStorage {
     }
 
     /// 节点表中的全部节点，按注册顺序排列。
-    pub async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
+    pub(crate) async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
         sqlx::query("SELECT name, url, created_at FROM node ORDER BY created_at ASC, name ASC")
             .fetch_all(&self.pool)
             .await?
@@ -102,7 +102,7 @@ impl SqliteStorage {
             .collect()
     }
 
-    pub async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
+    pub(crate) async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
         sqlx::query("SELECT name, url, created_at FROM node WHERE name = ?1")
             .bind(name.as_str())
             .fetch_optional(&self.pool)
@@ -112,7 +112,10 @@ impl SqliteStorage {
             .transpose()
     }
 
-    pub async fn session(&self, id: &SessionId) -> Result<Option<SessionRecord>, StoreError> {
+    pub(crate) async fn session(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<SessionRecord>, StoreError> {
         sqlx::query(
             "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf FROM session
              WHERE id = ?1",
@@ -126,7 +129,7 @@ impl SqliteStorage {
     }
 
     /// session 当前是否有 running 的 run。
-    pub async fn busy(&self, id: &SessionId) -> Result<bool, StoreError> {
+    pub(crate) async fn busy(&self, id: &SessionId) -> Result<bool, StoreError> {
         let count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM run WHERE session_id = ?1 AND status = 'running'",
         )
@@ -136,7 +139,7 @@ impl SqliteStorage {
         Ok(count > 0)
     }
 
-    pub async fn session_count(&self, workspace: &WorkspacePath) -> Result<i64, StoreError> {
+    pub(crate) async fn session_count(&self, workspace: &WorkspacePath) -> Result<i64, StoreError> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session WHERE workspace = ?1")
             .bind(workspace.as_str())
             .fetch_one(&self.pool)
@@ -144,7 +147,7 @@ impl SqliteStorage {
         Ok(count)
     }
 
-    pub async fn session_tree(
+    pub(crate) async fn session_tree(
         &self,
         id: &SessionId,
     ) -> Result<Option<SessionSnapshot>, StoreError> {
@@ -167,7 +170,7 @@ impl SqliteStorage {
         };
         let session = parse_session(&row)?;
         let queue_length = parse_queue_length(&row)?;
-        let busy = parse_busy(&row)?;
+        let busy = parse_busy(&row);
         let messages = sqlx::query(
             "SELECT id, parent_id, role, text, run_id, tool_calls, created_at FROM message
              WHERE session_id = ?1 ORDER BY id ASC",
@@ -210,7 +213,10 @@ impl SqliteStorage {
     }
 
     /// session 的最早队列项。
-    pub async fn first_queue_item(&self, id: &SessionId) -> Result<Option<QueueItem>, StoreError> {
+    pub(crate) async fn first_queue_item(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<QueueItem>, StoreError> {
         sqlx::query(
             "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC LIMIT 1",
         )
@@ -223,7 +229,7 @@ impl SqliteStorage {
     }
 
     /// 指定 session 中的单个队列项。
-    pub async fn queue_item(
+    pub(crate) async fn queue_item(
         &self,
         session: &SessionId,
         id: QueueItemId,
@@ -241,7 +247,7 @@ impl SqliteStorage {
     }
 
     /// 指定 session 中的单个消息节点。
-    pub async fn message(
+    pub(crate) async fn message(
         &self,
         session: &SessionId,
         id: MessageId,
@@ -260,7 +266,7 @@ impl SqliteStorage {
     }
 
     /// 全部仍为 running 的 run，按 id 升序。
-    pub async fn running_runs(&self) -> Result<Vec<RunRecord>, StoreError> {
+    pub(crate) async fn running_runs(&self) -> Result<Vec<RunRecord>, StoreError> {
         let rows = sqlx::query(
             "SELECT id, session_id, status, failure, created_at, updated_at FROM run
              WHERE status = 'running' ORDER BY id ASC",
@@ -271,7 +277,7 @@ impl SqliteStorage {
     }
 
     /// session 的队列长度。
-    pub async fn queue_length(&self, id: &SessionId) -> Result<u32, StoreError> {
+    pub(crate) async fn queue_length(&self, id: &SessionId) -> Result<u32, StoreError> {
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM queue_item WHERE session_id = ?1")
                 .bind(id.as_str())
@@ -282,7 +288,7 @@ impl SqliteStorage {
     }
 
     /// session 的消息节点数量。
-    pub async fn message_count(&self, id: &SessionId) -> Result<i64, StoreError> {
+    pub(crate) async fn message_count(&self, id: &SessionId) -> Result<i64, StoreError> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM message WHERE session_id = ?1")
             .bind(id.as_str())
             .fetch_one(&self.pool)
@@ -291,7 +297,7 @@ impl SqliteStorage {
     }
 
     /// 所有队列非空的 session，按最近更新排序。
-    pub async fn sessions_with_queue(&self) -> Result<Vec<SessionId>, StoreError> {
+    pub(crate) async fn sessions_with_queue(&self) -> Result<Vec<SessionId>, StoreError> {
         let rows = sqlx::query(
             "SELECT DISTINCT s.id AS id, s.updated_at AS updated_at
              FROM session s JOIN queue_item q ON q.session_id = s.id
@@ -307,210 +313,21 @@ impl SqliteStorage {
             .collect()
     }
 
-    pub async fn apply(&self, changes: &Changeset) -> Result<Vec<CommittedEvent>, StoreError> {
+    pub(crate) async fn apply(
+        &self,
+        changes: &Changeset,
+    ) -> Result<Vec<CommittedEvent>, StoreError> {
         let mut transaction = self.pool.begin().await?;
         let mut committed = Vec::new();
         for change in changes.operations() {
-            match change {
-                Change::InsertWorkspace(workspace) => {
-                    sqlx::query("INSERT INTO workspace (path, registered_at) VALUES (?1, ?2)")
-                        .bind(workspace.path.as_str())
-                        .bind(workspace.registered_at)
-                        .execute(&mut *transaction)
-                        .await?;
-                }
-                Change::DeleteWorkspace(path) => {
-                    let result = sqlx::query("DELETE FROM workspace WHERE path = ?1")
-                        .bind(path.as_str())
-                        .execute(&mut *transaction)
-                        .await?;
-                    ensure_written(&result, "删除 workspace")?;
-                }
-                Change::InsertNode(node) => {
-                    sqlx::query("INSERT INTO node (name, url, created_at) VALUES (?1, ?2, ?3)")
-                        .bind(node.name.as_str())
-                        .bind(&node.url)
-                        .bind(node.created_at)
-                        .execute(&mut *transaction)
-                        .await?;
-                }
-                Change::DeleteNode(name) => {
-                    let result = sqlx::query("DELETE FROM node WHERE name = ?1")
-                        .bind(name.as_str())
-                        .execute(&mut *transaction)
-                        .await?;
-                    ensure_written(&result, "删除 node")?;
-                }
-                Change::InsertSession(session) => {
-                    sqlx::query(
-                        "INSERT INTO session (id, workspace, title, title_auto, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    )
-                    .bind(session.id.as_str())
-                    .bind(session.workspace.as_str())
-                    .bind(session.title.as_str())
-                    .bind(session.title_auto)
-                    .bind(session.created_at)
-                    .bind(session.updated_at)
-                    .execute(&mut *transaction)
-                    .await?;
-                }
-                Change::UpdateSession {
-                    id,
-                    title,
-                    title_auto,
-                    updated_at,
-                    active_leaf,
-                } => {
-                    let result = sqlx::query(
-                        "UPDATE session SET title = ?2, title_auto = ?3, updated_at = ?4, active_leaf = ?5 WHERE id = ?1",
-                    )
-                    .bind(id.as_str())
-                    .bind(title.as_str())
-                    .bind(title_auto)
-                    .bind(updated_at)
-                    .bind(active_leaf.map(MessageId::get))
-                    .execute(&mut *transaction)
-                    .await?;
-                    ensure_written(&result, "更新 session")?;
-                }
-                Change::DeleteSession(id) => {
-                    for statement in [
-                        "DELETE FROM event WHERE session_id = ?1",
-                        "DELETE FROM queue_item WHERE session_id = ?1",
-                        "DELETE FROM message WHERE session_id = ?1",
-                        "DELETE FROM run WHERE session_id = ?1",
-                    ] {
-                        sqlx::query(statement)
-                            .bind(id.as_str())
-                            .execute(&mut *transaction)
-                            .await?;
-                    }
-                    let result = sqlx::query("DELETE FROM session WHERE id = ?1")
-                        .bind(id.as_str())
-                        .execute(&mut *transaction)
-                        .await?;
-                    ensure_written(&result, "删除 session")?;
-                }
-                Change::InsertMessage(message) => {
-                    sqlx::query(
-                        "INSERT INTO message (id, session_id, parent_id, role, text, run_id, tool_calls, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    )
-                    .bind(message.node.id.get())
-                    .bind(message.session.as_str())
-                    .bind(message.node.parent_id.map(MessageId::get))
-                    .bind(message.node.role.as_str())
-                    .bind(message.node.text.as_str())
-                    .bind(message.node.run_id.map(RunId::get))
-                    .bind(serde_json::to_string(&message.node.tool_calls)?)
-                    .bind(message.node.created_at)
-                    .execute(&mut *transaction)
-                    .await?;
-                }
-                Change::UpdateMessage {
-                    id,
-                    text,
-                    tool_calls,
-                } => {
-                    let result =
-                        sqlx::query("UPDATE message SET text = ?2, tool_calls = ?3 WHERE id = ?1")
-                            .bind(id.get())
-                            .bind(text.as_str())
-                            .bind(serde_json::to_string(tool_calls)?)
-                            .execute(&mut *transaction)
-                            .await?;
-                    ensure_written(&result, "更新消息")?;
-                }
-                Change::BindMessageRun { id, run_id } => {
-                    let result = sqlx::query("UPDATE message SET run_id = ?2 WHERE id = ?1")
-                        .bind(id.get())
-                        .bind(run_id.get())
-                        .execute(&mut *transaction)
-                        .await?;
-                    ensure_written(&result, "绑定消息 run")?;
-                }
-                Change::InsertQueueItem { session, item } => {
-                    sqlx::query(
-                        "INSERT INTO queue_item (id, session_id, text, anchor, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5)",
-                    )
-                    .bind(item.id.get())
-                    .bind(session.as_str())
-                    .bind(item.text.as_str())
-                    .bind(item.anchor.map(MessageId::get))
-                    .bind(item.created_at)
-                    .execute(&mut *transaction)
-                    .await?;
-                }
-                Change::DeleteQueueItem { session, item } => {
-                    let result =
-                        sqlx::query("DELETE FROM queue_item WHERE id = ?1 AND session_id = ?2")
-                            .bind(item.get())
-                            .bind(session.as_str())
-                            .execute(&mut *transaction)
-                            .await?;
-                    ensure_written(&result, "删除队列项")?;
-                }
-                Change::InsertRun(run) => {
-                    sqlx::query(
-                        "INSERT INTO run (id, session_id, status, failure, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    )
-                    .bind(run.id.get())
-                    .bind(run.session_id.as_str())
-                    .bind(run.status.as_str())
-                    .bind(
-                        run.failure
-                            .as_ref()
-                            .map(serde_json::to_string)
-                            .transpose()?,
-                    )
-                    .bind(run.created_at)
-                    .bind(run.updated_at)
-                    .execute(&mut *transaction)
-                    .await?;
-                }
-                Change::UpdateRun {
-                    id,
-                    status,
-                    failure,
-                    updated_at,
-                } => {
-                    let result = sqlx::query(
-                        "UPDATE run SET status = ?2, failure = ?3, updated_at = ?4 WHERE id = ?1",
-                    )
-                    .bind(id.get())
-                    .bind(status.as_str())
-                    .bind(failure.as_ref().map(serde_json::to_string).transpose()?)
-                    .bind(updated_at)
-                    .execute(&mut *transaction)
-                    .await?;
-                    ensure_written(&result, "更新 run")?;
-                }
-                Change::AppendEvent { event, created_at } => {
-                    let result = sqlx::query(
-                        "INSERT INTO event (session_id, created_at, event) VALUES (?1, ?2, ?3)",
-                    )
-                    .bind(event.session_id().map(SessionId::as_str))
-                    .bind(created_at)
-                    .bind(serde_json::to_string(event)?)
-                    .execute(&mut *transaction)
-                    .await?;
-                    committed.push(CommittedEvent {
-                        id: result.last_insert_rowid(),
-                        event: event.clone(),
-                        created_at: *created_at,
-                    });
-                }
-            }
+            apply_change(&mut transaction, change, &mut committed).await?;
         }
         transaction.commit().await?;
         Ok(committed)
     }
 
     /// 按 id 升序回放事实事件。
-    pub async fn events_after(&self, after: i64) -> Result<Vec<CommittedEvent>, StoreError> {
+    pub(crate) async fn events_after(&self, after: i64) -> Result<Vec<CommittedEvent>, StoreError> {
         let rows =
             sqlx::query("SELECT id, created_at, event FROM event WHERE id > ?1 ORDER BY id ASC")
                 .bind(after)
@@ -527,7 +344,7 @@ impl SqliteStorage {
             .collect()
     }
 
-    pub async fn mint_message_id(&self) -> Result<MessageId, StoreError> {
+    pub(crate) async fn mint_message_id(&self) -> Result<MessageId, StoreError> {
         let id: i64 = sqlx::query_scalar(
             "UPDATE meta SET value = value + 1 WHERE key = 'next_message_id'
              RETURNING value - 1",
@@ -537,7 +354,7 @@ impl SqliteStorage {
         MessageId::parse(id).map_err(|error| corrupted("message.id", error))
     }
 
-    pub async fn mint_queue_item_id(&self) -> Result<QueueItemId, StoreError> {
+    pub(crate) async fn mint_queue_item_id(&self) -> Result<QueueItemId, StoreError> {
         let id: i64 = sqlx::query_scalar(
             "UPDATE meta SET value = value + 1 WHERE key = 'next_queue_item_id'
              RETURNING value - 1",
@@ -547,7 +364,7 @@ impl SqliteStorage {
         QueueItemId::parse(id).map_err(|error| corrupted("queue_item.id", error))
     }
 
-    pub async fn mint_run_id(&self) -> Result<RunId, StoreError> {
+    pub(crate) async fn mint_run_id(&self) -> Result<RunId, StoreError> {
         let id: i64 = sqlx::query_scalar(
             "UPDATE meta SET value = value + 1 WHERE key = 'next_run_id'
              RETURNING value - 1",
@@ -556,6 +373,309 @@ impl SqliteStorage {
         .await?;
         RunId::parse(id).map_err(|error| corrupted("run.id", error))
     }
+}
+
+/// 把单条变更写入事务；事实事件在写入后追加到 `committed`。
+async fn apply_change(
+    connection: &mut SqliteConnection,
+    change: &Change,
+    committed: &mut Vec<CommittedEvent>,
+) -> Result<(), StoreError> {
+    match change {
+        Change::InsertWorkspace(workspace) => insert_workspace(connection, workspace).await,
+        Change::DeleteWorkspace(path) => delete_workspace(connection, path).await,
+        Change::InsertNode(node) => insert_node(connection, node).await,
+        Change::DeleteNode(name) => delete_node(connection, name).await,
+        Change::InsertSession(session) => insert_session(connection, session).await,
+        Change::UpdateSession {
+            id,
+            title,
+            title_auto,
+            updated_at,
+            active_leaf,
+        } => {
+            update_session(
+                connection,
+                id,
+                title,
+                *title_auto,
+                *updated_at,
+                *active_leaf,
+            )
+            .await
+        }
+        Change::DeleteSession(id) => delete_session(connection, id).await,
+        Change::InsertMessage(message) => insert_message(connection, message).await,
+        Change::UpdateMessage {
+            id,
+            text,
+            tool_calls,
+        } => update_message(connection, id, text, tool_calls).await,
+        Change::BindMessageRun { id, run_id } => bind_message_run(connection, *id, *run_id).await,
+        Change::InsertQueueItem { session, item } => {
+            insert_queue_item(connection, session, item).await
+        }
+        Change::DeleteQueueItem { session, item } => {
+            delete_queue_item(connection, session, *item).await
+        }
+        Change::InsertRun(run) => insert_run(connection, run).await,
+        Change::UpdateRun {
+            id,
+            status,
+            failure,
+            updated_at,
+        } => update_run(connection, *id, *status, failure.as_ref(), *updated_at).await,
+        Change::AppendEvent { event, created_at } => {
+            append_event(connection, event, *created_at, committed).await
+        }
+    }
+}
+
+async fn insert_workspace(
+    connection: &mut SqliteConnection,
+    workspace: &WorkspaceMetadata,
+) -> Result<(), StoreError> {
+    sqlx::query("INSERT INTO workspace (path, registered_at) VALUES (?1, ?2)")
+        .bind(workspace.path.as_str())
+        .bind(workspace.registered_at)
+        .execute(&mut *connection)
+        .await?;
+    Ok(())
+}
+
+async fn delete_workspace(
+    connection: &mut SqliteConnection,
+    path: &WorkspacePath,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("DELETE FROM workspace WHERE path = ?1")
+        .bind(path.as_str())
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "删除 workspace")
+}
+
+async fn insert_node(
+    connection: &mut SqliteConnection,
+    node: &NodeMetadata,
+) -> Result<(), StoreError> {
+    sqlx::query("INSERT INTO node (name, url, created_at) VALUES (?1, ?2, ?3)")
+        .bind(node.name.as_str())
+        .bind(&node.url)
+        .bind(node.created_at)
+        .execute(&mut *connection)
+        .await?;
+    Ok(())
+}
+
+async fn delete_node(connection: &mut SqliteConnection, name: &NodeName) -> Result<(), StoreError> {
+    let result = sqlx::query("DELETE FROM node WHERE name = ?1")
+        .bind(name.as_str())
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "删除 node")
+}
+
+async fn insert_session(
+    connection: &mut SqliteConnection,
+    session: &SessionRecord,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO session (id, workspace, title, title_auto, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(session.id.as_str())
+    .bind(session.workspace.as_str())
+    .bind(session.title.as_str())
+    .bind(session.title_auto)
+    .bind(session.created_at)
+    .bind(session.updated_at)
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+async fn update_session(
+    connection: &mut SqliteConnection,
+    id: &SessionId,
+    title: &SessionTitle,
+    title_auto: bool,
+    updated_at: i64,
+    active_leaf: Option<MessageId>,
+) -> Result<(), StoreError> {
+    let result = sqlx::query(
+        "UPDATE session SET title = ?2, title_auto = ?3, updated_at = ?4, active_leaf = ?5 WHERE id = ?1",
+    )
+    .bind(id.as_str())
+    .bind(title.as_str())
+    .bind(title_auto)
+    .bind(updated_at)
+    .bind(active_leaf.map(MessageId::get))
+    .execute(&mut *connection)
+    .await?;
+    ensure_written(&result, "更新 session")
+}
+
+async fn delete_session(
+    connection: &mut SqliteConnection,
+    id: &SessionId,
+) -> Result<(), StoreError> {
+    for statement in [
+        "DELETE FROM event WHERE session_id = ?1",
+        "DELETE FROM queue_item WHERE session_id = ?1",
+        "DELETE FROM message WHERE session_id = ?1",
+        "DELETE FROM run WHERE session_id = ?1",
+    ] {
+        sqlx::query(statement)
+            .bind(id.as_str())
+            .execute(&mut *connection)
+            .await?;
+    }
+    let result = sqlx::query("DELETE FROM session WHERE id = ?1")
+        .bind(id.as_str())
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "删除 session")
+}
+
+async fn insert_message(
+    connection: &mut SqliteConnection,
+    message: &Message,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO message (id, session_id, parent_id, role, text, run_id, tool_calls, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )
+    .bind(message.node.id.get())
+    .bind(message.session.as_str())
+    .bind(message.node.parent_id.map(MessageId::get))
+    .bind(message.node.role.as_str())
+    .bind(message.node.text.as_str())
+    .bind(message.node.run_id.map(RunId::get))
+    .bind(serde_json::to_string(&message.node.tool_calls)?)
+    .bind(message.node.created_at)
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+async fn update_message(
+    connection: &mut SqliteConnection,
+    id: &MessageId,
+    text: &MessageContent,
+    tool_calls: &[ToolCallRecord],
+) -> Result<(), StoreError> {
+    let result = sqlx::query("UPDATE message SET text = ?2, tool_calls = ?3 WHERE id = ?1")
+        .bind(id.get())
+        .bind(text.as_str())
+        .bind(serde_json::to_string(tool_calls)?)
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "更新消息")
+}
+
+async fn bind_message_run(
+    connection: &mut SqliteConnection,
+    id: MessageId,
+    run_id: RunId,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("UPDATE message SET run_id = ?2 WHERE id = ?1")
+        .bind(id.get())
+        .bind(run_id.get())
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "绑定消息 run")
+}
+
+async fn insert_queue_item(
+    connection: &mut SqliteConnection,
+    session: &SessionId,
+    item: &QueueItem,
+) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO queue_item (id, session_id, text, anchor, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(item.id.get())
+    .bind(session.as_str())
+    .bind(item.text.as_str())
+    .bind(item.anchor.map(MessageId::get))
+    .bind(item.created_at)
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+async fn delete_queue_item(
+    connection: &mut SqliteConnection,
+    session: &SessionId,
+    item: QueueItemId,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("DELETE FROM queue_item WHERE id = ?1 AND session_id = ?2")
+        .bind(item.get())
+        .bind(session.as_str())
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "删除队列项")
+}
+
+async fn insert_run(connection: &mut SqliteConnection, run: &RunRecord) -> Result<(), StoreError> {
+    sqlx::query(
+        "INSERT INTO run (id, session_id, status, failure, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )
+    .bind(run.id.get())
+    .bind(run.session_id.as_str())
+    .bind(run.status.as_str())
+    .bind(
+        run.failure
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?,
+    )
+    .bind(run.created_at)
+    .bind(run.updated_at)
+    .execute(&mut *connection)
+    .await?;
+    Ok(())
+}
+
+async fn update_run(
+    connection: &mut SqliteConnection,
+    id: RunId,
+    status: RunStatus,
+    failure: Option<&RunFailure>,
+    updated_at: i64,
+) -> Result<(), StoreError> {
+    let result =
+        sqlx::query("UPDATE run SET status = ?2, failure = ?3, updated_at = ?4 WHERE id = ?1")
+            .bind(id.get())
+            .bind(status.as_str())
+            .bind(failure.map(serde_json::to_string).transpose()?)
+            .bind(updated_at)
+            .execute(&mut *connection)
+            .await?;
+    ensure_written(&result, "更新 run")
+}
+
+async fn append_event(
+    connection: &mut SqliteConnection,
+    event: &FactEvent,
+    created_at: i64,
+    committed: &mut Vec<CommittedEvent>,
+) -> Result<(), StoreError> {
+    let result =
+        sqlx::query("INSERT INTO event (session_id, created_at, event) VALUES (?1, ?2, ?3)")
+            .bind(event.session_id().map(SessionId::as_str))
+            .bind(created_at)
+            .bind(serde_json::to_string(event)?)
+            .execute(&mut *connection)
+            .await?;
+    committed.push(CommittedEvent {
+        id: result.last_insert_rowid(),
+        event: event.clone(),
+        created_at,
+    });
+    Ok(())
 }
 
 fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
@@ -602,7 +722,7 @@ fn parse_session(row: &SqliteRow) -> Result<SessionRecord, StoreError> {
 fn parse_session_metadata(row: &SqliteRow) -> Result<crate::session::SessionMetadata, StoreError> {
     let session = parse_session(row)?;
     let queue_length = parse_queue_length(row)?;
-    let busy = parse_busy(row)?;
+    let busy = parse_busy(row);
     Ok(session.metadata(queue_length, busy))
 }
 
@@ -611,8 +731,8 @@ fn parse_queue_length(row: &SqliteRow) -> Result<u32, StoreError> {
     u32::try_from(count).map_err(|_| corrupted("session.queue_length", count))
 }
 
-fn parse_busy(row: &SqliteRow) -> Result<bool, StoreError> {
-    Ok(row.get::<i64, _>("running_count") > 0)
+fn parse_busy(row: &SqliteRow) -> bool {
+    row.get::<i64, _>("running_count") > 0
 }
 
 fn parse_queue_item(row: &SqliteRow) -> Result<QueueItem, StoreError> {

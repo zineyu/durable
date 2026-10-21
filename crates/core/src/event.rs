@@ -72,6 +72,7 @@ pub enum FactEvent {
 
 impl FactEvent {
     /// 事件所属的 session；workspace 事件不属于任何 session。
+    #[must_use]
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
             Self::WorkspaceRegistered { .. } | Self::WorkspaceRemoved { .. } => None,

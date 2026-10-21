@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
+use crate::id::{MessageId, SessionId, SessionTitle, SessionTitleError, WorkspacePath};
 use crate::message::{MessageNode, MessageText};
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
@@ -35,6 +35,7 @@ pub struct SessionRecord {
 }
 
 impl SessionRecord {
+    #[must_use]
     pub fn metadata(&self, queue_length: u32, busy: bool) -> SessionMetadata {
         SessionMetadata {
             id: self.id.clone(),
@@ -48,14 +49,18 @@ impl SessionRecord {
 }
 
 /// 由用户消息推导自动标题：取首行前 50 个字符；首行为空白时取首个非空白行。
-pub(crate) fn derive_title(text: &MessageText) -> SessionTitle {
+///
+/// # Errors
+///
+/// - `SessionTitleError`：推导出的文本去掉首尾空白后为空。
+pub(crate) fn derive_title(text: &MessageText) -> Result<SessionTitle, SessionTitleError> {
     let line = text
         .as_str()
         .lines()
         .find(|line| !line.trim().is_empty())
         .unwrap_or(text.as_str());
     let truncated: String = line.chars().take(AUTO_TITLE_LIMIT).collect();
-    SessionTitle::parse(&truncated).expect("非空白行截断后仍是合法标题")
+    SessionTitle::parse(&truncated)
 }
 
 /// 单个 session 的消息树快照。

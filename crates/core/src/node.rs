@@ -12,7 +12,11 @@ pub struct NodeName(String);
 impl NodeName {
     /// 解析节点名。
     ///
-    /// 失败：名称为空、超过 64 字节、含非路径安全字符，或是 `.` 与 `..`。
+    /// # Errors
+    ///
+    /// - `NodeNameError::Empty`：名称为空。
+    /// - `NodeNameError::TooLong`：名称超过 64 字节。
+    /// - `NodeNameError::Invalid`：名称是 `.` 或 `..`，或含非路径安全字符。
     pub fn parse(raw: &str) -> Result<Self, NodeNameError> {
         if raw.is_empty() {
             return Err(NodeNameError::Empty);
@@ -32,6 +36,7 @@ impl NodeName {
         Ok(Self(raw.to_owned()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

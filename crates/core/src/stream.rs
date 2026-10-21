@@ -68,18 +68,21 @@ impl EventBus {
     /// 创建总线。
     ///
     /// 容量是每个订阅者最多缓冲的事件数；落后于容量的订阅者收到 `Lagged`。
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let (sender, _) = broadcast::channel(capacity);
         Self { sender }
     }
 
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
         self.sender.subscribe()
     }
 
     /// 发布事件；没有订阅者时丢弃。
     pub fn publish(&self, event: StreamEvent) {
-        let _ = self.sender.send(event);
+        // 无订阅者时 `send` 返回错误；总线允许丢弃。
+        let _no_receiver = self.sender.send(event);
     }
 }
 

@@ -14,6 +14,7 @@ pub enum RunStatus {
 }
 
 impl RunStatus {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -25,7 +26,9 @@ impl RunStatus {
 
     /// 解析存储中的状态。
     ///
-    /// 失败：取值不是已知状态。
+    /// # Errors
+    ///
+    /// - `RunStatusError`：取值不是已知状态。
     pub fn parse(raw: &str) -> Result<Self, RunStatusError> {
         match raw {
             "running" => Ok(Self::Running),

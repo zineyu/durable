@@ -1,4 +1,4 @@
-pub mod sqlite;
+pub(crate) mod sqlite;
 
 use crate::message::Message;
 use crate::queue::QueueItem;
@@ -16,7 +16,7 @@ pub struct Snapshot {
 
 /// 单个 session 的持久快照：记录、消息树、队列与队列长度。
 #[derive(Debug, Clone)]
-pub struct SessionSnapshot {
+pub(crate) struct SessionSnapshot {
     pub session: SessionRecord,
     pub busy: bool,
     pub queue_length: u32,

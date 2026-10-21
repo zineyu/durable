@@ -48,7 +48,9 @@ pub struct WorkspacePath(String);
 impl WorkspacePath {
     /// 解析语法合法的绝对路径。不访问文件系统。
     ///
-    /// 失败：路径为空或不是绝对路径。
+    /// # Errors
+    ///
+    /// - `WorkspacePathError::NotAbsolute`：路径为空或不是绝对路径。
     pub fn parse(raw: &str) -> Result<Self, WorkspacePathError> {
         if raw.is_empty() || !Path::new(raw).is_absolute() {
             return Err(WorkspacePathError::NotAbsolute(raw.to_owned()));
@@ -58,7 +60,14 @@ impl WorkspacePath {
 
     /// 解析路径并规范化为身份：路径必须存在且是目录，符号链接被解析到目标。
     ///
-    /// 失败：路径不是绝对路径、不存在、不是目录、不是 UTF-8，或无法读取。
+    /// # Errors
+    ///
+    /// - `WorkspacePathError::NotAbsolute`：路径为空或不是绝对路径。
+    /// - `WorkspacePathError::NotFound`：规范化时路径不存在。
+    /// - `WorkspacePathError::Unreadable`：规范化时无法读取路径。
+    /// - `WorkspacePathError::NotDirectory`：规范化后的路径不是目录。
+    /// - `WorkspacePathError::NotUtf8`：规范化后的路径不是 UTF-8。
+    ///
     /// 副作用：访问文件系统。
     pub fn resolve(raw: &str) -> Result<Self, WorkspacePathError> {
         let path = Self::parse(raw)?;
@@ -75,6 +84,7 @@ impl WorkspacePath {
         Ok(Self(canonical.to_owned()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -112,7 +122,9 @@ pub struct SessionId(String);
 impl SessionId {
     /// 解析 session id。
     ///
-    /// 失败：id 为空。
+    /// # Errors
+    ///
+    /// - `SessionIdError`：id 去掉首尾空白后为空。
     pub fn parse(raw: &str) -> Result<Self, SessionIdError> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -122,10 +134,12 @@ impl SessionId {
     }
 
     /// 生成新的 session id（UUID v7，按时间有序）。不访问存储。
+    #[must_use]
     pub fn generate() -> Self {
         Self(Uuid::now_v7().to_string())
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -151,7 +165,9 @@ pub const DEFAULT_SESSION_TITLE: &str = "新 session";
 impl SessionTitle {
     /// 解析标题并去掉首尾空白。
     ///
-    /// 失败：去掉空白后为空。
+    /// # Errors
+    ///
+    /// - `SessionTitleError`：标题去掉首尾空白后为空。
     pub fn parse(raw: &str) -> Result<Self, SessionTitleError> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -160,6 +176,7 @@ impl SessionTitle {
         Ok(Self(trimmed.to_owned()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -189,7 +206,9 @@ pub struct MessageId(i64);
 impl MessageId {
     /// 从存储值构造。
     ///
-    /// 失败：id 不是正数。
+    /// # Errors
+    ///
+    /// - `MessageIdError`：id 不是正数。
     pub fn parse(raw: i64) -> Result<Self, MessageIdError> {
         if raw <= 0 {
             return Err(MessageIdError(raw));
@@ -197,6 +216,7 @@ impl MessageId {
         Ok(Self(raw))
     }
 
+    #[must_use]
     pub fn get(self) -> i64 {
         self.0
     }
@@ -220,7 +240,9 @@ pub struct QueueItemId(i64);
 impl QueueItemId {
     /// 从存储值构造。
     ///
-    /// 失败：id 不是正数。
+    /// # Errors
+    ///
+    /// - `QueueItemIdError`：id 不是正数。
     pub fn parse(raw: i64) -> Result<Self, QueueItemIdError> {
         if raw <= 0 {
             return Err(QueueItemIdError(raw));
@@ -228,6 +250,7 @@ impl QueueItemId {
         Ok(Self(raw))
     }
 
+    #[must_use]
     pub fn get(self) -> i64 {
         self.0
     }
@@ -251,7 +274,9 @@ pub struct RunId(i64);
 impl RunId {
     /// 从存储值构造。
     ///
-    /// 失败：id 不是正数。
+    /// # Errors
+    ///
+    /// - `RunIdError`：id 不是正数。
     pub fn parse(raw: i64) -> Result<Self, RunIdError> {
         if raw <= 0 {
             return Err(RunIdError(raw));
@@ -259,6 +284,7 @@ impl RunId {
         Ok(Self(raw))
     }
 
+    #[must_use]
     pub fn get(self) -> i64 {
         self.0
     }

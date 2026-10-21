@@ -14,6 +14,7 @@ pub enum MessageRole {
 }
 
 impl MessageRole {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::User => "user",
@@ -23,7 +24,9 @@ impl MessageRole {
 
     /// 解析存储中的角色。
     ///
-    /// 失败：取值不是已知角色。
+    /// # Errors
+    ///
+    /// - `MessageRoleError`：取值不是已知角色。
     pub fn parse(raw: &str) -> Result<Self, MessageRoleError> {
         match raw {
             "user" => Ok(Self::User),
@@ -51,7 +54,9 @@ pub struct MessageText(String);
 impl MessageText {
     /// 解析消息正文。
     ///
-    /// 失败：去掉空白后为空。
+    /// # Errors
+    ///
+    /// - `MessageTextError`：正文去掉首尾空白后为空。
     pub fn parse(raw: &str) -> Result<Self, MessageTextError> {
         if raw.trim().is_empty() {
             return Err(MessageTextError);
@@ -59,6 +64,7 @@ impl MessageText {
         Ok(Self(raw.to_owned()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -86,10 +92,12 @@ impl MessageContent {
         Self(raw.into())
     }
 
+    #[must_use]
     pub fn empty() -> Self {
         Self(String::new())
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }

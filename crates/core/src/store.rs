@@ -39,7 +39,12 @@ pub struct Store {
 impl Store {
     /// 打开 SQLite 文件并应用迁移。父目录不存在时自动建立。
     ///
-    /// 失败：目录无法建立、数据库无法打开、连接参数被拒绝或迁移失败。
+    /// # Errors
+    ///
+    /// - `StoreError::DatabaseDirectory`：数据库父目录无法建立。
+    /// - `StoreError::Database`：数据库无法打开或连接参数被拒绝。
+    /// - `StoreError::Migration`：迁移执行失败。
+    ///
     /// 副作用：创建数据库目录、数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
         tracing::debug!(database = %path.display(), "打开 SQLite");
@@ -57,7 +62,10 @@ impl Store {
 
     /// 读取 bootstrap 元数据。
     ///
-    /// 失败：数据库读取失败或存储值不符合领域约束。
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn bootstrap(&self) -> Result<Snapshot, StoreError> {
         self.storage.snapshot().await
     }
@@ -65,7 +73,14 @@ impl Store {
     /// 注册 workspace。
     ///
     /// 输入：已规范化的 workspace 身份路径。
-    /// 失败：该路径已注册。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::WorkspaceDuplicate`：该路径已注册。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：写入 workspace 行与 `workspace_registered` 事实事件。
     pub async fn register_workspace(
         &self,
@@ -81,7 +96,13 @@ impl Store {
     /// 注册启动参数给出的初始 workspace。
     ///
     /// 输入：已规范化的 workspace 路径列表；重复出现与已注册的路径被跳过。
-    /// 失败：数据库读取或写入失败。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：为新路径写入 workspace 行与事实事件。
     pub async fn register_initial_workspaces(
         &self,
@@ -121,7 +142,14 @@ impl Store {
     /// 移除 workspace 注册记录。
     ///
     /// 输入：存储中的 workspace 身份路径；不访问文件系统，因此目录已被删除时仍可移除。
-    /// 失败：该路径未注册，或该 workspace 仍有 session。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::WorkspaceNotFound`：该路径未注册。
+    /// - `StoreError::WorkspaceNotEmpty`：该 workspace 仍有 session。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：删除 workspace 行，写入 `workspace_removed` 事实事件。
     pub async fn remove_workspace(&self, path: &WorkspacePath) -> Result<(), StoreError> {
         let _line = self.line.lock().await;
@@ -142,14 +170,20 @@ impl Store {
 
     /// 节点表中的单个节点。
     ///
-    /// 失败：数据库读取失败或存储值不符合领域约束。
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
         self.storage.node(name).await
     }
 
     /// 节点表中的全部节点，按注册顺序排列。
     ///
-    /// 失败：数据库读取失败或存储值不符合领域约束。
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
         self.storage.nodes().await
     }
@@ -157,7 +191,13 @@ impl Store {
     /// 注册节点。
     ///
     /// 输入：已解析的节点名与非空 URL。
-    /// 失败：该名称已注册。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::NodeNameTaken`：该名称已注册。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    ///
     /// 副作用：写入 node 行。
     pub async fn register_node(
         &self,
@@ -182,7 +222,14 @@ impl Store {
     /// 重命名节点。
     ///
     /// 输入：节点表中的旧名与新名。名称即身份，改名后旧名不再存在。
-    /// 失败：旧名不在节点表中，或新名已被使用。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::NodeNotFound`：旧名不在节点表中。
+    /// - `StoreError::NodeNameTaken`：新名已被使用。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    ///
     /// 副作用：替换 node 行，保留 URL 与注册时间。
     pub async fn rename_node(
         &self,
@@ -213,7 +260,11 @@ impl Store {
 
     /// 移除节点。
     ///
-    /// 失败：该名称不在节点表中。
+    /// # Errors
+    ///
+    /// - `StoreError::NodeNotFound`：该名称不在节点表中。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    ///
     /// 副作用：删除 node 行。
     pub async fn remove_node(&self, name: &NodeName) -> Result<(), StoreError> {
         let _line = self.line.lock().await;
@@ -228,7 +279,14 @@ impl Store {
     /// 在指定 workspace 下创建 session。
     ///
     /// 输入：已规范化的 workspace 路径与已解析的标题。
-    /// 失败：该 workspace 未注册。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::WorkspaceNotFound`：该 workspace 未注册。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：写入 session 行与 `session_created` 事实事件。
     pub async fn create_session(
         &self,
@@ -264,7 +322,14 @@ impl Store {
     /// 重命名 session。
     ///
     /// 输入：session 身份与已解析的标题。
-    /// 失败：session 不存在。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：更新标题与 `updated_at`，写入 `session_renamed` 事实事件。
     pub async fn rename_session(
         &self,
@@ -299,7 +364,13 @@ impl Store {
     /// 删除 session。
     ///
     /// 输入：session 身份。
-    /// 失败：session 不存在。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：删除该 session 的消息树、队列、run 与历史事件，再写入 `session_deleted` 事实事件。
     /// 不访问 workspace 文件系统。
     pub async fn delete_session(&self, id: &SessionId) -> Result<(), StoreError> {
@@ -318,7 +389,11 @@ impl Store {
 
     /// 读取单个 session 的消息树。
     ///
-    /// 失败：session 不存在。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn session_tree(&self, id: &SessionId) -> Result<SessionTree, StoreError> {
         self.storage
             .session_tree(id)
@@ -329,7 +404,11 @@ impl Store {
 
     /// 读取 session 的 transcript：root 到 active leaf 的路径。
     ///
-    /// 失败：session 不存在。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn transcript(&self, id: &SessionId) -> Result<Vec<MessageNode>, StoreError> {
         let tree = self.session_tree(id).await?;
         Ok(path_to_leaf(&tree.nodes, tree.active_leaf))
@@ -338,7 +417,15 @@ impl Store {
     /// 把一条用户消息写入 session 的 FIFO 队列。此阶段不创建消息节点，不移动 active leaf。
     ///
     /// 输入：session 身份与已校验的消息正文。
-    /// 失败：session 不存在。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Invariant`：无法由正文推导出合法标题。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：写入队列项、更新 `updated_at`，必要时把自动标题改为由首行推导的标题，
     /// 并写入 `message_queued` 事实事件。
     pub async fn enqueue_message(
@@ -353,7 +440,8 @@ impl Store {
         let busy = self.storage.busy(id).await?;
         let created_at = now_millis();
         if session.title_auto && pending == 0 && messages == 0 {
-            session.title = derive_title(&text);
+            session.title = derive_title(&text)
+                .map_err(|error| StoreError::Invariant(format!("自动标题推导失败: {error}")))?;
         }
         session.updated_at = created_at;
         let item = QueueItem {
@@ -385,7 +473,14 @@ impl Store {
     /// 删除尚未开始的队列项。
     ///
     /// 输入：session 身份与队列项身份。
-    /// 失败：session 不存在，或该项不在该 session 的队列中。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::QueueItemNotFound`：该项不在该 session 的队列中。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：删除队列项，写入 `queue_item_removed` 事实事件。
     pub async fn remove_queue_item(
         &self,
@@ -412,7 +507,18 @@ impl Store {
     /// 编辑一条历史用户消息：在其父节点下创建兄弟用户节点，把 active leaf 移到新节点并入队执行。
     ///
     /// 输入：session 身份、目标用户消息身份与已校验的新正文。
-    /// 失败：session 不存在，目标不是该 session 的用户消息，或 session 忙碌、队列非空。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::MessageNotFound`：目标不是该 session 的消息。
+    /// - `StoreError::MessageRoleMismatch`：目标不是用户消息。
+    /// - `StoreError::QueueNotEmpty`：session 队列非空。
+    /// - `StoreError::RunInProgress`：session 有 run 进行中。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：写入新用户节点、锚定该节点的队列项与 active leaf，并写入事实事件。
     pub async fn edit_user_message(
         &self,
@@ -488,7 +594,19 @@ impl Store {
     /// 重试一条 assistant 消息：以其父用户节点为锚入队，run 开始时创建同父兄弟 assistant 节点。
     ///
     /// 输入：session 身份与目标 assistant 消息身份。
-    /// 失败：session 不存在，目标不是该 session 的 assistant 消息，或 session 忙碌、队列非空。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::MessageNotFound`：目标或目标的父节点不是该 session 的消息。
+    /// - `StoreError::MessageRoleMismatch`：目标不是 assistant 消息。
+    /// - `StoreError::Invariant`：目标 assistant 消息缺少父节点。
+    /// - `StoreError::QueueNotEmpty`：session 队列非空。
+    /// - `StoreError::RunInProgress`：session 有 run 进行中。
+    /// - `StoreError::CorruptedData`：父消息正文不符合领域约束。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：写入锚定父用户节点的队列项与更新时间；不创建用户节点。
     pub async fn retry_assistant_message(
         &self,
@@ -543,7 +661,18 @@ impl Store {
     /// 切换 active leaf：把 active leaf 移到目标子树中最近创建的叶子。
     ///
     /// 输入：session 身份与目标消息身份。
-    /// 失败：session 不存在，目标不属于该 session，或 session 忙碌、队列非空。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::MessageNotFound`：目标不属于该 session。
+    /// - `StoreError::Invariant`：目标子树没有叶子。
+    /// - `StoreError::QueueNotEmpty`：session 队列非空。
+    /// - `StoreError::RunInProgress`：session 有 run 进行中。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：更新 active leaf 与更新时间，写入 `active_leaf_changed` 事实事件。
     pub async fn switch_active_leaf(
         &self,
@@ -610,7 +739,15 @@ impl Store {
     /// 队列项未锚定用户节点时在当前 active leaf 下新建用户节点；已锚定时接续该节点，
     /// 已存在但未绑定 run 的节点补上 run 关联。
     ///
-    /// 失败：session 不存在或锚定的消息与 session 不匹配。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::MessageNotFound`：锚定的消息不是该 session 的消息。
+    /// - `StoreError::MessageRoleMismatch`：锚定的消息不是用户消息。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：删除队首项，写入消息节点、run 行、active leaf 与事实事件。
     /// 队列为空或该 session 已有 running 的 run 时返回 `None`。
     pub async fn start_run(&self, id: &SessionId) -> Result<Option<RunStart>, StoreError> {
@@ -639,84 +776,18 @@ impl Store {
         let mut changes = Changeset::new();
         changes.delete_queue_item(id.clone(), item.id);
         changes.insert_run(run.clone());
-        let user = match item.anchor {
-            Some(anchor) => {
-                let message = self
-                    .storage
-                    .message(id, anchor)
-                    .await?
-                    .ok_or_else(|| StoreError::MessageNotFound(id.clone(), anchor))?;
-                if message.node.role != MessageRole::User {
-                    return Err(StoreError::MessageRoleMismatch(anchor, message.node.role));
-                }
-                if message.node.run_id.is_some() {
-                    message.node
-                } else {
-                    let bound = MessageNode {
-                        run_id: Some(run_id),
-                        ..message.node
-                    };
-                    changes.bind_message_run(bound.id, run_id);
-                    changes.append_event(
-                        FactEvent::MessageUpdated {
-                            session: metadata.clone(),
-                            message: bound.clone(),
-                        },
-                        now,
-                    );
-                    bound
-                }
-            }
-            None => {
-                let user = MessageNode {
-                    id: self.storage.mint_message_id().await?,
-                    parent_id: session.active_leaf,
-                    role: MessageRole::User,
-                    text: MessageContent::new(item.text.as_str()),
-                    run_id: Some(run_id),
-                    tool_calls: Vec::new(),
-                    created_at: now,
-                };
-                changes.insert_message(Message {
-                    session: id.clone(),
-                    node: user.clone(),
-                });
-                changes.append_event(
-                    FactEvent::MessageAppended {
-                        session: metadata.clone(),
-                        message: user.clone(),
-                    },
-                    now,
-                );
-                user
-            }
-        };
-        let assistant = MessageNode {
-            id: self.storage.mint_message_id().await?,
-            parent_id: Some(user.id),
-            role: MessageRole::Assistant,
-            text: MessageContent::empty(),
-            run_id: Some(run_id),
-            tool_calls: Vec::new(),
-            created_at: now,
-        };
-        changes.insert_message(Message {
-            session: id.clone(),
-            node: assistant.clone(),
-        });
+        let user = self
+            .run_user_node(&item, &run, session.active_leaf, &metadata, &mut changes)
+            .await?;
+        let assistant = self
+            .run_assistant_node(&user, &run, &metadata, &mut changes)
+            .await?;
         changes.update_session(
             id.clone(),
             session.title.clone(),
             session.title_auto,
             now,
             Some(assistant.id),
-        );
-        changes.append_event(
-            FactEvent::MessageAppended {
-                session: metadata.clone(),
-                message: assistant.clone(),
-            },
-            now,
         );
         changes.append_event(
             FactEvent::ActiveLeafChanged {
@@ -748,9 +819,103 @@ impl Store {
         }))
     }
 
+    /// 登记 run 的用户节点：接续队首项锚定的用户节点，或新建挂在 `parent` 下的用户节点。
+    async fn run_user_node(
+        &self,
+        item: &QueueItem,
+        run: &RunRecord,
+        parent: Option<MessageId>,
+        metadata: &SessionMetadata,
+        changes: &mut Changeset,
+    ) -> Result<MessageNode, StoreError> {
+        let session = &run.session_id;
+        let Some(anchor) = item.anchor else {
+            let user = MessageNode {
+                id: self.storage.mint_message_id().await?,
+                parent_id: parent,
+                role: MessageRole::User,
+                text: MessageContent::new(item.text.as_str()),
+                run_id: Some(run.id),
+                tool_calls: Vec::new(),
+                created_at: run.created_at,
+            };
+            changes.insert_message(Message {
+                session: session.clone(),
+                node: user.clone(),
+            });
+            changes.append_event(
+                FactEvent::MessageAppended {
+                    session: metadata.clone(),
+                    message: user.clone(),
+                },
+                run.created_at,
+            );
+            return Ok(user);
+        };
+        let message = self
+            .storage
+            .message(session, anchor)
+            .await?
+            .ok_or_else(|| StoreError::MessageNotFound(session.clone(), anchor))?;
+        if message.node.role != MessageRole::User {
+            return Err(StoreError::MessageRoleMismatch(anchor, message.node.role));
+        }
+        if message.node.run_id.is_some() {
+            return Ok(message.node);
+        }
+        let bound = MessageNode {
+            run_id: Some(run.id),
+            ..message.node
+        };
+        changes.bind_message_run(bound.id, run.id);
+        changes.append_event(
+            FactEvent::MessageUpdated {
+                session: metadata.clone(),
+                message: bound.clone(),
+            },
+            run.created_at,
+        );
+        Ok(bound)
+    }
+
+    /// 登记 run 的 assistant 节点：挂在 `user` 之下，内容为空。
+    async fn run_assistant_node(
+        &self,
+        user: &MessageNode,
+        run: &RunRecord,
+        metadata: &SessionMetadata,
+        changes: &mut Changeset,
+    ) -> Result<MessageNode, StoreError> {
+        let assistant = MessageNode {
+            id: self.storage.mint_message_id().await?,
+            parent_id: Some(user.id),
+            role: MessageRole::Assistant,
+            text: MessageContent::empty(),
+            run_id: Some(run.id),
+            tool_calls: Vec::new(),
+            created_at: run.created_at,
+        };
+        changes.insert_message(Message {
+            session: run.session_id.clone(),
+            node: assistant.clone(),
+        });
+        changes.append_event(
+            FactEvent::MessageAppended {
+                session: metadata.clone(),
+                message: assistant.clone(),
+            },
+            run.created_at,
+        );
+        Ok(assistant)
+    }
+
     /// 节流写入 assistant 节点的部分输出。此写入不产生事实事件。
     ///
-    /// 失败：该消息不存在。
+    /// # Errors
+    ///
+    /// - `StoreError::Invariant`：该消息不存在，更新未命中任何行。
+    /// - `StoreError::Database`：数据库写入失败。
+    /// - `StoreError::Serialization`：工具调用序列化失败。
     pub async fn flush_message(
         &self,
         message_id: MessageId,
@@ -766,7 +931,14 @@ impl Store {
 
     /// 记录一次已完成的工具调用：把记录追加到 assistant 节点，并写入事实事件。
     ///
-    /// 失败：session 或消息不存在。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::MessageNotFound`：消息不存在。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    ///
     /// 副作用：更新消息节点的工具调用；写入 `tool_call_recorded` 事件。
     pub async fn record_tool_call(
         &self,
@@ -802,7 +974,12 @@ impl Store {
 
     /// 结束 run：写终态、assistant 终文本与 active leaf，并写入事实事件。
     ///
-    /// 失败：session 或 run 不存在。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
     pub async fn finish_run(
         &self,
         session: &SessionId,
@@ -856,7 +1033,12 @@ impl Store {
 
     /// 启动恢复：把仍为 running 的 run 标记为 failed（进程中断），并发布其事件。
     ///
-    /// 失败：数据库读取或写入失败。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：run 归属的 session 不存在。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
     pub async fn recover_running_runs(&self) -> Result<(), StoreError> {
         let _line = self.line.lock().await;
         let running = self.storage.running_runs().await?;
@@ -900,23 +1082,41 @@ impl Store {
     }
 
     /// session 是否有 running 的 run。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
     pub async fn busy(&self, id: &SessionId) -> Result<bool, StoreError> {
         self.storage.busy(id).await
     }
 
     /// 队列非空的全部 session。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn sessions_with_queue(&self) -> Result<Vec<SessionId>, StoreError> {
         self.storage.sessions_with_queue().await
     }
 
     /// 从 `after` 游标之后回放事实事件。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::Serialization`：事实事件反序列化失败。
     pub async fn events_after(&self, after: i64) -> Result<Vec<CommittedEvent>, StoreError> {
         self.storage.events_after(after).await
     }
 
     /// 读取 session 记录。
     ///
-    /// 失败：session 不存在。
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn session_record(&self, id: &SessionId) -> Result<SessionRecord, StoreError> {
         self.find_session(id).await
     }
@@ -943,7 +1143,7 @@ impl Store {
     }
 }
 
-fn snapshot_into_tree(snapshot: crate::storage::SessionSnapshot) -> SessionTree {
+fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTree {
     SessionTree {
         session: snapshot
             .session
