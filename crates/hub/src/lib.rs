@@ -1,3 +1,6 @@
+//! hub 二进制库：路由、节点表命令、节点作用域转发、静态资源与类型导出入口。
+//! 总线与上游订阅在 `bus`，合并事件流在 `sse`。
+
 use std::collections::HashMap;
 use std::fmt;
 use std::net::SocketAddr;

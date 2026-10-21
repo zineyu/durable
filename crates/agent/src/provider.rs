@@ -1,3 +1,6 @@
+//! `OpenAI` 兼容 provider：请求构造、流式解析与限流错误分类。
+//! 重试决策在 `engine/step`。
+
 use std::fmt;
 use std::time::Duration;
 

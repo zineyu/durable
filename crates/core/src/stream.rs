@@ -1,3 +1,6 @@
+//! 进程内事件广播：事实事件、实时增量与 resync 指示。
+//! 事实事件的持久化在 `event`。
+
 use tokio::sync::broadcast;
 
 use crate::event::FactEvent;

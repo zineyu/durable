@@ -1,3 +1,6 @@
+//! 领域事实事件：可回放、带游标的持久化历史。
+//! 只走实时、不入库的增量在 `stream`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

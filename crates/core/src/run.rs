@@ -1,3 +1,6 @@
+//! run 实体：状态、失败类别与持久记录。
+//! 调度与失败判定在 `crates/agent/src/engine`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

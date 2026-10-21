@@ -1,3 +1,6 @@
+//! 待执行队列项：正文、锚点与创建时间。
+//! 出队与执行在 `store/run`，自动标题在 `session`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

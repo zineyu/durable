@@ -1,3 +1,6 @@
+//! 节点名与节点元数据：名字即 hub 节点的身份。
+//! 节点状态机与上游订阅在 `crates/hub/src/bus`。
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};

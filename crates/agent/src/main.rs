@@ -1,3 +1,6 @@
+//! agent 进程入口：解析参数、准备目录与日志、启动 HTTP 服务。
+//! 路由与状态装配在 `lib`。
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;

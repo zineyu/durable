@@ -1,3 +1,5 @@
+//! `edit_file` 工具：唯一匹配替换；未找到与多处匹配是两种错误。
+
 use durable::ToolErrorCode;
 use serde::Deserialize;
 use serde_json::json;

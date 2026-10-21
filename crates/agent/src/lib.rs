@@ -1,3 +1,6 @@
+//! agent 二进制库：路由装配、监听地址与类型导出入口。
+//! run 执行在 `engine`，工具在 `tools`，进程启动在 `main`。
+
 use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;

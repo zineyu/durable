@@ -1,3 +1,5 @@
+//! `write_file` 工具：覆盖写入；父目录不存在即报错。
+
 use serde::Deserialize;
 use serde_json::json;
 

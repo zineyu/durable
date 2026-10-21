@@ -1,3 +1,6 @@
+//! 消息正文、角色与消息树节点：父子指针、run 关联与工具调用。
+//! 分支选择规则在 `store/branch`，快照结构在 `session`。
+
 use std::fmt;
 
 use serde::{Deserialize, Serialize};

@@ -1,3 +1,6 @@
+//! session 元数据、持久记录与消息树快照；自动标题由首条用户消息推导。
+//! 写入命令在 `store/session`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

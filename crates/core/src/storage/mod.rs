@@ -1,3 +1,6 @@
+//! 存储层的对外快照结构，以及 SQLite 子模块入口。
+//! 写命令包装在 `store`。
+
 pub(crate) mod sqlite;
 
 use crate::message::Message;

@@ -1,3 +1,6 @@
+//! 工具调用的持久记录、结果与错误码。
+//! 工具实现与路径边界在 `crates/agent/src/tools`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

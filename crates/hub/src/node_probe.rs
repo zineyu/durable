@@ -1,3 +1,6 @@
+//! 上游探测：节点基地址与 bootstrap 取数。
+//! 订阅循环在 `bus/watch`。
+
 use std::time::Duration;
 
 use agent::BootstrapResponse;

@@ -1,3 +1,6 @@
+//! 内核错误：写命令的失败原因，按调用方该怎么处理分类。
+//! 对外 HTTP 错误信封在 `crates/agent/src/error` 与 `crates/hub/src/error`。
+
 use std::path::PathBuf;
 
 use thiserror::Error;

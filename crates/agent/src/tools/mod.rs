@@ -1,3 +1,6 @@
+//! 工具注册表与工具契约：定义、调用上下文与统一入口。
+//! 四个工具实现在同级模块，路径边界在 `paths`。
+
 use std::time::Duration;
 
 use async_trait::async_trait;

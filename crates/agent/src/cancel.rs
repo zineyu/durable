@@ -1,3 +1,6 @@
+//! 取消信号：请求与工具共享的一次性通知。
+//! 杀进程组在 `tools/bash`。
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 

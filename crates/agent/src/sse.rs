@@ -1,3 +1,6 @@
+//! agent 的单一全局事件流：回放、实时转发与 resync。
+//! hub 的合并流在 `crates/hub/src/sse`。
+
 use std::time::Duration;
 
 use axum::extract::{Query, State};

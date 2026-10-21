@@ -1,3 +1,6 @@
+//! agent 的 HTTP 协议 DTO 与协议版本。
+//! hub 自有协议在 `crates/hub/src/protocol`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

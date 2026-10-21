@@ -1,3 +1,6 @@
+//! HTTP 路由与处理器：workspace、session、消息树、队列、run 与事件流。
+//! 对外 DTO 在 `protocol`，错误信封在 `error`。
+
 use std::sync::Arc;
 
 use axum::extract::rejection::{JsonRejection, PathRejection};

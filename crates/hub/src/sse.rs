@@ -1,3 +1,6 @@
+//! hub 的合并事件流端点：订阅、回放与心跳。
+//! 游标与回放窗口语义在 `bus/window`。
+
 use std::time::Duration;
 
 use axum::extract::{Query, State};

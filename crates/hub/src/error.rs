@@ -1,3 +1,5 @@
+//! hub 的 HTTP 错误信封：状态码、错误码与节点名。
+
 use std::fmt;
 
 use axum::Json;

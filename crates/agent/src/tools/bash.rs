@@ -1,3 +1,5 @@
+//! `bash` 工具：进程组执行、输出截断与超时或取消处理。
+
 use std::fmt::Write;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};

@@ -1,3 +1,6 @@
+//! workspace 边界：把工具路径解析到根内，拒绝绝对路径、点段与符号链接逃逸。
+//! 各工具的参数校验在自己的模块。
+
 use std::path::{Component, Path, PathBuf};
 
 use durable::ToolErrorCode;

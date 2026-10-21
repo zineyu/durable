@@ -1,3 +1,6 @@
+//! workspace 元数据：规范化路径身份与注册时间。
+//! 路径校验在 `id`。
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 

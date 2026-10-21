@@ -1,3 +1,6 @@
+//! 从环境变量读取运行配置，缺省值与应用校验也在本模块。
+//! 日志过滤在 `runtime` 的日志初始化。
+
 use std::env::{VarError, var};
 use std::fmt;
 use std::time::Duration;

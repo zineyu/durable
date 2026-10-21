@@ -1,3 +1,6 @@
+//! 强类型标识与解析校验：workspace 路径、session、消息、队列项与 run。
+//! 标题规则在 `session`，节点名规则在 `node`。
+
 use std::fmt;
 use std::path::Path;
 

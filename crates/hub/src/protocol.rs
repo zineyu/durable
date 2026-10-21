@@ -1,3 +1,6 @@
+//! hub 自有协议：节点表 DTO、合并事件信封与协议版本。
+//! 节点状态机在 `bus/view`，上游协议复用 `agent` 的 DTO。
+
 use agent::BootstrapResponse;
 use durable::{FactEvent, MessageId, NodeMetadata, NodeName, ResyncReason, SessionId};
 use serde::{Deserialize, Serialize};

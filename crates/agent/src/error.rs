@@ -1,3 +1,6 @@
+//! HTTP 错误信封：状态码与错误码的映射。
+//! 内核错误在 `durable::StoreError`。
+
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

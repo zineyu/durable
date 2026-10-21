@@ -1,3 +1,6 @@
+//! 一次存储事务内的变更清单：按顺序累积行操作与事实事件，交给存储层落库。
+//! 行写入在 `storage/sqlite/apply`，领域类型在同级各对象模块。
+
 use crate::event::FactEvent;
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{Message, MessageContent};

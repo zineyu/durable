@@ -1,3 +1,5 @@
+//! `read_file` 工具：带行号的文本读取与可选行区间。
+
 use std::fmt::Write;
 
 use durable::ToolErrorCode;
