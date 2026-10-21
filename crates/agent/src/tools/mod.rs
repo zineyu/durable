@@ -28,7 +28,7 @@ pub struct ToolContext {
     pub cancellation: Cancellation,
 }
 
-/// 暴露给模型的工具定义，对应 OpenAI 的 function 声明。
+/// 暴露给模型的工具定义，对应 `OpenAI` 的 `function` 声明。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolDefinition {
     pub name: &'static str,
@@ -37,6 +37,7 @@ pub struct ToolDefinition {
 }
 
 impl ToolDefinition {
+    #[must_use]
     pub fn to_json(&self) -> Value {
         json!({
             "type": "function",
@@ -83,9 +84,9 @@ pub struct ToolLimits {
     pub bash_timeout: Duration,
 }
 
-pub const DEFAULT_READ_BYTES: usize = 256 * 1024;
-pub const DEFAULT_BASH_OUTPUT_BYTES: usize = 64 * 1024;
-pub const DEFAULT_BASH_TIMEOUT: Duration = Duration::from_secs(120);
+pub(crate) const DEFAULT_READ_BYTES: usize = 256 * 1024;
+pub(crate) const DEFAULT_BASH_OUTPUT_BYTES: usize = 64 * 1024;
+pub(crate) const DEFAULT_BASH_TIMEOUT: Duration = Duration::from_secs(120);
 
 impl Default for ToolLimits {
     fn default() -> Self {
@@ -103,6 +104,7 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
+    #[must_use]
     pub fn new(limits: ToolLimits) -> Self {
         Self { limits }
     }
@@ -139,7 +141,7 @@ impl ToolBox for ToolRegistry {
             }
         };
         match result {
-            Ok(content) => ToolOutcome::Succeeded { content },
+            Ok(output) => ToolOutcome::Succeeded { content: output },
             Err(failure) => failure.into(),
         }
     }
@@ -160,7 +162,7 @@ impl ToolFailure {
         }
     }
 
-    pub(crate) fn io(action: &str, error: std::io::Error) -> Self {
+    pub(crate) fn io(action: &str, error: &std::io::Error) -> Self {
         Self::new(ToolErrorCode::IoError, format!("{action}: {error}"))
     }
 }

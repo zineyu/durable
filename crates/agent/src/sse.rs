@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::time::Duration;
 
 use axum::extract::{Query, State};
@@ -15,16 +14,16 @@ use crate::error::ApiError;
 const KEEP_ALIVE: Duration = Duration::from_secs(15);
 
 #[derive(Debug, serde::Deserialize)]
-pub struct EventsQuery {
+pub(crate) struct EventsQuery {
     #[serde(default)]
     pub after: i64,
 }
 
 /// 单一全局事件流。先回放 `after` 之后的事实事件，再接入实时事件。
-pub async fn events(
+pub(crate) async fn events(
     State(state): State<AgentState>,
     Query(query): Query<EventsQuery>,
-) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, ApiError> {
+) -> Result<Sse<impl Stream<Item = Result<Event, serde_json::Error>>>, ApiError> {
     if query.after < 0 {
         return Err(ApiError::invalid_request(
             axum::http::StatusCode::BAD_REQUEST,
@@ -39,20 +38,23 @@ pub async fn events(
         .max()
         .unwrap_or(query.after);
     let replay = stream::iter(replayed.into_iter().map(move |event| {
-        Ok(sse_event(&StreamEvent::Fact {
+        sse_event(&StreamEvent::Fact {
             id: event.id,
             session_id: event.event.session_id().cloned(),
             timestamp: event.created_at,
             event: event.event,
-        }))
+        })
     }));
     let live = async_stream::stream! {
         loop {
             match receiver.recv().await {
-                Ok(event) if !forwards(&event, max_replayed) => continue,
-                Ok(event) => yield Ok(sse_event(&event)),
+                Ok(event) => {
+                    if forwards(&event, max_replayed) {
+                        yield sse_event(&event);
+                    }
+                }
                 Err(RecvError::Lagged(skipped)) => {
-                    yield Ok(sse_event(&resync_event(skipped)));
+                    yield sse_event(&resync_event(skipped));
                     break;
                 }
                 Err(RecvError::Closed) => break,
@@ -78,14 +80,14 @@ fn forwards(event: &StreamEvent, max_replayed: i64) -> bool {
     }
 }
 
-fn sse_event(event: &StreamEvent) -> Event {
-    let data = serde_json::to_string(event).expect("事件可序列化");
-    match event {
+fn sse_event(event: &StreamEvent) -> Result<Event, serde_json::Error> {
+    let data = serde_json::to_string(event)?;
+    Ok(match event {
         StreamEvent::Fact { id, .. } => Event::default().id(id.to_string()).data(data),
         StreamEvent::Delta { .. } | StreamEvent::Retry { .. } | StreamEvent::Resync { .. } => {
             Event::default().data(data)
         }
-    }
+    })
 }
 
 #[cfg(test)]

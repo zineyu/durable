@@ -4,7 +4,8 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script, ToolCallSpec};
+use support::provider::ToolCallSpec;
+use support::{Harness, Script};
 
 fn user_texts(tree: &agent::SessionTree) -> Vec<&str> {
     tree.nodes

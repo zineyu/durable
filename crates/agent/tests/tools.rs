@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "工具测试辅助函数用 expect 直接报告夹具与断言失败。"
+)]
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -5,7 +10,8 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script, ToolCallSpec};
+use support::provider::ToolCallSpec;
+use support::{Harness, Script};
 
 struct ToolRun {
     harness: Harness,
@@ -55,20 +61,25 @@ impl ToolRun {
 
     async fn calls(&self) -> Vec<agent::ToolCallRecord> {
         let response = self.harness.submit_message(&self.session.id, "执行").await;
-        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(response.status(), StatusCode::CREATED, "提交消息返回 201");
         let tree = self.harness.wait_idle(&self.session.id).await;
+        let run = tree.runs.first().expect("消息树有 run");
         assert_eq!(
-            tree.runs[0].status,
+            run.status,
             agent::RunStatus::Succeeded,
             "工具结果不终止 run"
         );
-        tree.nodes[1].tool_calls.clone()
+        tree.nodes
+            .get(1)
+            .expect("消息树含 assistant 节点")
+            .tool_calls
+            .clone()
     }
 
     async fn outcome(&self) -> agent::ToolOutcome {
         let calls = self.calls().await;
-        assert_eq!(calls.len(), 1);
-        calls[0].outcome.clone()
+        assert_eq!(calls.len(), 1, "一次消息只产生一条工具调用记录");
+        calls.first().expect("有一条工具调用记录").outcome.clone()
     }
 }
 
@@ -85,7 +96,7 @@ fn failed(code: agent::ToolErrorCode, message: &str) -> agent::ToolOutcome {
     }
 }
 
-/// 规格 user story 26：read_file 输出带行号。
+/// 规格 user story 26：`read_file` 输出带行号。
 #[tokio::test]
 async fn reads_file_with_line_numbers() {
     let run = start(vec![call("read_file", r#"{"path":"notes.txt"}"#), done()]).await;
@@ -179,7 +190,7 @@ async fn rejects_non_utf8_and_oversized_reads() {
     );
 }
 
-/// 规格 user story 27：write_file 覆盖写入并返回字节数。
+/// 规格 user story 27：`write_file` 覆盖写入并返回字节数。
 #[tokio::test]
 async fn overwrites_file_and_reports_bytes() {
     let run = start(vec![
@@ -280,7 +291,7 @@ async fn rejects_symlink_escape() {
     assert!(!outside.path().join("new.txt").exists());
 }
 
-/// 规格 user story 28：edit_file 只替换唯一匹配。
+/// 规格 user story 28：`edit_file` 只替换唯一匹配。
 #[tokio::test]
 async fn edits_unique_match() {
     let run = start(vec![

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "元数据辅助函数用 expect 直接报告夹具与断言失败。"
+)]
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -668,7 +673,7 @@ async fn error_responses_carry_code_status_and_message() {
     }
 }
 
-/// 规格「协议」：事实事件以 id、session_id、时间戳与负载持久化。
+/// 规格「协议」：事实事件以 id、`session_id`、时间戳与负载持久化。
 #[tokio::test]
 async fn persists_fact_event_envelope_fields() {
     let harness = Harness::start().await;

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "非 `#[test]` 函数中的轮询等待超时后用 panic 直接报告预期状态未到达。"
+)]
+
 use reqwest::StatusCode;
 
 mod support;

@@ -25,6 +25,7 @@ impl ApiError {
     }
 
     /// 请求体无法解析为协议类型。
+    #[must_use]
     pub fn invalid_request(status: StatusCode, message: String) -> Self {
         Self::new(ErrorCode::InvalidRequest, status, message)
     }

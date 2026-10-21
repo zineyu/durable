@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "消息树辅助函数用 expect 直接报告夹具与断言失败。"
+)]
+
 use reqwest::StatusCode;
 
 mod support;

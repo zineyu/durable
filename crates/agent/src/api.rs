@@ -124,7 +124,12 @@ pub struct AgentState {
 impl AgentState {
     /// 组装 agent 状态并执行启动恢复。
     ///
-    /// 失败：恢复中断的 run 时存储读取或写入失败。
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：读取中断的 run、读取队列或提交恢复结果时数据库操作失败。
+    /// - `StoreError::Serialization`：恢复过程读出或写出的记录无法序列化。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    /// - `StoreError::Invariant`：存储不变量被破坏。
     pub async fn start(
         store: Store,
         model_name: String,
@@ -142,18 +147,22 @@ impl AgentState {
         })
     }
 
+    #[must_use]
     pub fn store(&self) -> &Store {
         &self.store
     }
 
+    #[must_use]
     pub fn engine(&self) -> &Arc<RunEngine> {
         &self.engine
     }
 
+    #[must_use]
     pub fn events(&self) -> &EventBus {
         self.store.events()
     }
 
+    #[must_use]
     pub fn model_name(&self) -> &str {
         &self.model_name
     }
@@ -190,6 +199,10 @@ pub fn router(state: AgentState) -> Router {
 }
 
 /// 在已绑定的监听器上提供 HTTP 服务，直到进程结束或出错。
+///
+/// # Errors
+///
+/// - 监听器关闭、接受连接失败或连接处理出错时返回该错误。
 pub async fn serve(listener: tokio::net::TcpListener, state: AgentState) -> std::io::Result<()> {
     axum::serve(listener, router(state)).await
 }
@@ -275,7 +288,7 @@ async fn submit_message(
 ) -> Result<(StatusCode, Json<QueueItem>), ApiError> {
     let text = MessageText::parse(&request.text)?;
     let item = state.store().enqueue_message(&id, text).await?;
-    state.engine().notify_session(id);
+    state.engine().notify_session(id).await;
     Ok((StatusCode::CREATED, Json(item)))
 }
 
@@ -289,7 +302,7 @@ async fn edit_user_message(
         .store()
         .edit_user_message(&session, message, text)
         .await?;
-    state.engine().notify_session(session);
+    state.engine().notify_session(session).await;
     Ok((StatusCode::CREATED, Json(node)))
 }
 
@@ -301,7 +314,7 @@ async fn retry_assistant_message(
         .store()
         .retry_assistant_message(&session, message)
         .await?;
-    state.engine().notify_session(session);
+    state.engine().notify_session(session).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

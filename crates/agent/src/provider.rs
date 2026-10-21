@@ -36,25 +36,33 @@ impl ChatMessage {
     }
 
     fn to_json(&self) -> serde_json::Value {
-        let mut value = serde_json::json!({ "role": self.role, "content": self.content });
+        let mut object = serde_json::Map::new();
+        object.insert("role".to_owned(), serde_json::json!(self.role));
+        object.insert("content".to_owned(), serde_json::json!(self.content));
         if !self.tool_calls.is_empty() {
-            value["tool_calls"] = serde_json::Value::Array(
-                self.tool_calls
-                    .iter()
-                    .map(|call| {
-                        serde_json::json!({
-                            "id": call.id,
-                            "type": "function",
-                            "function": { "name": call.name, "arguments": call.arguments },
+            object.insert(
+                "tool_calls".to_owned(),
+                serde_json::Value::Array(
+                    self.tool_calls
+                        .iter()
+                        .map(|call| {
+                            serde_json::json!({
+                                "id": call.id,
+                                "type": "function",
+                                "function": { "name": call.name, "arguments": call.arguments },
+                            })
                         })
-                    })
-                    .collect(),
+                        .collect(),
+                ),
             );
         }
         if let Some(tool_call_id) = &self.tool_call_id {
-            value["tool_call_id"] = serde_json::Value::String(tool_call_id.clone());
+            object.insert(
+                "tool_call_id".to_owned(),
+                serde_json::Value::String(tool_call_id.clone()),
+            );
         }
-        value
+        serde_json::Value::Object(object)
     }
 }
 
@@ -93,6 +101,7 @@ pub enum ProviderError {
 
 impl ProviderError {
     /// 限流：`429`，或供应商给了等待建议。
+    #[must_use]
     pub fn is_rate_limited(&self) -> bool {
         match self {
             Self::Status {
@@ -105,6 +114,7 @@ impl ProviderError {
     }
 
     /// 供应商建议的等待时长。不限流或没给建议时为 `None`。
+    #[must_use]
     pub fn retry_after(&self) -> Option<Duration> {
         match self {
             Self::Status { retry_after, .. } => *retry_after,
@@ -152,7 +162,7 @@ pub trait ModelProvider: Send + Sync {
     ) -> Result<ChatStream, ProviderError>;
 }
 
-/// OpenAI 兼容的 `/chat/completions` 流式客户端。
+/// `OpenAI` 兼容的 `/chat/completions` 流式客户端。
 pub struct OpenAiProvider {
     client: reqwest::Client,
     base_url: String,
@@ -161,6 +171,7 @@ pub struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
+    #[must_use]
     pub fn new(config: &ModelConfig) -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -170,6 +181,7 @@ impl OpenAiProvider {
         }
     }
 
+    #[must_use]
     pub fn model_name(&self) -> &str {
         &self.model
     }
@@ -182,15 +194,25 @@ impl ModelProvider for OpenAiProvider {
         messages: Vec<ChatMessage>,
         tools: Vec<ToolDefinition>,
     ) -> Result<ChatStream, ProviderError> {
-        let mut body = serde_json::json!({
-            "model": self.model,
-            "messages": messages.iter().map(ChatMessage::to_json).collect::<Vec<_>>(),
-            "stream": true,
-        });
+        let mut body = serde_json::Map::new();
+        body.insert("model".to_owned(), serde_json::json!(self.model));
+        body.insert(
+            "messages".to_owned(),
+            serde_json::json!(
+                messages
+                    .iter()
+                    .map(ChatMessage::to_json)
+                    .collect::<Vec<_>>()
+            ),
+        );
+        body.insert("stream".to_owned(), serde_json::json!(true));
         if !tools.is_empty() {
-            body["tools"] =
-                serde_json::Value::Array(tools.iter().map(ToolDefinition::to_json).collect());
+            body.insert(
+                "tools".to_owned(),
+                serde_json::Value::Array(tools.iter().map(ToolDefinition::to_json).collect()),
+            );
         }
+        let body = serde_json::Value::Object(body);
         let url = format!("{}/chat/completions", self.base_url);
         let response = self
             .client
@@ -285,10 +307,11 @@ fn chunks_from_value(value: &serde_json::Value) -> Result<Vec<ChatChunk>, Provid
         .and_then(serde_json::Value::as_array)
     {
         for call in calls {
-            let index = call
-                .get("index")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(0) as usize;
+            let index = match call.get("index").and_then(serde_json::Value::as_u64) {
+                Some(value) => usize::try_from(value)
+                    .map_err(|_| ProviderError::Decode(format!("工具调用序号超出范围: {value}")))?,
+                None => 0,
+            };
             let id = call
                 .get("id")
                 .and_then(serde_json::Value::as_str)

@@ -7,8 +7,8 @@ pub const MODEL_API_KEY: &str = "DURABLE_MODEL_API_KEY";
 pub const MODEL_NAME: &str = "DURABLE_MODEL_NAME";
 pub const CONTEXT_CHAR_LIMIT: &str = "DURABLE_CONTEXT_CHAR_LIMIT";
 pub const MAX_STEPS: &str = "DURABLE_MAX_STEPS";
-pub const MODEL_RETRY_LIMIT: &str = "DURABLE_MODEL_RETRY_LIMIT";
-pub const MODEL_RETRY_BACKOFF_MS: &str = "DURABLE_MODEL_RETRY_BACKOFF_MS";
+pub(crate) const MODEL_RETRY_LIMIT: &str = "DURABLE_MODEL_RETRY_LIMIT";
+pub(crate) const MODEL_RETRY_BACKOFF_MS: &str = "DURABLE_MODEL_RETRY_BACKOFF_MS";
 
 const DEFAULT_CONTEXT_CHAR_LIMIT: usize = 200_000;
 const DEFAULT_MAX_STEPS: usize = 50;
@@ -67,7 +67,11 @@ impl std::error::Error for ConfigError {}
 
 /// 从进程环境读取模型配置。
 ///
-/// 失败：任一配置缺失或为空，或已存在但无法解析为 UTF-8。
+/// # Errors
+///
+/// - [`ConfigError::Missing`]：`DURABLE_MODEL_BASE_URL`、`DURABLE_MODEL_API_KEY` 或
+///   `DURABLE_MODEL_NAME` 未设置或为空。
+/// - [`ConfigError::NotUnicode`]：已设置的配置不是 UTF-8。
 pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
     let base_url = read_required(MODEL_BASE_URL)?;
     let api_key = read_required(MODEL_API_KEY)?;
@@ -92,7 +96,10 @@ pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
 
 /// 从进程环境读取 run 引擎配置。未设置时使用默认值。
 ///
-/// 失败：已设置的配置无法解析为 UTF-8，或不是正整数（重试次数允许 `0`）。
+/// # Errors
+///
+/// - [`ConfigError::NotUnicode`]：已设置的配置不是 UTF-8。
+/// - [`ConfigError::InvalidNumber`]：已设置的配置不是正整数。
 pub fn engine_config_from_env() -> Result<EngineConfig, ConfigError> {
     let defaults = EngineConfig::default();
     Ok(EngineConfig {

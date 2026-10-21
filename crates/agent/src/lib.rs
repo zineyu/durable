@@ -66,6 +66,12 @@ impl fmt::Display for ListenAddressError {
 
 impl std::error::Error for ListenAddressError {}
 
+/// 解析监听地址，并确认它是回环地址。
+///
+/// # Errors
+///
+/// - [`ListenAddressError::Invalid`]：字符串无法解析为 socket 地址。
+/// - [`ListenAddressError::NotLoopback`]：解析出的地址不是回环地址。
 pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError> {
     let address: SocketAddr = raw
         .parse()
@@ -76,6 +82,12 @@ pub fn parse_listen_address(raw: &str) -> Result<SocketAddr, ListenAddressError>
     Ok(address)
 }
 
+/// 把全部协议类型导出到给定目录。
+///
+/// # Errors
+///
+/// - `std::io::Error`：输出目录无法创建。
+/// - `ts_rs::ExportError`：任一协议类型导出失败。
 pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(directory)?;
     let config = ts_rs::Config::new().with_out_dir(directory);

@@ -2,7 +2,14 @@
 //!
 //! 每个集成测试目标是独立 crate，会单独编译本模块，因此这里允许未被该目标使用的条目。
 
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::let_underscore_must_use,
+    let_underscore_drop,
+    reason = "测试脚手架用 panic 与 expect 直接报告夹具与断言失败；本模块被每个测试目标各编译一次，未被该目标用到的条目属正常情况。"
+)]
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -14,13 +21,12 @@ use reqwest::{Response, StatusCode};
 use sqlx::{ConnectOptions, Row};
 use tempfile::TempDir;
 
-pub mod provider;
+pub(crate) mod provider;
 
-#[allow(unused_imports)]
-pub use provider::{Script, ScriptedProvider, ToolCallSpec};
+pub(crate) use provider::{Script, ScriptedProvider};
 
 /// 模型配置的测试取值，用 `Command::envs` 应用到 std 或 tokio 的命令。
-pub fn model_environment() -> [(&'static str, &'static str); 3] {
+pub(crate) fn model_environment() -> [(&'static str, &'static str); 3] {
     [
         (agent::MODEL_BASE_URL, "http://127.0.0.1:9/v1"),
         (agent::MODEL_API_KEY, "test-key"),
@@ -28,12 +34,12 @@ pub fn model_environment() -> [(&'static str, &'static str); 3] {
     ]
 }
 
-pub fn binary() -> PathBuf {
+pub(crate) fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_agent"))
 }
 
 /// 运行 agent 二进制的命令：指定 SQLite 与日志路径并带上模型配置。
-pub fn command(database: &Path) -> std::process::Command {
+pub(crate) fn command(database: &Path) -> std::process::Command {
     let mut command = command_without_paths();
     command
         .args(["--database"])
@@ -44,7 +50,7 @@ pub fn command(database: &Path) -> std::process::Command {
 }
 
 /// 未指定数据库与日志路径的 agent 命令：用于验证标准目录，也供 [`command`] 派生。
-pub fn command_without_paths() -> std::process::Command {
+pub(crate) fn command_without_paths() -> std::process::Command {
     let mut command = std::process::Command::new(binary());
     command
         .envs(model_environment())
@@ -53,7 +59,7 @@ pub fn command_without_paths() -> std::process::Command {
 }
 
 /// 与给定数据库同级的日志目录，使测试不写入用户的标准日志目录。
-pub fn log_directory(database: &Path) -> PathBuf {
+pub(crate) fn log_directory(database: &Path) -> PathBuf {
     database
         .parent()
         .unwrap_or_else(|| Path::new("."))
@@ -61,7 +67,7 @@ pub fn log_directory(database: &Path) -> PathBuf {
 }
 
 /// 启动 agent 二进制的命令：随机回环端口、捕获 stdout、随进程退出而结束。
-pub fn serving_command(database: &Path) -> tokio::process::Command {
+pub(crate) fn serving_command(database: &Path) -> tokio::process::Command {
     let mut command = tokio::process::Command::new(binary());
     command
         .args(["--listen", "127.0.0.1:0", "--database"])
@@ -76,7 +82,7 @@ pub fn serving_command(database: &Path) -> tokio::process::Command {
 }
 
 /// 读取 agent 打印的监听地址。
-pub async fn read_address(child: &mut tokio::process::Child) -> String {
+pub(crate) async fn read_address(child: &mut tokio::process::Child) -> String {
     use tokio::io::AsyncBufReadExt;
 
     let stdout = child.stdout.take().expect("取得启动输出");
@@ -92,13 +98,13 @@ pub async fn read_address(child: &mut tokio::process::Child) -> String {
 }
 
 /// 进程内的 agent 实例，监听随机回环端口。
-pub struct TestAgent {
+pub(crate) struct TestAgent {
     base_url: String,
     handle: tokio::task::JoinHandle<()>,
 }
 
 impl TestAgent {
-    pub async fn start(
+    pub(crate) async fn start(
         database: &Path,
         model: &str,
         provider: Arc<dyn agent::ModelProvider>,
@@ -122,18 +128,18 @@ impl TestAgent {
         }
     }
 
-    pub fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)
     }
 
-    pub async fn shutdown(self) {
+    pub(crate) async fn shutdown(self) {
         self.handle.abort();
         let _ = self.handle.await;
     }
 }
 
 /// 临时目录中的 agent、脚本化 provider 与可复用的 HTTP 客户端。
-pub struct Harness {
+pub(crate) struct Harness {
     pub directory: TempDir,
     pub database: PathBuf,
     pub provider: ScriptedProvider,
@@ -144,15 +150,15 @@ pub struct Harness {
 }
 
 impl Harness {
-    pub async fn start() -> Harness {
+    pub(crate) async fn start() -> Harness {
         Harness::start_with(agent::EngineConfig::default(), Vec::new()).await
     }
 
-    pub async fn start_with(config: agent::EngineConfig, scripts: Vec<Script>) -> Harness {
+    pub(crate) async fn start_with(config: agent::EngineConfig, scripts: Vec<Script>) -> Harness {
         Harness::start_with_limits(config, scripts, agent::ToolLimits::default()).await
     }
 
-    pub async fn start_with_limits(
+    pub(crate) async fn start_with_limits(
         config: agent::EngineConfig,
         scripts: Vec<Script>,
         limits: agent::ToolLimits,
@@ -189,7 +195,7 @@ impl Harness {
         }
     }
 
-    pub async fn restart(self) -> Harness {
+    pub(crate) async fn restart(self) -> Harness {
         let Harness {
             directory,
             database,
@@ -203,21 +209,21 @@ impl Harness {
         Harness::open(directory, database, provider, config, limits).await
     }
 
-    pub fn url(&self, path: &str) -> String {
+    pub(crate) fn url(&self, path: &str) -> String {
         self.agent.url(path)
     }
 
-    pub fn workspace_path(&self, name: &str) -> PathBuf {
+    pub(crate) fn workspace_path(&self, name: &str) -> PathBuf {
         self.directory.path().join(name)
     }
 
-    pub fn workspace(&self, name: &str) -> PathBuf {
+    pub(crate) fn workspace(&self, name: &str) -> PathBuf {
         let path = self.workspace_path(name);
         std::fs::create_dir(&path).expect("创建 workspace 目录");
         path
     }
 
-    pub async fn register(&self, path: &str) -> Response {
+    pub(crate) async fn register(&self, path: &str) -> Response {
         self.client
             .post(self.url("/api/workspaces"))
             .json(&serde_json::json!({ "path": path }))
@@ -226,7 +232,7 @@ impl Harness {
             .expect("注册 workspace")
     }
 
-    pub async fn remove(&self, path: &str) -> Response {
+    pub(crate) async fn remove(&self, path: &str) -> Response {
         self.client
             .post(self.url("/api/workspaces/remove"))
             .json(&serde_json::json!({ "path": path }))
@@ -235,7 +241,7 @@ impl Harness {
             .expect("移除 workspace")
     }
 
-    pub async fn bootstrap(&self) -> agent::BootstrapResponse {
+    pub(crate) async fn bootstrap(&self) -> agent::BootstrapResponse {
         self.client
             .get(self.url("/api/bootstrap"))
             .send()
@@ -246,7 +252,7 @@ impl Harness {
             .expect("解析 bootstrap")
     }
 
-    pub async fn create_session(
+    pub(crate) async fn create_session(
         &self,
         workspace: &agent::WorkspacePath,
         title: Option<&str>,
@@ -254,7 +260,11 @@ impl Harness {
         self.create_session_raw(workspace.as_str(), title).await
     }
 
-    pub async fn create_session_raw(&self, workspace: &str, title: Option<&str>) -> Response {
+    pub(crate) async fn create_session_raw(
+        &self,
+        workspace: &str,
+        title: Option<&str>,
+    ) -> Response {
         self.client
             .post(self.url("/api/sessions"))
             .json(&serde_json::json!({ "workspace": workspace, "title": title }))
@@ -263,7 +273,7 @@ impl Harness {
             .expect("创建 session")
     }
 
-    pub async fn rename_session(&self, id: &agent::SessionId, title: &str) -> Response {
+    pub(crate) async fn rename_session(&self, id: &agent::SessionId, title: &str) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/rename", id.as_str())))
             .json(&serde_json::json!({ "title": title }))
@@ -272,7 +282,7 @@ impl Harness {
             .expect("重命名 session")
     }
 
-    pub async fn delete_session(&self, id: &agent::SessionId) -> Response {
+    pub(crate) async fn delete_session(&self, id: &agent::SessionId) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/delete", id.as_str())))
             .send()
@@ -280,7 +290,7 @@ impl Harness {
             .expect("删除 session")
     }
 
-    pub async fn session_tree(&self, id: &agent::SessionId) -> Response {
+    pub(crate) async fn session_tree(&self, id: &agent::SessionId) -> Response {
         self.client
             .get(self.url(&format!("/api/sessions/{}/tree", id.as_str())))
             .send()
@@ -288,7 +298,7 @@ impl Harness {
             .expect("读取消息树")
     }
 
-    pub async fn tree(&self, id: &agent::SessionId) -> agent::SessionTree {
+    pub(crate) async fn tree(&self, id: &agent::SessionId) -> agent::SessionTree {
         self.session_tree(id)
             .await
             .json()
@@ -296,7 +306,7 @@ impl Harness {
             .expect("解析消息树")
     }
 
-    pub async fn submit_message(&self, id: &agent::SessionId, text: &str) -> Response {
+    pub(crate) async fn submit_message(&self, id: &agent::SessionId, text: &str) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/messages", id.as_str())))
             .json(&serde_json::json!({ "text": text }))
@@ -305,7 +315,7 @@ impl Harness {
             .expect("提交消息")
     }
 
-    pub async fn edit_message(
+    pub(crate) async fn edit_message(
         &self,
         id: &agent::SessionId,
         message: agent::MessageId,
@@ -323,7 +333,7 @@ impl Harness {
             .expect("编辑用户消息")
     }
 
-    pub async fn retry_message(
+    pub(crate) async fn retry_message(
         &self,
         id: &agent::SessionId,
         message: agent::MessageId,
@@ -339,7 +349,7 @@ impl Harness {
             .expect("重试 assistant 消息")
     }
 
-    pub async fn switch_active_leaf(
+    pub(crate) async fn switch_active_leaf(
         &self,
         id: &agent::SessionId,
         message: agent::MessageId,
@@ -352,7 +362,7 @@ impl Harness {
             .expect("切换 active leaf")
     }
 
-    pub async fn cancel_run(&self, id: &agent::SessionId) -> Response {
+    pub(crate) async fn cancel_run(&self, id: &agent::SessionId) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/cancel", id.as_str())))
             .send()
@@ -360,7 +370,7 @@ impl Harness {
             .expect("取消 run")
     }
 
-    pub async fn remove_queue_item(
+    pub(crate) async fn remove_queue_item(
         &self,
         id: &agent::SessionId,
         item: agent::QueueItemId,
@@ -377,7 +387,7 @@ impl Harness {
     }
 
     /// 轮询直到该 session 不再忙碌且队列为空。
-    pub async fn wait_idle(&self, id: &agent::SessionId) -> agent::SessionTree {
+    pub(crate) async fn wait_idle(&self, id: &agent::SessionId) -> agent::SessionTree {
         for _ in 0..500 {
             let tree = self.tree(id).await;
             if !tree.session.busy && tree.queue.is_empty() {
@@ -389,7 +399,7 @@ impl Harness {
     }
 
     /// 轮询直到该 session 进入忙碌状态。
-    pub async fn wait_busy(&self, id: &agent::SessionId) -> agent::SessionTree {
+    pub(crate) async fn wait_busy(&self, id: &agent::SessionId) -> agent::SessionTree {
         for _ in 0..500 {
             let tree = self.tree(id).await;
             if tree.session.busy {
@@ -401,7 +411,7 @@ impl Harness {
     }
 
     /// 轮询直到消息树满足条件。
-    pub async fn wait_for_tree(
+    pub(crate) async fn wait_for_tree(
         &self,
         id: &agent::SessionId,
         ready: impl Fn(&agent::SessionTree) -> bool,
@@ -417,7 +427,7 @@ impl Harness {
     }
 
     /// 订阅全局事件流。`after` 为 0 时回放全部历史事件。
-    pub async fn subscribe(&self, after: i64) -> EventStream {
+    pub(crate) async fn subscribe(&self, after: i64) -> EventStream {
         let response = self
             .client
             .get(self.url(&format!("/api/events?after={after}")))
@@ -430,42 +440,53 @@ impl Harness {
         }
     }
 
-    pub async fn registered_workspace(&self, name: &str) -> (PathBuf, agent::WorkspaceMetadata) {
+    pub(crate) async fn registered_workspace(
+        &self,
+        name: &str,
+    ) -> (PathBuf, agent::WorkspaceMetadata) {
         let workspace = self.workspace(name);
         let path = std::fs::canonicalize(&workspace)
             .expect("规范化路径")
             .to_string_lossy()
             .into_owned();
         let response = self.register(&path).await;
-        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(
+            response.status(),
+            StatusCode::CREATED,
+            "注册 workspace 返回 201"
+        );
         let metadata = response.json().await.expect("解析注册响应");
         (workspace, metadata)
     }
 
-    pub async fn created_session(
+    pub(crate) async fn created_session(
         &self,
         workspace: &agent::WorkspacePath,
     ) -> agent::SessionMetadata {
         let response = self.create_session(workspace, None).await;
-        assert_eq!(response.status(), StatusCode::CREATED);
+        assert_eq!(
+            response.status(),
+            StatusCode::CREATED,
+            "创建 session 返回 201"
+        );
         response.json().await.expect("解析 session 元数据")
     }
 
     /// 注册一个新建目录并创建 session，返回 session 元数据。
-    pub async fn session(&self, name: &str) -> agent::SessionMetadata {
+    pub(crate) async fn session(&self, name: &str) -> agent::SessionMetadata {
         let (_, workspace) = self.registered_workspace(name).await;
         self.created_session(&workspace.path).await
     }
 }
 
 /// 已订阅的事件流，按 SSE `data:` 行产出协议事件。
-pub struct EventStream {
-    response: reqwest::Response,
+pub(crate) struct EventStream {
+    response: Response,
     buffer: Vec<u8>,
 }
 
 impl EventStream {
-    pub async fn next(&mut self) -> Option<agent::StreamEvent> {
+    pub(crate) async fn next(&mut self) -> Option<agent::StreamEvent> {
         loop {
             if let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
                 let line: Vec<u8> = self.buffer.drain(..=position).collect();
@@ -485,7 +506,7 @@ impl EventStream {
     }
 }
 
-pub async fn connect(database: &Path) -> sqlx::SqliteConnection {
+pub(crate) async fn connect(database: &Path) -> sqlx::SqliteConnection {
     sqlx::sqlite::SqliteConnectOptions::new()
         .filename(database)
         .busy_timeout(Duration::from_secs(5))
@@ -494,14 +515,14 @@ pub async fn connect(database: &Path) -> sqlx::SqliteConnection {
         .expect("打开 SQLite")
 }
 
-pub async fn recorded_event_ids(database: &Path) -> Vec<i64> {
+pub(crate) async fn recorded_event_ids(database: &Path) -> Vec<i64> {
     sqlx::query_scalar("SELECT id FROM event ORDER BY id")
         .fetch_all(&mut connect(database).await)
         .await
         .expect("查询事件 id")
 }
 
-pub async fn recorded_events(database: &Path) -> Vec<agent::FactEvent> {
+pub(crate) async fn recorded_events(database: &Path) -> Vec<agent::FactEvent> {
     let payloads: Vec<String> = sqlx::query_scalar("SELECT event FROM event ORDER BY id")
         .fetch_all(&mut connect(database).await)
         .await
@@ -512,20 +533,24 @@ pub async fn recorded_events(database: &Path) -> Vec<agent::FactEvent> {
         .collect()
 }
 
-pub async fn recorded_event_kinds(database: &Path) -> Vec<String> {
+pub(crate) async fn recorded_event_kinds(database: &Path) -> Vec<String> {
     recorded_event_rows(database)
         .await
         .into_iter()
         .map(|(_, _, _, payload)| {
-            serde_json::from_str::<serde_json::Value>(&payload).expect("解析事件负载")["kind"]
-                .as_str()
+            let event: serde_json::Value = serde_json::from_str(&payload).expect("解析事件负载");
+            event
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
                 .expect("事件负载有 kind")
                 .to_owned()
         })
         .collect()
 }
 
-pub async fn recorded_event_rows(database: &Path) -> Vec<(i64, Option<String>, i64, String)> {
+pub(crate) async fn recorded_event_rows(
+    database: &Path,
+) -> Vec<(i64, Option<String>, i64, String)> {
     sqlx::query("SELECT id, session_id, created_at, event FROM event ORDER BY id")
         .fetch_all(&mut connect(database).await)
         .await
@@ -542,10 +567,10 @@ pub async fn recorded_event_rows(database: &Path) -> Vec<(i64, Option<String>, i
         .collect()
 }
 
-pub async fn error_code(response: Response) -> agent::ErrorCode {
+pub(crate) async fn error_code(response: Response) -> agent::ErrorCode {
     error_envelope(response).await.code
 }
 
-pub async fn error_envelope(response: Response) -> agent::ErrorResponse {
+pub(crate) async fn error_envelope(response: Response) -> agent::ErrorResponse {
     response.json().await.expect("解析错误响应")
 }

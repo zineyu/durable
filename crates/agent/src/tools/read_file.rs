@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use durable::ToolErrorCode;
 use serde::Deserialize;
 use serde_json::json;
@@ -44,7 +46,7 @@ pub(crate) fn read(
     let workspace = Workspace::new(context.workspace.as_str());
     let path = workspace.resolve_existing(&arguments.path)?;
     let metadata =
-        std::fs::metadata(&path).map_err(|error| ToolFailure::io("读取文件属性", error))?;
+        std::fs::metadata(&path).map_err(|error| ToolFailure::io("读取文件属性", &error))?;
     if !metadata.is_file() {
         return Err(ToolFailure::new(
             ToolErrorCode::IoError,
@@ -54,7 +56,7 @@ pub(crate) fn read(
     if metadata.len() > limit as u64 {
         return Err(limit_failure(limit, metadata.len()));
     }
-    let bytes = std::fs::read(&path).map_err(|error| ToolFailure::io("读取文件", error))?;
+    let bytes = std::fs::read(&path).map_err(|error| ToolFailure::io("读取文件", &error))?;
     if bytes.len() > limit {
         return Err(limit_failure(limit, bytes.len() as u64));
     }
@@ -70,8 +72,15 @@ pub(crate) fn read(
         return Ok(String::new());
     }
     let mut output = String::new();
-    for (offset, line) in lines[start - 1..end].iter().enumerate() {
-        output.push_str(&format!("{}\t{line}\n", start + offset));
+    for (offset, line) in lines
+        .iter()
+        .enumerate()
+        .skip(start - 1)
+        .take(end - start + 1)
+    {
+        writeln!(output, "{}\t{line}", offset + 1).map_err(|error| {
+            ToolFailure::new(ToolErrorCode::IoError, format!("写入读取结果: {error}"))
+        })?;
     }
     Ok(output)
 }

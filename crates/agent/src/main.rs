@@ -36,14 +36,14 @@ async fn main() -> ExitCode {
     let prepared = match prepare(&arguments) {
         Ok(prepared) => prepared,
         Err(error) => {
-            eprintln!("{error}");
+            report_startup_failure(&error);
             return ExitCode::FAILURE;
         }
     };
     let _log = match init(&prepared.log) {
         Ok(guard) => guard,
         Err(error) => {
-            eprintln!("{error}");
+            report_startup_failure(&error);
             return ExitCode::FAILURE;
         }
     };
@@ -54,6 +54,24 @@ async fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// 启动早期失败时日志尚未初始化，只能写标准错误。
+#[expect(
+    clippy::print_stderr,
+    reason = "日志尚未初始化，启动失败只能写标准错误。"
+)]
+fn report_startup_failure(error: &dyn std::fmt::Display) {
+    eprintln!("{error}");
+}
+
+/// 监听地址写到标准输出，是启动协议的一部分：调用方据此得知就绪端口。
+#[expect(
+    clippy::print_stdout,
+    reason = "监听地址是启动协议的一部分，调用方从标准输出读取。"
+)]
+fn report_listen_address(address: SocketAddr) {
+    println!("agent listening on http://{address}");
 }
 
 fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>> {
@@ -96,7 +114,7 @@ async fn run(arguments: Arguments, prepared: Prepared) -> Result<(), Box<dyn std
     );
     let listener = tokio::net::TcpListener::bind(prepared.address).await?;
     let bound = listener.local_addr()?;
-    println!("agent listening on http://{bound}");
+    report_listen_address(bound);
     info!(listen = %bound, "agent 开始监听");
     agent::serve(listener, state).await?;
     Ok(())

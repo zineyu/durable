@@ -44,14 +44,14 @@ pub(crate) fn edit(call: &ToolCall, context: &ToolContext) -> Result<String, Too
     let workspace = Workspace::new(context.workspace.as_str());
     let path = workspace.resolve_existing(&arguments.path)?;
     let metadata =
-        std::fs::metadata(&path).map_err(|error| ToolFailure::io("读取文件属性", error))?;
+        std::fs::metadata(&path).map_err(|error| ToolFailure::io("读取文件属性", &error))?;
     if !metadata.is_file() {
         return Err(ToolFailure::new(
             ToolErrorCode::IoError,
             format!("路径不是普通文件: {}", arguments.path),
         ));
     }
-    let bytes = std::fs::read(&path).map_err(|error| ToolFailure::io("读取文件", error))?;
+    let bytes = std::fs::read(&path).map_err(|error| ToolFailure::io("读取文件", &error))?;
     let text = String::from_utf8(bytes).map_err(|_| {
         ToolFailure::new(
             ToolErrorCode::NotUtf8,
@@ -74,7 +74,7 @@ pub(crate) fn edit(call: &ToolCall, context: &ToolContext) -> Result<String, Too
         }
     }
     let updated = text.replacen(&arguments.old_string, &arguments.new_string, 1);
-    std::fs::write(&path, &updated).map_err(|error| ToolFailure::io("写入文件", error))?;
+    std::fs::write(&path, &updated).map_err(|error| ToolFailure::io("写入文件", &error))?;
     Ok(format!(
         "替换 1 处，写入 {} 字节: {}",
         updated.len(),

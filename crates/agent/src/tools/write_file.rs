@@ -35,7 +35,7 @@ pub(crate) fn write(call: &ToolCall, context: &ToolContext) -> Result<String, To
     let workspace = Workspace::new(context.workspace.as_str());
     let path = workspace.resolve_for_write(&arguments.path)?;
     std::fs::write(&path, &arguments.content)
-        .map_err(|error| ToolFailure::io("写入文件", error))?;
+        .map_err(|error| ToolFailure::io("写入文件", &error))?;
     Ok(format!(
         "写入 {} 字节: {}",
         arguments.content.len(),

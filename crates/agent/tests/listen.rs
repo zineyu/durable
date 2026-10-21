@@ -1,3 +1,8 @@
+#![expect(
+    clippy::expect_used,
+    reason = "监听地址测试的启动夹具用 expect 直接报告失败。"
+)]
+
 mod support;
 
 fn run_agent(listen: &str) -> std::process::Output {

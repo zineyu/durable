@@ -16,6 +16,7 @@ struct Inner {
 }
 
 impl Cancellation {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -25,6 +26,7 @@ impl Cancellation {
         self.inner.notify.notify_waiters();
     }
 
+    #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.inner.cancelled.load(Ordering::SeqCst)
     }

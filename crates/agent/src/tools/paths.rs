@@ -29,7 +29,7 @@ impl Workspace {
             std::io::ErrorKind::NotFound => {
                 ToolFailure::new(ToolErrorCode::FileNotFound, format!("文件不存在: {raw}"))
             }
-            _ => ToolFailure::io(&format!("解析路径 {raw}"), error),
+            _ => ToolFailure::io(&format!("解析路径 {raw}"), &error),
         })?;
         self.contain(&canonical, raw)?;
         Ok(canonical)
@@ -60,7 +60,7 @@ impl Workspace {
                     ToolErrorCode::ParentNotFound,
                     format!("父目录不存在: {raw}"),
                 ),
-                _ => ToolFailure::io(&format!("解析父目录 {raw}"), error),
+                _ => ToolFailure::io(&format!("解析父目录 {raw}"), &error),
             })?;
         self.contain(&canonical_parent, raw)?;
         let target = canonical_parent.join(file_name);

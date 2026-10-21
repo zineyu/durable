@@ -1,3 +1,11 @@
+#![expect(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::let_underscore_must_use,
+    let_underscore_drop,
+    reason = "进程级测试脚本用 panic 与 expect 直接报告夹具与断言失败。"
+)]
+
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

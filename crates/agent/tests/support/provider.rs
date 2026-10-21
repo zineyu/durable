@@ -1,8 +1,13 @@
-//! 测试用脚本化 OpenAI 兼容 SSE 服务。它是真实 HTTP 服务，不替换被测代码。
+//! 测试用脚本化 `OpenAI` 兼容 SSE 服务。它是真实 HTTP 服务，不替换被测代码。
 
-#![allow(dead_code)]
+#![expect(
+    dead_code,
+    clippy::expect_used,
+    reason = "脚本化 provider 用 expect 直接报告夹具失败；本模块被每个测试目标各编译一次，未被该目标用到的条目属正常情况。"
+)]
 
 use std::collections::VecDeque;
+use std::fmt::Write;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
@@ -17,7 +22,7 @@ use serde_json::{Value, json};
 
 /// 一次请求的脚本。
 #[derive(Debug, Clone)]
-pub enum Script {
+pub(crate) enum Script {
     /// 流式返回一段 assistant 文本。
     Text(String),
     /// 返回单个工具调用。
@@ -41,14 +46,14 @@ pub enum Script {
 
 /// 脚本化的工具调用。
 #[derive(Debug, Clone)]
-pub struct ToolCallSpec {
+pub(crate) struct ToolCallSpec {
     pub id: String,
     pub name: String,
     pub arguments: String,
 }
 
 impl ToolCallSpec {
-    pub fn new(id: &str, name: &str, arguments: &str) -> Self {
+    pub(crate) fn new(id: &str, name: &str, arguments: &str) -> Self {
         Self {
             id: id.to_owned(),
             name: name.to_owned(),
@@ -64,14 +69,14 @@ struct ScriptState {
 }
 
 /// 本地脚本化 provider。
-pub struct ScriptedProvider {
+pub(crate) struct ScriptedProvider {
     address: SocketAddr,
     handle: tokio::task::JoinHandle<()>,
     state: ScriptState,
 }
 
 impl ScriptedProvider {
-    pub async fn start(scripts: Vec<Script>) -> ScriptedProvider {
+    pub(crate) async fn start(scripts: Vec<Script>) -> ScriptedProvider {
         let state = ScriptState {
             scripts: Arc::new(Mutex::new(scripts.into())),
             requests: Arc::new(Mutex::new(Vec::new())),
@@ -95,12 +100,12 @@ impl ScriptedProvider {
         }
     }
 
-    pub fn base_url(&self) -> String {
+    pub(crate) fn base_url(&self) -> String {
         format!("http://{}/v1", self.address)
     }
 
     /// 追加一个脚本，供后续请求使用。
-    pub fn push(&self, script: Script) {
+    pub(crate) fn push(&self, script: Script) {
         self.state
             .scripts
             .lock()
@@ -109,11 +114,11 @@ impl ScriptedProvider {
     }
 
     /// 已收到的请求体。
-    pub fn requests(&self) -> Vec<Value> {
+    pub(crate) fn requests(&self) -> Vec<Value> {
         self.state.requests.lock().expect("请求日志锁").clone()
     }
 
-    pub fn shutdown(self) {
+    pub(crate) fn shutdown(self) {
         self.handle.abort();
     }
 }
@@ -197,10 +202,12 @@ fn tool_call_events(calls: &[ToolCallSpec]) -> String {
             })
         })
         .collect();
-    body.push_str(&format!(
+    write!(
+        body,
         "data: {}\n\n",
         json!({ "choices": [{ "delta": { "tool_calls": headers } }] })
-    ));
+    )
+    .expect("写入 tool_calls 头帧");
     let fragments: Vec<Value> = calls
         .iter()
         .enumerate()
@@ -211,10 +218,12 @@ fn tool_call_events(calls: &[ToolCallSpec]) -> String {
             })
         })
         .collect();
-    body.push_str(&format!(
+    write!(
+        body,
         "data: {}\n\n",
         json!({ "choices": [{ "delta": { "tool_calls": fragments } }] })
-    ));
+    )
+    .expect("写入 tool_calls 参数帧");
     body.push_str("data: [DONE]\n\n");
     body
 }
@@ -224,10 +233,12 @@ fn text_events(text: &str) -> String {
     let characters: Vec<char> = text.chars().collect();
     for piece in characters.chunks(4) {
         let piece: String = piece.iter().collect();
-        body.push_str(&format!(
+        write!(
+            body,
             "data: {}\n\n",
             json!({ "choices": [{ "delta": { "content": piece } }] })
-        ));
+        )
+        .expect("写入文本帧");
     }
     body
 }
