@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Path as UrlPath, Request, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
@@ -13,8 +13,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use durable::{NodeMetadata, NodeName, Store};
-use futures_util::TryStreamExt;
 use futures_util::future::join_all;
+use futures_util::{Stream, StreamExt, TryStreamExt};
 use rust_embed::Embed;
 use serde::de::DeserializeOwned;
 use ts_rs::TS;
@@ -341,14 +341,24 @@ async fn forward_node(
         upstream = upstream.header(name, value);
     }
 
-    let response = upstream.body(body).send().await.map_err(|error| {
-        tracing::debug!(node = %name, error = %error, "转发请求失败");
-        ApiError::node_unavailable(format!("连接节点失败: {error}"))
-    })?;
+    let started = tokio::time::Instant::now();
+    let response =
+        match tokio::time::timeout(state.options.command_timeout, upstream.body(body).send()).await
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => {
+                tracing::debug!(node = %name, error = %error, "转发请求失败");
+                return Err(ApiError::node_unavailable(format!("连接节点失败: {error}")));
+            }
+            Err(_) => {
+                return Err(ApiError::node_unavailable(
+                    "命令超时: 节点未在时限内响应".to_owned(),
+                ));
+            }
+        };
 
     let status = response.status();
     let response_headers = response.headers().clone();
-    let stream = response.bytes_stream().map_err(std::io::Error::other);
 
     let mut builder = Response::builder().status(status);
     for (name, value) in response_headers.iter() {
@@ -358,9 +368,66 @@ async fn forward_node(
         builder = builder.header(name, value);
     }
 
+    let body = if is_event_stream(&response_headers) {
+        Body::from_stream(idle_body(
+            response.bytes_stream(),
+            state.options.stream_idle_timeout,
+            &name,
+        ))
+    } else {
+        let deadline = started + state.options.command_timeout;
+        match tokio::time::timeout_at(deadline, response.bytes()).await {
+            Ok(Ok(bytes)) => Body::from(bytes),
+            Ok(Err(error)) => {
+                return Err(ApiError::node_unavailable(format!(
+                    "读取节点响应失败: {error}"
+                )));
+            }
+            Err(_) => {
+                return Err(ApiError::node_unavailable(
+                    "命令超时: 节点未在时限内完成响应".to_owned(),
+                ));
+            }
+        }
+    };
+
     builder
-        .body(Body::from_stream(stream))
+        .body(body)
         .map_err(|error| ApiError::node_unavailable(format!("构造转发响应失败: {error}")))
+}
+
+/// 响应是否事件流。hub 据此选空闲超时而不是总超时，因此不需要认识 agent 的端点清单。
+fn is_event_stream(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"))
+}
+
+/// 给转发的事件流套上逐块空闲超时。超时即结束该流，由客户端重连后恢复。
+fn idle_body(
+    stream: impl Stream<Item = reqwest::Result<Bytes>> + Send + 'static,
+    idle: Duration,
+    node: &NodeName,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+    let node = node.clone();
+    async_stream::stream! {
+        let mut stream = Box::pin(stream);
+        loop {
+            match tokio::time::timeout(idle, stream.next()).await {
+                Ok(Some(Ok(chunk))) => yield Ok(chunk),
+                Ok(Some(Err(error))) => {
+                    yield Err(std::io::Error::other(error));
+                    return;
+                }
+                Ok(None) => return,
+                Err(_) => {
+                    tracing::debug!(node = %node, idle_ms = idle.as_millis(), "转发的事件流空闲超时");
+                    return;
+                }
+            }
+        }
+    }
 }
 
 fn split_node_path(path: &str) -> Result<(&str, &str), ApiError> {
