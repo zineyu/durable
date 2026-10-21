@@ -15,7 +15,7 @@ fn user_texts(tree: &agent::SessionTree) -> Vec<&str> {
         .collect()
 }
 
-/// 规格 user story 8：assistant 文本流式落库，run 结束后内容一致。
+/// 规格 user story A-8：assistant 文本流式落库，run 结束后内容一致。
 #[tokio::test]
 async fn streams_assistant_text_and_finishes_run() {
     let harness = Harness::start_with(
@@ -166,7 +166,7 @@ async fn executes_tool_calls_in_order_and_continues() {
     assert_eq!(results[1]["content"], "1\t记录\n");
 }
 
-/// 规格 user story 15 与「调度与会话状态」：同一 session 的队列按 FIFO 执行。
+/// 规格 user story A-15 与「调度与会话状态」：同一 session 的队列按 FIFO 执行。
 #[tokio::test]
 async fn executes_queued_messages_in_fifo_order() {
     let harness = Harness::start_with(
@@ -204,7 +204,7 @@ async fn executes_queued_messages_in_fifo_order() {
     );
 }
 
-/// 规格 user story 11：删除尚未开始的队列项后该项不再执行。
+/// 规格 user story A-11：删除尚未开始的队列项后该项不再执行。
 #[tokio::test]
 async fn removes_pending_queue_item_before_execution() {
     let harness = Harness::start_with(
@@ -246,7 +246,7 @@ async fn removes_pending_queue_item_before_execution() {
     assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
 }
 
-/// 规格 user story 10：取消保留已收到的部分 assistant 文本，队列继续。
+/// 规格 user story A-10：取消保留已收到的部分 assistant 文本，队列继续。
 #[tokio::test]
 async fn cancels_running_run_and_keeps_partial_text() {
     let harness = Harness::start_with(
@@ -280,7 +280,7 @@ async fn cancels_running_run_and_keeps_partial_text() {
     assert_eq!(tree.nodes[3].text.as_str(), "下一项");
 }
 
-/// 规格 user story 23：多个标签页订阅同一条事件流，任一命令对全部订阅者生效。
+/// 规格 user story A-23：多个标签页订阅同一条事件流，任一命令对全部订阅者生效。
 #[tokio::test]
 async fn broadcasts_facts_to_every_subscriber() {
     let harness = Harness::start_with(
@@ -330,7 +330,7 @@ async fn broadcasts_facts_to_every_subscriber() {
     }
 }
 
-/// 规格 user story 12：工具失败以结构化结果回传模型，run 继续。
+/// 规格 user story A-12：工具失败以结构化结果回传模型，run 继续。
 #[tokio::test]
 async fn passes_tool_failure_to_model_and_continues() {
     let harness = Harness::start_with(
@@ -595,7 +595,7 @@ async fn streams_deltas_and_facts_over_sse() {
     );
 }
 
-/// 规格 user story 1：供应商限流时 run 以显式类别结束，说明带等待建议。
+/// ADR 0031：供应商限流时 run 以显式类别结束，说明带等待建议。
 #[tokio::test]
 async fn fails_run_as_rate_limited_when_retries_are_exhausted() {
     let harness = Harness::start_with(
@@ -648,7 +648,7 @@ async fn fails_run_as_rate_limited_when_retries_are_exhausted() {
     assert!(tree.queue.is_empty());
 }
 
-/// 规格 user story 2：瞬时限流自动重试，不写额外事实事件。
+/// ADR 0031：瞬时限流自动重试，不写额外事实事件。
 #[tokio::test]
 async fn retries_rate_limited_call_and_reports_waiting_over_sse() {
     let harness = Harness::start_with(
@@ -724,7 +724,7 @@ async fn retries_rate_limited_call_and_reports_waiting_over_sse() {
     assert_eq!(tree.nodes[1].text.as_str(), "恢复");
 }
 
-/// 规格 user story 4：`Retry-After` 优先于指数退避。
+/// ADR 0031：`Retry-After` 优先于指数退避。
 #[tokio::test]
 async fn honors_retry_after_instead_of_backoff() {
     let harness = Harness::start_with(

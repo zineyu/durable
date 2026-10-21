@@ -93,7 +93,7 @@ mod tests {
         NodeName::parse(raw).expect("合法节点名")
     }
 
-    /// 规格 user story 35：落后的订阅者收到 resync 后流结束。
+    /// 规格 user story H-35：落后的订阅者收到 resync 后流结束。
     #[tokio::test]
     async fn lagged_receiver_yields_resync_then_ends() {
         let bus = Arc::new(Bus::new(1, 8));
@@ -111,7 +111,7 @@ mod tests {
         assert!(events.next().await.is_none(), "resync 之后流必须结束");
     }
 
-    /// 规格 user story 33：窗口外游标只收到一条 resync。
+    /// 规格 user story H-33：窗口外游标只收到一条 resync。
     #[tokio::test]
     async fn resync_subscription_yields_single_resync() {
         let bus = Arc::new(Bus::new(8, 1));
@@ -124,7 +124,7 @@ mod tests {
         assert!(events.next().await.is_none());
     }
 
-    /// 规格 user story 31：窗口内游标先收到回放，再接实时。
+    /// 规格 user story H-31：窗口内游标先收到回放，再接实时。
     #[tokio::test]
     async fn replay_precedes_live_events() {
         let bus = Arc::new(Bus::new(8, 8));

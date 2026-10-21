@@ -39,7 +39,7 @@ ADR-0032 让 lint 告警阻断并禁用抑制，覆盖的是「写错的代码�
 
 ## 契约一致性
 
-- 规格追溯：代码与测试写 `规格 user story N`，`scripts/check-spec-links.sh` 断言该编号在 `docs/specs/*.md` 中存在。未被引用的编号只打印清单，不阻断，因为规格先行是常态。
+- 规格追溯：代码与测试写 `规格 user story A-16`（`crates/hub` 写 `H-16`），`scripts/check-spec-links.sh` 断言该编号在对应规格中存在且前缀与目录归属匹配（ADR 0034）。未被引用的编号只打印清单，不阻断，因为规格先行是常态。
 - 类型清单：`docs/api/types.md` 与 TS 类型由同一命令 `scripts/typegen.sh` 生成，`durable-test` 重新生成后比对两个路径。清单从生成文件派生，不重复类型定义。
 - 类型导出覆盖：`scripts/check-typegen-coverage.sh` 收集 `crates/*/src` 里每个 `#[derive(TS)]` 的类型名，断言 `client/src/api/generated/<Name>.ts` 存在。生成文件一致只能证明「导出的都正确」，覆盖检查补上「该导出的都导出了」这一半。
 - 术语表：`scripts/check-glossary.sh` 断言 `docs/glossary.md` 里标识符形状的反引号术语能在 `crates/` 或 `client/` 里找到。URL 模板一类自然语言片段不参与检查。
@@ -62,4 +62,4 @@ ADR-0032 让 lint 告警阻断并禁用抑制，覆盖的是「写错的代码�
 - 新增直接依赖需要一次显式登记并写理由。
 - 文档漂移会失败或提醒：类型清单与术语不一致即失败，规格编号越界即失败。
 - 门禁脚本自身受 `shellcheck` 约束。
-- 已知缺口：规模预算只拦增长，不强制已登记文件变小；规格编号是全局集合，两个规格的编号空间重名，因此只能判断「编号存在」，不能判断「引用的是正确的规格」。
+- 已知缺口：规模预算只拦增长，不强制已登记文件变小。

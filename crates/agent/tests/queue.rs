@@ -72,7 +72,7 @@ async fn queues_messages_behind_running_run() {
     harness.wait_idle(&session.id).await;
 }
 
-/// 规格 user story 15：同一 session 的消息按 FIFO 顺序执行。
+/// 规格 user story A-15：同一 session 的消息按 FIFO 顺序执行。
 #[tokio::test]
 async fn executes_queued_messages_in_fifo_order() {
     let harness = Harness::start_with(
@@ -138,7 +138,7 @@ async fn continues_queue_after_restart() {
     assert_eq!(tree.nodes[3].text.as_str(), "B 完成");
 }
 
-/// 规格 user story 4：首条用户消息决定标题，后续消息不再改变。
+/// 规格 user story A-4：首条用户消息决定标题，后续消息不再改变。
 #[tokio::test]
 async fn derives_auto_title_from_first_message() {
     let harness = Harness::start().await;
@@ -157,7 +157,7 @@ async fn derives_auto_title_from_first_message() {
     );
 }
 
-/// 规格 user story 4：标题取首行前 50 个字符。
+/// 规格 user story A-4：标题取首行前 50 个字符。
 #[tokio::test]
 async fn truncates_auto_title_to_fifty_characters() {
     let harness = Harness::start().await;
@@ -172,7 +172,7 @@ async fn truncates_auto_title_to_fifty_characters() {
     );
 }
 
-/// 规格 user story 4：重命名后不再自动更新标题。
+/// 规格 user story A-4：重命名后不再自动更新标题。
 #[tokio::test]
 async fn keeps_renamed_title_before_first_message() {
     let harness = Harness::start().await;
@@ -220,7 +220,7 @@ async fn rejects_message_for_missing_session() {
     );
 }
 
-/// 规格 user story 5：删除运行中的 session 先取消 run，并丢弃队列。
+/// 规格 user story A-5：删除运行中的 session 先取消 run，并丢弃队列。
 #[tokio::test]
 async fn deletes_running_session_with_its_queue() {
     let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;

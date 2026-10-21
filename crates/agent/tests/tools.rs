@@ -96,7 +96,7 @@ fn failed(code: agent::ToolErrorCode, message: &str) -> agent::ToolOutcome {
     }
 }
 
-/// 规格 user story 26：`read_file` 输出带行号。
+/// 规格 user story A-26：`read_file` 输出带行号。
 #[tokio::test]
 async fn reads_file_with_line_numbers() {
     let run = start(vec![call("read_file", r#"{"path":"notes.txt"}"#), done()]).await;
@@ -108,7 +108,7 @@ async fn reads_file_with_line_numbers() {
     );
 }
 
-/// 规格 user story 26：可选起止行，区间含两端。
+/// 规格 user story A-26：可选起止行，区间含两端。
 #[tokio::test]
 async fn reads_selected_line_range() {
     let run = start(vec![
@@ -134,7 +134,7 @@ async fn reads_selected_line_range() {
     assert_eq!(calls[1].outcome, succeeded("2\tbeta\n3\tgamma\n"));
 }
 
-/// 规格 user story 26：区间非法是显式错误。
+/// 规格 user story A-26：区间非法是显式错误。
 #[tokio::test]
 async fn rejects_invalid_line_ranges() {
     for arguments in [
@@ -158,7 +158,7 @@ async fn rejects_invalid_line_ranges() {
     }
 }
 
-/// 规格 user story 26：非 UTF-8 与读取上限是不同错误。
+/// 规格 user story A-26：非 UTF-8 与读取上限是不同错误。
 #[tokio::test]
 async fn rejects_non_utf8_and_oversized_reads() {
     let run = start(vec![call("read_file", r#"{"path":"binary.txt"}"#), done()]).await;
@@ -190,7 +190,7 @@ async fn rejects_non_utf8_and_oversized_reads() {
     );
 }
 
-/// 规格 user story 27：`write_file` 覆盖写入并返回字节数。
+/// 规格 user story A-27：`write_file` 覆盖写入并返回字节数。
 #[tokio::test]
 async fn overwrites_file_and_reports_bytes() {
     let run = start(vec![
@@ -204,7 +204,7 @@ async fn overwrites_file_and_reports_bytes() {
     assert_eq!(run.read("notes.txt"), "新内容");
 }
 
-/// 规格 user story 27：父目录不存在时不隐式创建目录。
+/// 规格 user story A-27：父目录不存在时不隐式创建目录。
 #[tokio::test]
 async fn rejects_write_with_missing_parent() {
     let run = start(vec![
@@ -226,7 +226,7 @@ async fn rejects_write_with_missing_parent() {
     assert!(!run.exists("missing"));
 }
 
-/// 规格 user story 30：绝对路径与 `..` 逃逸都被拒绝。
+/// 规格 user story A-30：绝对路径与 `..` 逃逸都被拒绝。
 #[tokio::test]
 async fn rejects_absolute_and_parent_paths() {
     for path in ["/etc/passwd", "../escape.txt", "sub/../../escape.txt"] {
@@ -253,7 +253,7 @@ async fn rejects_absolute_and_parent_paths() {
     }
 }
 
-/// 规格 user story 30：符号链接目标逃逸 workspace 根时被拒绝。
+/// 规格 user story A-30：符号链接目标逃逸 workspace 根时被拒绝。
 #[cfg(unix)]
 #[tokio::test]
 async fn rejects_symlink_escape() {
@@ -291,7 +291,7 @@ async fn rejects_symlink_escape() {
     assert!(!outside.path().join("new.txt").exists());
 }
 
-/// 规格 user story 28：`edit_file` 只替换唯一匹配。
+/// 规格 user story A-28：`edit_file` 只替换唯一匹配。
 #[tokio::test]
 async fn edits_unique_match() {
     let run = start(vec![
@@ -311,7 +311,7 @@ async fn edits_unique_match() {
     assert_eq!(run.read("notes.txt"), "alpha\ngamma\n");
 }
 
-/// 规格 user story 28：未找到与多处匹配是不同错误。
+/// 规格 user story A-28：未找到与多处匹配是不同错误。
 #[tokio::test]
 async fn reports_edit_mismatch_and_missing_file() {
     let run = start(vec![
@@ -372,7 +372,7 @@ async fn reports_edit_mismatch_and_missing_file() {
     assert_eq!(run.read("notes.txt"), "alpha\nbeta\n");
 }
 
-/// 规格 user story 29：bash 返回合并输出、退出码与耗时。
+/// 规格 user story A-29：bash 返回合并输出、退出码与耗时。
 #[tokio::test]
 async fn reports_bash_output_and_exit_code() {
     let run = start(vec![
@@ -396,7 +396,7 @@ async fn reports_bash_output_and_exit_code() {
     assert!(content.starts_with("退出码: 3\n"), "{content}");
 }
 
-/// 规格 user story 29：bash 的 cwd 限定 workspace 根内。
+/// 规格 user story A-29：bash 的 cwd 限定 workspace 根内。
 #[tokio::test]
 async fn runs_bash_in_requested_cwd() {
     let run = start(vec![
@@ -413,7 +413,7 @@ async fn runs_bash_in_requested_cwd() {
     assert!(content.ends_with("输出:\n子目录内容"), "{content}");
 }
 
-/// 规格 user story 29：cwd 越出 workspace 根时被拒绝。
+/// 规格 user story A-29：cwd 越出 workspace 根时被拒绝。
 #[tokio::test]
 async fn rejects_bash_cwd_outside_workspace() {
     let run = start(vec![
@@ -434,7 +434,7 @@ async fn rejects_bash_cwd_outside_workspace() {
     );
 }
 
-/// 规格 user story 29：输出超过上限时标注截断。
+/// 规格 user story A-29：输出超过上限时标注截断。
 #[tokio::test]
 async fn truncates_bash_output() {
     let limits = agent::ToolLimits {
@@ -460,7 +460,7 @@ async fn truncates_bash_output() {
     assert!(content.ends_with("输出:\n01234567"), "{content}");
 }
 
-/// 规格 user story 29：超时杀掉整个进程组，后台子进程不再产生输出。
+/// 规格 user story A-29：超时杀掉整个进程组，后台子进程不再产生输出。
 #[tokio::test]
 async fn times_out_bash_and_kills_process_group() {
     let limits = agent::ToolLimits {
@@ -493,7 +493,7 @@ async fn times_out_bash_and_kills_process_group() {
     assert!(!run.exists("marker.txt"), "被杀进程组不再产生输出");
 }
 
-/// 规格 user story 10 与 29：取消 run 杀掉在途命令的进程组。
+/// 规格 user story A-10 与 A-29：取消 run 杀掉在途命令的进程组。
 #[cfg(unix)]
 #[tokio::test]
 async fn cancels_bash_process_group() {

@@ -13,7 +13,7 @@ async fn error_code(response: reqwest::Response) -> hub::HubErrorCode {
     body.code
 }
 
-/// 规格 user story 1：注册节点不需要可达，只校验名称与 URL。
+/// 规格 user story H-1：注册节点不需要可达，只校验名称与 URL。
 #[tokio::test]
 async fn registers_offline_node_and_lists_it_in_bootstrap() {
     let harness = Harness::start().await;
@@ -33,7 +33,7 @@ async fn registers_offline_node_and_lists_it_in_bootstrap() {
     assert_eq!(bootstrap.nodes[0].status, hub::NodeStatus::Unreachable);
 }
 
-/// 规格 user story 3：节点名重复是显式错误。
+/// 规格 user story H-3：节点名重复是显式错误。
 #[tokio::test]
 async fn rejects_duplicate_node_name() {
     let harness = Harness::start().await;
@@ -51,7 +51,7 @@ async fn rejects_duplicate_node_name() {
     assert_eq!(bootstrap.nodes.len(), 1, "重复注册不覆盖原记录");
 }
 
-/// 规格 user story 4：名称必须是路径安全字符。
+/// 规格 user story H-4：名称必须是路径安全字符。
 #[tokio::test]
 async fn rejects_invalid_node_name() {
     let harness = Harness::start().await;
@@ -73,7 +73,7 @@ async fn rejects_invalid_node_name() {
     assert!(harness.bootstrap().await.nodes.is_empty());
 }
 
-/// 规格 user story 4：URL 不能为空。
+/// 规格 user story H-4：URL 不能为空。
 #[tokio::test]
 async fn rejects_blank_node_url() {
     let harness = Harness::start().await;
@@ -86,7 +86,7 @@ async fn rejects_blank_node_url() {
     );
 }
 
-/// 规格 user story 5 与 6：改名保留 URL，旧名立即失效。
+/// 规格 user story H-5 与 H-6：改名保留 URL，旧名立即失效。
 #[tokio::test]
 async fn renames_node_and_drops_old_name() {
     let harness = Harness::start().await;
@@ -117,7 +117,7 @@ async fn renames_node_and_drops_old_name() {
     assert_eq!(new.status(), StatusCode::OK);
 }
 
-/// 规格 user story 3 与 4：改名同样校验名称。
+/// 规格 user story H-3 与 H-4：改名同样校验名称。
 #[tokio::test]
 async fn rejects_invalid_taken_or_unknown_rename() {
     let harness = Harness::start().await;
@@ -153,7 +153,7 @@ async fn rejects_invalid_taken_or_unknown_rename() {
     assert_eq!(names, ["laptop", "desktop"]);
 }
 
-/// 规格 user story 42：改名对已打开的客户端广播旧名删除与新名登记。
+/// 规格 user story H-42：改名对已打开的客户端广播旧名删除与新名登记。
 #[tokio::test]
 async fn broadcasts_rename_as_remove_and_register() {
     let harness = Harness::start().await;
@@ -190,7 +190,7 @@ async fn broadcasts_rename_as_remove_and_register() {
     }
 }
 
-/// 规格 user story 8：删除只移除登记。未知节点返回显式错误。
+/// 规格 user story H-8：删除只移除登记。未知节点返回显式错误。
 #[tokio::test]
 async fn removes_node_and_rejects_unknown_node() {
     let harness = Harness::start().await;
@@ -207,7 +207,7 @@ async fn removes_node_and_rejects_unknown_node() {
     assert_eq!(error_code(response).await, hub::HubErrorCode::UnknownNode);
 }
 
-/// 规格 user story 10：重启 hub 后节点表仍在。
+/// 规格 user story H-10：重启 hub 后节点表仍在。
 #[tokio::test]
 async fn restores_node_table_after_restart() {
     let harness = Harness::start().await;

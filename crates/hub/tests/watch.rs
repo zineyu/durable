@@ -40,7 +40,7 @@ fn unreachable_detail(event: &hub::HubStreamEvent) -> Option<&str> {
     }
 }
 
-/// 规格 user story 12：状态保持不可达而原因变化时，已订阅的客户端看到新的说明。
+/// 规格 user story H-12：状态保持不可达而原因变化时，已订阅的客户端看到新的说明。
 ///
 /// 这条路径只在健康检查失败时出现：任何通过的尝试都会先把状态置为 ok，
 /// 状态一变就会广播，因此只有两次相邻的 unreachable 才需要靠说明区分。
@@ -119,7 +119,7 @@ async fn demotes_node_when_stream_headers_never_arrive() {
     );
 }
 
-/// 规格 user story 3：hub 重启后上游从节点水位起订阅，不重播历史事实。
+/// ADR 0027：hub 重启后上游从节点水位起订阅，不重播历史事实。
 #[tokio::test]
 async fn restarts_upstream_from_node_watermark() {
     let harness = Harness::start_with_options(options()).await;
@@ -171,7 +171,7 @@ async fn demotes_node_when_upstream_stream_goes_idle() {
         .await;
 }
 
-/// 规格 user story 16：hub 落后于上游广播时只重连，不把节点当成不可达。
+/// ADR 0030：hub 落后于上游广播时只重连，不把节点当成不可达。
 ///
 /// 落后的游标不动，重连从最后消费的事实续传，因此回放之后事实齐全。
 #[tokio::test]

@@ -36,7 +36,7 @@ async fn register_workspace(harness: &Harness, node: &str, path: &str) {
         .expect("经 hub 注册 workspace");
 }
 
-/// 规格 user story 30：合并流的广播序号跨节点严格递增。
+/// 规格 user story H-30：合并流的广播序号跨节点严格递增。
 #[tokio::test]
 async fn broadcasts_ordered_hub_seq_across_nodes() {
     let harness = Harness::start().await;
@@ -65,7 +65,7 @@ async fn broadcasts_ordered_hub_seq_across_nodes() {
     assert_eq!(node_of(&second_event), "second");
 }
 
-/// 规格 user story 31：游标落在回放窗口内时回放缺失事件。
+/// 规格 user story H-31：游标落在回放窗口内时回放缺失事件。
 #[tokio::test]
 async fn replays_events_after_cursor_within_window() {
     let harness = Harness::start().await;
@@ -87,7 +87,7 @@ async fn replays_events_after_cursor_within_window() {
     );
 }
 
-/// 规格 user story 33：游标落在窗口外时返回 resync。
+/// 规格 user story H-33：游标落在窗口外时返回 resync。
 #[tokio::test]
 async fn resyncs_when_cursor_falls_outside_window() {
     let harness = Harness::start_with_options(hub::HubOptions {
@@ -113,7 +113,7 @@ async fn resyncs_when_cursor_falls_outside_window() {
     );
 }
 
-/// 规格 user story 34：游标超前于当前序号（例如 hub 重启后）时要求 resync。
+/// 规格 user story H-34：游标超前于当前序号（例如 hub 重启后）时要求 resync。
 #[tokio::test]
 async fn resyncs_when_cursor_is_ahead_of_hub() {
     let harness = Harness::start().await;
@@ -122,7 +122,7 @@ async fn resyncs_when_cursor_is_ahead_of_hub() {
     assert!(is_resync(&stream.next_event().await));
 }
 
-/// 规格 user story 1：快照进行中产生的事实不会漏掉。
+/// ADR 0029：快照进行中产生的事实不会漏掉。
 ///
 /// 水位必须在任何节点请求之前取：否则该事实既不在快照里，也不在游标之后。
 #[tokio::test]
@@ -192,7 +192,7 @@ fn node_of(event: &hub::HubStreamEvent) -> String {
     }
 }
 
-/// 规格 user story 3：重试提示随合并流到达，带节点名且不推进广播序号。
+/// ADR 0031：重试提示随合并流到达，带节点名且不推进广播序号。
 #[tokio::test]
 async fn forwards_retry_hint_without_advancing_cursor() {
     let harness = Harness::start().await;

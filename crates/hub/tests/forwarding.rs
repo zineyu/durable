@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use reqwest::StatusCode;
 use support::{AgentHandle, Harness, start_fake_agent};
 
-/// 规格 user story 23：一次 bootstrap 取得全部节点的状态与元数据。
+/// 规格 user story H-23：一次 bootstrap 取得全部节点的状态与元数据。
 #[tokio::test]
 async fn merges_bootstrap_from_each_node() {
     let harness = Harness::start().await;
@@ -43,7 +43,7 @@ async fn merges_bootstrap_from_each_node() {
     assert_eq!(harness.bootstrap().await.nodes.len(), 3);
 }
 
-/// 规格 user story 25：节点作用域命令只落在目标节点。
+/// 规格 user story H-25：节点作用域命令只落在目标节点。
 #[tokio::test]
 async fn forwards_node_scoped_requests_to_that_node_only() {
     let harness = Harness::start().await;
@@ -82,7 +82,7 @@ async fn forwards_node_scoped_requests_to_that_node_only() {
     assert_eq!(server.workspaces.len(), 0, "server 不应收到该请求");
 }
 
-/// 规格 user story 27：未知节点名返回显式错误。
+/// 规格 user story H-27：未知节点名返回显式错误。
 #[tokio::test]
 async fn rejects_unknown_node() {
     let harness = Harness::start().await;
@@ -95,7 +95,7 @@ async fn rejects_unknown_node() {
     assert_eq!(body.code, hub::HubErrorCode::UnknownNode);
 }
 
-/// 规格 user story 28：不可达节点的命令返回显式错误。
+/// 规格 user story H-28：不可达节点的命令返回显式错误。
 #[tokio::test]
 async fn rejects_commands_to_unreachable_node() {
     let harness = Harness::start().await;
@@ -112,7 +112,7 @@ async fn rejects_commands_to_unreachable_node() {
     assert_eq!(body.code, hub::HubErrorCode::NodeUnavailable);
 }
 
-/// 规格 user story 15：协议版本不匹配的节点状态为 incompatible，命令被拒绝。
+/// 规格 user story H-15：协议版本不匹配的节点状态为 incompatible，命令被拒绝。
 #[tokio::test]
 async fn marks_incompatible_agent_and_rejects_its_commands() {
     let harness = Harness::start().await;
@@ -142,7 +142,7 @@ fn required_agent_protocol_version_matches_agent() {
     );
 }
 
-/// 规格 user story 4：节点卡住时命令得到显式的 `node_unavailable`，而不是无限等待。
+/// ADR 0028：节点卡住时命令得到显式的 `node_unavailable`，而不是无限等待。
 #[tokio::test]
 async fn times_out_hung_command_with_node_unavailable() {
     let harness = Harness::start_with_options(hub::HubOptions {

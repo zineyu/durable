@@ -260,7 +260,7 @@ async fn restores_workspaces_sessions_and_titles_after_restart() {
     assert_eq!(tree.session, renamed);
 }
 
-/// 规格 user story 1：「以规范化绝对路径作为身份。重复注册返回显式错误。」
+/// 规格 user story A-1：「以规范化绝对路径作为身份。重复注册返回显式错误。」
 #[tokio::test]
 async fn treats_workspace_identity_as_canonical_path() {
     let harness = Harness::start().await;
@@ -350,7 +350,7 @@ async fn records_workspace_removal_as_fact_event() {
     );
 }
 
-/// 规格 user story 2：移除被拒绝后，删除该 workspace 的 session 即可移除。
+/// 规格 user story A-2：移除被拒绝后，删除该 workspace 的 session 即可移除。
 #[tokio::test]
 async fn removes_workspace_after_its_sessions_are_deleted() {
     let harness = Harness::start().await;
@@ -375,7 +375,7 @@ async fn removes_workspace_after_its_sessions_are_deleted() {
     assert!(bootstrap.sessions.is_empty());
 }
 
-/// 规格 user story 4 与 6：重命名更新标题与更新时间，并保持其余元数据。
+/// 规格 user story A-4 与 A-6：重命名更新标题与更新时间，并保持其余元数据。
 #[tokio::test]
 async fn rename_updates_updated_at_and_preserves_session_metadata() {
     let harness = Harness::start().await;
@@ -479,7 +479,7 @@ async fn deleting_session_does_not_touch_workspace() {
     assert!(directory.exists(), "删除 session 不得删除工作区目录");
 }
 
-/// 规格 user story 3：workspace 身份是规范化路径，任何拼写都解析到同一身份。
+/// 规格 user story A-3：workspace 身份是规范化路径，任何拼写都解析到同一身份。
 #[tokio::test]
 async fn resolves_workspace_path_spellings_for_session_creation() {
     let harness = Harness::start().await;
@@ -534,7 +534,7 @@ async fn rejects_unparsable_request_body_with_error_envelope() {
     );
 }
 
-/// 规格 user story 6：session 按最近更新时间排序。
+/// 规格 user story A-6：session 按最近更新时间排序。
 #[tokio::test]
 async fn orders_sessions_by_recent_update() {
     let harness = Harness::start().await;
@@ -705,7 +705,7 @@ async fn persists_fact_event_envelope_fields() {
     );
 }
 
-/// 规格 user story 3：workspace 身份是规范化路径，点段拼写也解析到同一身份。
+/// 规格 user story A-3：workspace 身份是规范化路径，点段拼写也解析到同一身份。
 #[tokio::test]
 async fn resolves_dot_segment_spellings_for_session_creation() {
     let harness = Harness::start().await;
@@ -833,7 +833,7 @@ async fn session_tree_reports_watermark_and_replays_events_after_it() {
     }
 }
 
-/// 规格 user story 1 与「持久化」：重复注册在重启后仍被拒绝，且不写事件。
+/// 规格 user story A-1 与「持久化」：重复注册在重启后仍被拒绝，且不写事件。
 #[tokio::test]
 async fn duplicate_workspace_registration_survives_restart() {
     let harness = Harness::start().await;

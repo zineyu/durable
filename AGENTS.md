@@ -118,7 +118,7 @@
 
 ## 契约一致性
 
-- 规格追溯：代码与测试里的 `规格 user story N` 必须对应 `docs/specs/*.md` 里存在的编号；未被引用的编号只打印清单，不阻断。脚本 `scripts/check-spec-links.sh`。
+- 规格追溯：代码与测试里的 `规格 user story A-16`（`crates/hub` 写 `H-16`）必须对应 `docs/specs/` 里存在的编号，且前缀与所在目录匹配；不属于规格的决定写 `ADR 00NN：…`。未被引用的编号只打印清单，不阻断。脚本 `scripts/check-spec-links.sh`。
 - 类型清单：`docs/api/types.md` 与 TS 类型同一来源、同一命令生成，`durable-test` 比对两者，见「生成物」。
 - 术语表：`docs/glossary.md` 里标识符形状的反引号术语必须能在 `crates/` 或 `client/` 里找到，否则视为过时。脚本 `scripts/check-glossary.sh`。
 

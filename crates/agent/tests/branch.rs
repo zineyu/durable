@@ -26,7 +26,7 @@ fn transcript_ids(tree: &agent::SessionTree) -> Vec<agent::MessageId> {
     ids
 }
 
-/// 规格 user story 16：编辑用户消息产生同父兄弟节点，active leaf 移到新分支并执行。
+/// 规格 user story A-16：编辑用户消息产生同父兄弟节点，active leaf 移到新分支并执行。
 #[tokio::test]
 async fn edits_user_message_into_sibling_branch() {
     let harness = Harness::start_with(
@@ -102,7 +102,7 @@ async fn edits_user_message_into_sibling_branch() {
     assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
 }
 
-/// 规格 user story 17：重试 assistant 在相同父节点下新建 run，不重复用户消息。
+/// 规格 user story A-17：重试 assistant 在相同父节点下新建 run，不重复用户消息。
 #[tokio::test]
 async fn retries_assistant_with_same_parent_without_new_user() {
     let harness = Harness::start_with(
@@ -151,7 +151,7 @@ async fn retries_assistant_with_same_parent_without_new_user() {
     assert_eq!(tree.runs.len(), 2);
 }
 
-/// 规格 user story 18：切换 active leaf 移到目标子树中最近创建的叶子。
+/// 规格 user story A-18：切换 active leaf 移到目标子树中最近创建的叶子。
 #[tokio::test]
 async fn switches_active_leaf_to_subtree_leaf() {
     let harness = Harness::start_with(
@@ -192,7 +192,7 @@ async fn switches_active_leaf_to_subtree_leaf() {
     assert_eq!(transcript_ids(&tree), vec![new_user, new_assistant]);
 }
 
-/// 规格 user story 18：目标子树有多个分支时选取创建最晚的叶子。
+/// 规格 user story A-18：目标子树有多个分支时选取创建最晚的叶子。
 #[tokio::test]
 async fn switches_to_most_recent_leaf_in_subtree() {
     let harness = Harness::start_with(
@@ -286,7 +286,7 @@ async fn records_active_leaf_change_and_survives_restart() {
     );
 }
 
-/// 规格 user story 19：run 进行中拒绝编辑、重试与切换，返回 `run_in_progress`。
+/// 规格 user story A-19：run 进行中拒绝编辑、重试与切换，返回 `run_in_progress`。
 #[tokio::test]
 async fn rejects_branch_commands_while_running() {
     let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
@@ -309,7 +309,7 @@ async fn rejects_branch_commands_while_running() {
     harness.wait_idle(&session.id).await;
 }
 
-/// 规格 user story 19：队列非空时拒绝分支命令，返回 `queue_not_empty`。
+/// 规格 user story A-19：队列非空时拒绝分支命令，返回 `queue_not_empty`。
 #[tokio::test]
 async fn rejects_branch_commands_with_pending_queue() {
     let harness = Harness::start_with(

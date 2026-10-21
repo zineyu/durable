@@ -5,7 +5,7 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use support::{AgentHandle, Harness};
 
-/// 规格 user story 26：节点作用域的 SSE 原样透传，上游发一段就转一段。
+/// 规格 user story H-26：节点作用域的 SSE 原样透传，上游发一段就转一段。
 #[tokio::test]
 async fn streams_node_events_without_buffering() {
     let harness = Harness::start().await;
