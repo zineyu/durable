@@ -1,0 +1,58 @@
+# 直接依赖白名单：<package> <crate> # 理由。
+#
+# 新增直接依赖时必须同时在此登记并写明理由；删除依赖后对应行必须删除。
+# 检查脚本：scripts/check-deps.sh（比对 cargo metadata 的直接依赖，含 dev 依赖）。
+
+agent async-stream # SSE 事件流用 generator 拼装
+agent async-trait # provider 与工具需要异步 trait 对象
+agent axum # HTTP 与 SSE 服务端
+agent clap # 命令行参数解析
+agent durable # 领域内核
+agent futures-util # 流适配与组合
+agent jiff # 时间戳
+agent libc # 终止工具子进程组，标准库没有该接口
+agent reqwest # 调用 OpenAI 兼容接口；测试内请求被测服务
+agent runtime # 平台标准目录与日志初始化
+agent serde # 协议结构序列化
+agent serde_json # JSON 编解码；测试内构造与解析响应
+agent sqlx # 测试内直连 SQLite 断言落库结果
+agent tempfile # 测试用临时目录与数据库文件
+agent tokio # 异步运行时
+agent tracing # 结构化日志
+agent ts-rs # 导出 TS 协议类型
+
+durable jiff # 时间戳
+durable serde # 协议结构序列化
+durable serde_json # JSON 编解码
+durable sqlx # SQLite 访问
+durable tempfile # 测试用临时目录与数据库文件
+durable thiserror # 领域错误类型
+durable tokio # 异步运行时；测试的宏与多线程调度
+durable tracing # 结构化日志
+durable ts-rs # 导出 TS 协议类型
+durable uuid # 标识符生成
+
+hub agent # hub 拉起并托管 agent 进程
+hub async-stream # 转发流用 generator 拼装
+hub axum # 静态资源与 API 反向代理服务端
+hub bytes # 测试内拼装响应体
+hub clap # 命令行参数解析
+hub durable # 领域内核
+hub futures-util # 流适配与组合
+hub mime_guess # 静态资源 MIME 推断
+hub reqwest # 把 /api/* 反向代理给 agent
+hub rust-embed # 编译期内嵌 client/dist
+hub runtime # 平台标准目录与日志初始化
+hub serde # 协议结构序列化
+hub serde_json # JSON 编解码
+hub tempfile # 测试用临时目录
+hub tokio # 异步运行时
+hub tracing # 结构化日志
+hub ts-rs # 导出 TS 协议类型
+
+runtime serde_json # 测试内解析 JSON Lines 日志
+runtime tempfile # 测试用临时日志目录
+runtime thiserror # 错误类型
+runtime tracing # 结构化日志
+runtime tracing-appender # 每日轮转的日志文件
+runtime tracing-subscriber # 日志过滤与格式化

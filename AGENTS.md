@@ -52,6 +52,13 @@
 
 `durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 hub 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
 
+## 规模与依赖预算
+
+- 源码预算：`crates/*/src` 下单个 Rust 文件 600 行，`client/src` 下单个 TS/TSX 文件 400 行（不含 `*.test.ts(x)` 与 `src/api/generated/`）。超限必须拆文件；存量欠账登记在 `scripts/source-budget.allow`，登记值只许变小。
+- 依赖白名单：每个包的直接依赖（含 dev 依赖）都登记在 `deps.allow`，新增依赖必须先写明理由。
+
+两条检查由 `scripts/check-source-budget.sh` 与 `scripts/check-deps.sh` 执行，已包含在 `durable-lint` 内。
+
 ## 日志与路径
 
 `--database` 与 `--log-dir` 可省略：省略时使用平台标准目录（见 `docs/adr/0026-logging-and-default-paths.md`）。日志同时写入标准错误（pretty 格式）与每日轮转的 JSON Lines 文件，保留 14 天。`DURABLE_LOG` 控制过滤，默认 `info`。测试必须传 `--log-dir`，避免写入用户的标准日志目录。

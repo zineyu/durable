@@ -7,6 +7,7 @@
     cargo-deny
     cargo-machete
     clippy
+    jq
     nodejs
     nixfmt
     rustc
