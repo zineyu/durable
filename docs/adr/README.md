@@ -36,3 +36,4 @@
 | [0030](0030-upstream-resync-is-reconnect-not-failure.md) | 上游 resync 只触发重连，不写节点状态 | 已接受。细化 ADR 0018 的 resync 语义与 ADR 0021 的节点状态机 | 上游 Resync 只结束订阅并按原游标重连，不写节点状态。 |
 | [0031](0031-provider-rate-limit-retry.md) | 供应商限流用独立失败类别并有限重试 | 已接受。细化 ADR 0014 的失败类别与 ADR 0018 的实时事件 | 新增 model_rate_limited 类别，在单次模型调用内有限重试，只发实时提示。 |
 | [0032](0032-strict-lint-gate.md) | 严格 lint 门禁 | 已接受 | durable-lint 统一跑十类检查，抑制须带理由且失效即报错。 |
+| [0033](0033-gate-second-layer-and-navigation.md) | 门禁第二层：规模、依赖、PR 自锁与仓库导航 | 已接受 | 门禁进版本库并分快慢两 lane，加规模与依赖预算、PR 自锁提醒和文档一致性检查。 |
