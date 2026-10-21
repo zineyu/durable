@@ -7,6 +7,8 @@ use durable::{NodeMetadata, NodeName, ResyncReason, SessionId, StreamEvent};
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use crate::HubOptions;
+use crate::node_probe;
 use crate::protocol::{HubStreamEvent, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION};
 
 /// 一个客户端订阅时得到的内容：可回放的事件、实时接收端，或一条 resync 指示。
@@ -198,11 +200,13 @@ pub struct NodeWatcher {
 }
 
 impl NodeWatcher {
-    pub fn start(bus: Arc<Bus>, node: NodeMetadata) -> Self {
-        let handle = tokio::spawn({
-            let client = reqwest::Client::new();
-            async move { watch_forever(bus, node, client).await }
-        });
+    pub fn start(
+        bus: Arc<Bus>,
+        node: NodeMetadata,
+        client: reqwest::Client,
+        options: HubOptions,
+    ) -> Self {
+        let handle = tokio::spawn(async move { watch_forever(bus, node, client, options).await });
         Self { handle }
     }
 }
@@ -213,13 +217,17 @@ impl Drop for NodeWatcher {
     }
 }
 
-async fn watch_forever(bus: Arc<Bus>, node: NodeMetadata, client: reqwest::Client) {
-    let base = node.url.trim_end_matches('/').to_owned();
-    let mut last_id = 0i64;
+async fn watch_forever(
+    bus: Arc<Bus>,
+    node: NodeMetadata,
+    client: reqwest::Client,
+    options: HubOptions,
+) {
+    let mut last_id: Option<i64> = None;
     let mut attempt = 0u32;
     loop {
         let was_ok = bus.view(&node.name).status == NodeStatus::Ok;
-        if let Err(failure) = run_stream(&bus, &client, &base, &node.name, &mut last_id).await {
+        if let Err(failure) = run_stream(&bus, &client, &node, &mut last_id, options).await {
             bus.set_view(
                 node.name.clone(),
                 NodeView {
@@ -228,13 +236,32 @@ async fn watch_forever(bus: Arc<Bus>, node: NodeMetadata, client: reqwest::Clien
                 },
             );
         }
-        attempt = if was_ok {
-            1
-        } else {
-            attempt.saturating_add(1).min(5)
-        };
-        tokio::time::sleep(Duration::from_secs(1u64 << attempt.min(5))).await;
+        attempt = if was_ok { 1 } else { attempt.saturating_add(1) };
+        tokio::time::sleep(backoff_delay(&node.name, attempt, options.backoff_base)).await;
     }
+}
+
+/// 重连退避：底数翻倍，抖动 ±20%，抖动之后仍不超过上限。
+///
+/// 抖动由 `(节点名, 尝试次数)` 决定：确定性让退避序列可被单测直接断言，
+/// 同时把同时重连的节点错开。上限取 `底数 × 8 ÷ 1.2`，所以抖动后最长等待为 `底数 × 8`。
+fn backoff_delay(node: &NodeName, attempt: u32, base: Duration) -> Duration {
+    let ceiling = base.mul_f64(8.0 / 1.2);
+    let exponent = attempt.saturating_sub(1).min(3);
+    let nominal = base.saturating_mul(1 << exponent).min(ceiling);
+    nominal.mul_f64(jitter(node, attempt))
+}
+
+/// 抖动系数，值域 `[0.8, 1.2]`。
+fn jitter(node: &NodeName, attempt: u32) -> f64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in node.as_str().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash ^= u64::from(attempt);
+    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    0.8 + 0.4 * (hash % 1001) as f64 / 1000.0
 }
 
 /// 探测或订阅失败。状态由失败本身决定，避免上层把它抹平成不可达。
@@ -262,13 +289,15 @@ impl Failure {
 async fn run_stream(
     bus: &Arc<Bus>,
     client: &reqwest::Client,
-    base: &str,
-    name: &NodeName,
-    last_id: &mut i64,
+    node: &NodeMetadata,
+    last_id: &mut Option<i64>,
+    options: HubOptions,
 ) -> Result<(), Failure> {
+    let base = node_probe::base_url(node);
+    let name = &node.name;
     let health = client
         .get(format!("{base}/api/health"))
-        .timeout(Duration::from_secs(5))
+        .timeout(options.connect_timeout)
         .send()
         .await
         .map_err(|error| Failure::unreachable(format!("连接节点失败: {error}")))?;
@@ -290,11 +319,29 @@ async fn run_stream(
         },
     );
 
-    let response = client
-        .get(format!("{base}/api/events?after={last_id}"))
-        .send()
-        .await
-        .map_err(|error| Failure::unreachable(format!("订阅事件流失败: {error}")))?;
+    // 水位探测失败必须降级，不能退回 after=0 继续订阅：那会把节点的全部历史重新灌进
+    // 合并流，正是本决策要消除的行为（ADR 0027）。拿不到水位就意味着拿不到该节点的快照，
+    // 此时让它保持不可达，比让客户端收到一份没有快照支撑的事实流更诚实。
+    let after = match *last_id {
+        Some(id) => id,
+        None => {
+            let bootstrap = node_probe::fetch_bootstrap(client, node, options.connect_timeout)
+                .await
+                .map_err(|detail| Failure::unreachable(format!("读取节点水位失败: {detail}")))?;
+            *last_id = Some(bootstrap.max_event_id);
+            bootstrap.max_event_id
+        }
+    };
+    // 只给「等响应头」加时限。请求级 timeout 会覆盖到响应体读完，从而杀死整条常驻事件流。
+    let response = tokio::time::timeout(
+        options.connect_timeout,
+        client
+            .get(format!("{base}/api/events?after={after}"))
+            .send(),
+    )
+    .await
+    .map_err(|_| Failure::unreachable("等待事件流响应超时"))?
+    .map_err(|error| Failure::unreachable(format!("订阅事件流失败: {error}")))?;
     if !response.status().is_success() {
         return Err(Failure::unreachable(format!(
             "事件流返回 {}",
@@ -305,12 +352,13 @@ async fn run_stream(
     let mut buffer: Vec<u8> = Vec::new();
     loop {
         use futures_util::StreamExt;
-        let chunk = match stream.next().await {
-            Some(Ok(chunk)) => chunk,
-            Some(Err(error)) => {
+        let chunk = match tokio::time::timeout(options.stream_idle_timeout, stream.next()).await {
+            Err(_) => return Err(Failure::unreachable("事件流空闲超时")),
+            Ok(Some(Ok(chunk))) => chunk,
+            Ok(Some(Err(error))) => {
                 return Err(Failure::unreachable(format!("读取事件流失败: {error}")));
             }
-            None => return Err(Failure::unreachable("事件流结束")),
+            Ok(None) => return Err(Failure::unreachable("事件流结束")),
         };
         buffer.extend_from_slice(&chunk);
         while let Some(end) = buffer.windows(2).position(|window| window == b"\n\n") {
@@ -330,7 +378,7 @@ async fn run_stream(
                         timestamp,
                         event,
                     } => {
-                        *last_id = id;
+                        *last_id = Some(id);
                         bus.node_fact(name.clone(), id, session_id, timestamp, event);
                     }
                     StreamEvent::Delta {
@@ -361,6 +409,53 @@ mod tests {
             status,
             detail: Some(detail.to_owned()),
         }
+    }
+
+    /// 退避序列：底数翻倍、抖动 ±20%、抖动之后仍不超过上限。
+    #[test]
+    fn backoff_delay_stays_within_jittered_bounds() {
+        let base = Duration::from_millis(100);
+        let ceiling = 800.0;
+        for index in 0..64 {
+            let node = name(&format!("node-{index}"));
+            for attempt in 1..=10 {
+                let elapsed = backoff_delay(&node, attempt, base).as_secs_f64() * 1000.0;
+                let nominal = match attempt {
+                    1 => 100.0,
+                    2 => 200.0,
+                    3 => 400.0,
+                    _ => ceiling / 1.2,
+                };
+                assert!(
+                    elapsed <= ceiling + 0.001,
+                    "node-{index} 第 {attempt} 次退避 {elapsed} 毫秒超过上限"
+                );
+                assert!(
+                    elapsed >= nominal * 0.8 - 0.001 && elapsed <= nominal * 1.2 + 0.001,
+                    "node-{index} 第 {attempt} 次退避 {elapsed} 毫秒超出抖动区间"
+                );
+            }
+        }
+    }
+
+    /// 抖动把同时重连的节点错开。
+    #[test]
+    fn jitter_differs_between_nodes() {
+        let base = Duration::from_secs(1);
+        assert_ne!(
+            backoff_delay(&name("laptop"), 4, base),
+            backoff_delay(&name("server"), 4, base)
+        );
+    }
+
+    /// 同一节点同一尝试次数总是同一个等待，因此可以被断言。
+    #[test]
+    fn backoff_delay_is_deterministic() {
+        let base = Duration::from_millis(100);
+        assert_eq!(
+            backoff_delay(&name("laptop"), 3, base),
+            backoff_delay(&name("laptop"), 3, base)
+        );
     }
 
     /// 状态说明变化也广播；连续相同的组合不发。
