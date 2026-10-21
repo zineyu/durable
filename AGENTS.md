@@ -69,8 +69,8 @@
 | SSE 事件载荷 | `crates/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
 | 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `change.rs` |
 | 新的 LLM 工具 | `crates/agent/src/tools/` 新文件，并在 `tools/mod.rs` 的 `ToolBox` 实现里登记 `definitions()` 与 `execute()` |
-| 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite.rs` |
-| hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus.rs` |
+| 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
+| hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus/watch.rs` |
 | 协议类型与 TS 生成 | `crates/agent/src/lib.rs`、`crates/hub/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
 | 客户端状态推导 | `client/src/view/reducer.ts` 与 `node-state.ts` |
 | 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
