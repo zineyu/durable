@@ -46,7 +46,7 @@
 | 模块 | 职责 |
 | --- | --- |
 | `api.rs` | HTTP 路由与处理器 |
-| `engine.rs` | run 引擎：session 内串行、流式落库、工具循环、限流重试与取消 |
+| `engine/` | run 引擎：`mod.rs` 执行循环与收尾、`step.rs` 模型流与重试、`tools.rs` 工具循环、`prompt.rs` 请求装配 |
 | `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
 | `tools/` | 工具注册表与四个工具；`paths.rs` 管 workspace 边界 |
 | `sse.rs` | 单一全局事件流：回放、实时与 resync |

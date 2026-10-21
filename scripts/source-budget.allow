@@ -5,7 +5,6 @@
 # 缩短后必须把 <max> 改小；回到默认上限以内则整行删除。
 # 检查脚本：scripts/check-source-budget.sh。
 
-crates/agent/src/engine.rs 663
 crates/hub/src/bus.rs 705
 client/src/App.tsx 811
 client/src/view/node-state.ts 446
