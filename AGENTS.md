@@ -59,6 +59,8 @@
 
 两条检查由 `scripts/check-source-budget.sh` 与 `scripts/check-deps.sh` 执行，已包含在 `durable-lint` 内。
 
+门禁本身不写在检查脚本里：`.github/workflows/gate-watch.yml` 在 PR 上比对门禁文件与 `.github/` 的改动，命中时评论提醒审查者，不阻断合并。
+
 ## 日志与路径
 
 `--database` 与 `--log-dir` 可省略：省略时使用平台标准目录（见 `docs/adr/0026-logging-and-default-paths.md`）。日志同时写入标准错误（pretty 格式）与每日轮转的 JSON Lines 文件，保留 14 天。`DURABLE_LOG` 控制过滤，默认 `info`。测试必须传 `--log-dir`，避免写入用户的标准日志目录。

@@ -1,0 +1,105 @@
+name: Gate watch
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: 收集改动的门禁文件
+        id: gate
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          base="origin/${BASE_REF}"
+          paths=(
+            .github
+            client/eslint.config.js
+            client/stylelint.config.mjs
+            client/tsconfig.json
+            clippy.toml
+            deny.toml
+            rustfmt.toml
+            scripts/lint-fast.sh
+            scripts/lint.sh
+            "scripts/check-*.sh"
+          )
+          git diff --name-only "${base}...HEAD" -- "${paths[@]}" > changed.txt
+
+          extract_lints() {
+            awk '/^\[workspace\.lints/ { inside = 1 } /^\[/ && !/^\[workspace\.lints/ { inside = 0 } inside'
+          }
+          git show "${base}:Cargo.toml" | extract_lints > base-lints.txt
+          extract_lints < Cargo.toml > head-lints.txt
+          if ! diff -q base-lints.txt head-lints.txt > /dev/null; then
+            printf 'Cargo.toml（[workspace.lints] 段）\n' >> changed.txt
+          fi
+
+          sort -u -o changed.txt changed.txt
+          if [ -s changed.txt ]; then
+            {
+              echo 'changed=true'
+              echo 'files<<FILES'
+              cat changed.txt
+              echo 'FILES'
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 评论提醒审查者
+        uses: actions/github-script@v8
+        env:
+          CHANGED: ${{ steps.gate.outputs.changed }}
+          FILES: ${{ steps.gate.outputs.files }}
+        with:
+          script: |
+            const marker = '<!-- gate-watch -->'
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const { data: comments } = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            })
+            const existing = comments.find((comment) => comment.body?.includes(marker))
+
+            if (process.env.CHANGED !== 'true') {
+              if (existing) {
+                await github.rest.issues.deleteComment({ owner, repo, comment_id: existing.id })
+              }
+              return
+            }
+
+            const body = [
+              marker,
+              '本 PR 修改了门禁、lint 配置或 `.github/`，请审查者逐条确认这些改动是有意为之：',
+              '',
+              (process.env.FILES ?? '')
+                .split('\n')
+                .filter((file) => file !== '')
+                .map((file) => `- \`${file}\``)
+                .join('\n'),
+              '',
+              '门禁只能收紧，不能放松。放宽任何检查必须在 ADR 里写明理由。',
+            ].join('\n')
+
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body })
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body })
+            }
