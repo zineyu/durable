@@ -166,6 +166,54 @@ async fn demotes_node_when_upstream_stream_goes_idle() {
         .await;
 }
 
+/// 规格 user story 16：hub 落后于上游广播时只重连，不把节点当成不可达。
+///
+/// 落后的游标不动，重连从最后消费的事实续传，因此回放之后事实齐全。
+#[tokio::test]
+async fn resync_reconnects_without_marking_node_unreachable() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        // 客户端自己不能因为总线容量不足而收到 resync，否则本用例观察的就不是上游行为了。
+        broadcast_capacity: 4096,
+        replay_window: 4096,
+        ..options()
+    })
+    .await;
+    let node = ScriptedNode::start_with_fact_capacity(1).await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    let cursor = harness.bootstrap().await.max_hub_seq;
+    let mut stream = EventStream::connect(&harness, cursor).await;
+
+    let total = 200;
+    for id in 1..=total {
+        node.publish_fact(id, fact());
+    }
+
+    let mut seen = Vec::new();
+    while seen.last().copied() != Some(total) {
+        let event = stream.next_event().await;
+        assert!(
+            !matches!(event, hub::HubStreamEvent::NodeStatusChanged { .. }),
+            "上游 resync 不得改变节点状态: {event:?}"
+        );
+        if let hub::HubStreamEvent::Fact { id, .. } = event {
+            seen.push(id);
+        }
+    }
+    assert_eq!(
+        seen,
+        (1..=total).collect::<Vec<_>>(),
+        "重连必须从最后消费的事实续传，补齐落后期间的事实"
+    );
+    assert_eq!(
+        harness.snapshot("laptop").await.status,
+        hub::NodeStatus::Ok,
+        "resync 之后节点仍是可用"
+    );
+}
+
 /// 退避使用注入的底数：卡住的节点在一秒内多次重连，不会退到几十秒。
 #[tokio::test]
 async fn reconnects_quickly_with_small_backoff_base() {

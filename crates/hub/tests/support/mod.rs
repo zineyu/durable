@@ -308,7 +308,8 @@ impl EventStream {
 ///
 /// - `/api/health` 永远报协议版本一致。
 /// - `/api/bootstrap` 可由闸门挂起，`maxEventId` 是测试设定的水位。
-/// - `/api/events` 记录收到的 `after`，按脚本推送事实，也可置为失败或立即结束。
+/// - `/api/events` 记录收到的 `after`，先回放该游标之后的事实，再接实时推送；
+///   广播落后时像 `agent` 一样发一条 `resync` 并结束该流。
 /// - 其余路径永不响应，用于覆盖命令转发超时。
 pub mod scripted {
     use std::convert::Infallible;
@@ -322,6 +323,7 @@ pub mod scripted {
     use axum::response::{IntoResponse, Response};
     use axum::routing::get;
     use axum::{Json, Router};
+    use futures_util::StreamExt;
     use tokio::sync::{Notify, broadcast, oneshot};
 
     /// 事件流的行为。
@@ -345,7 +347,8 @@ pub mod scripted {
         watermark: AtomicI64,
         mode: Mutex<EventsMode>,
         after: Mutex<Vec<Option<i64>>>,
-        facts: broadcast::Sender<String>,
+        facts: broadcast::Sender<durable::StreamEvent>,
+        published: Mutex<Vec<durable::StreamEvent>>,
         health_body: Mutex<Option<String>>,
         bootstrap_stall: AtomicBool,
         bootstrap_wait: Mutex<Option<oneshot::Receiver<()>>>,
@@ -362,11 +365,20 @@ pub mod scripted {
 
     impl ScriptedNode {
         pub async fn start() -> Self {
+            Self::start_with_fact_capacity(64).await
+        }
+
+        /// 用指定的广播容量启动。
+        ///
+        /// 容量小于一次推送的事实数时，hub 的订阅会收到 `Lagged`，从而模拟
+        /// 「hub 落后于 agent 的内存广播」这一真实场景。
+        pub async fn start_with_fact_capacity(capacity: usize) -> Self {
             let inner = Arc::new(Inner {
                 watermark: AtomicI64::new(0),
                 mode: Mutex::new(EventsMode::Scripted),
                 after: Mutex::new(Vec::new()),
-                facts: broadcast::channel(64).0,
+                facts: broadcast::channel(capacity).0,
+                published: Mutex::new(Vec::new()),
                 health_body: Mutex::new(None),
                 bootstrap_stall: AtomicBool::new(false),
                 bootstrap_wait: Mutex::new(None),
@@ -491,17 +503,25 @@ pub mod scripted {
 
         /// 向上游推送一条事实。
         pub fn publish_fact(&self, id: i64, event: durable::FactEvent) {
-            let frame = durable::StreamEvent::Fact {
+            self.publish(durable::StreamEvent::Fact {
                 id,
                 session_id: None,
                 timestamp: id,
                 event,
-            };
-            let payload = serde_json::to_string(&frame).expect("序列化事实");
+            });
+        }
+
+        /// 推送一个事件，并记入回放历史。
+        fn publish(&self, event: durable::StreamEvent) {
+            self.inner
+                .published
+                .lock()
+                .expect("回放历史锁")
+                .push(event.clone());
             self.inner
                 .facts
-                .send(payload)
-                .expect("推送事实需要上游事件流已订阅");
+                .send(event)
+                .expect("推送事件需要上游事件流已订阅");
         }
 
         /// 挂起下一次 bootstrap 响应，直到 `release_bootstrap`。
@@ -577,28 +597,68 @@ pub mod scripted {
             .expect("构造卡住的响应")
     }
 
+    /// 事件携带的事实 id。增量与 resync 没有 id。
+    fn event_id(event: &durable::StreamEvent) -> Option<i64> {
+        match event {
+            durable::StreamEvent::Fact { id, .. } => Some(*id),
+            durable::StreamEvent::Delta { .. } | durable::StreamEvent::Resync { .. } => None,
+        }
+    }
+
+    fn frame(event: &durable::StreamEvent) -> Event {
+        Event::default().data(serde_json::to_string(event).expect("序列化事件"))
+    }
+
     async fn events(inner: Arc<Inner>, query: EventsQuery) -> Response {
         if *inner.mode.lock().expect("模式锁") == EventsMode::Stall {
             std::future::pending::<()>().await;
         }
         let mut receiver = inner.facts.subscribe();
         inner.after.lock().expect("after 锁").push(query.after);
+        let after = query.after.unwrap_or(0);
+        let replayed: Vec<durable::StreamEvent> = inner
+            .published
+            .lock()
+            .expect("回放历史锁")
+            .iter()
+            .filter(|event| event_id(event).is_some_and(|id| id > after))
+            .cloned()
+            .collect();
+        let replayed_max = replayed.iter().filter_map(event_id).max();
         match *inner.mode.lock().expect("模式锁") {
             EventsMode::End => {
                 Sse::new(futures_util::stream::empty::<Result<Event, Infallible>>()).into_response()
             }
             EventsMode::Stall => (StatusCode::SERVICE_UNAVAILABLE, "已停止响应").into_response(),
             EventsMode::Scripted => {
-                let stream = async_stream::stream! {
+                let replay = futures_util::stream::iter(
+                    replayed
+                        .into_iter()
+                        .map(|event| Ok::<Event, Infallible>(frame(&event))),
+                );
+                let live = async_stream::stream! {
                     loop {
                         match receiver.recv().await {
-                            Ok(payload) => yield Ok::<Event, Infallible>(Event::default().data(payload)),
-                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Ok(event) => {
+                                let covered = replayed_max
+                                    .zip(event_id(&event))
+                                    .is_some_and(|(max, id)| id <= max);
+                                if covered {
+                                    continue;
+                                }
+                                yield Ok::<Event, Infallible>(frame(&event));
+                            }
+                            Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                                yield Ok::<Event, Infallible>(frame(&durable::StreamEvent::Resync {
+                                    reason: durable::ResyncReason::Lagged { skipped },
+                                }));
+                                return;
+                            }
                             Err(broadcast::error::RecvError::Closed) => return,
                         }
                     }
                 };
-                Sse::new(stream).into_response()
+                Sse::new(replay.chain(live)).into_response()
             }
         }
     }

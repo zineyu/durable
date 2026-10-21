@@ -1,4 +1,5 @@
 use std::collections::{HashMap, VecDeque};
+use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -227,17 +228,35 @@ async fn watch_forever(
     let mut attempt = 0u32;
     loop {
         let was_ok = bus.view(&node.name).status == NodeStatus::Ok;
-        if let Err(failure) = run_stream(&bus, &client, &node, &mut last_id, options).await {
+        let end = match run_stream(&bus, &client, &node, &mut last_id, options).await {
+            Ok(never) => match never {},
+            Err(end) => end,
+        };
+        if let StreamEnd::Failure(failure) = &end {
             bus.set_view(
                 node.name.clone(),
                 NodeView {
                     status: failure.status,
-                    detail: Some(failure.detail),
+                    detail: Some(failure.detail.clone()),
                 },
             );
         }
-        attempt = if was_ok { 1 } else { attempt.saturating_add(1) };
+        if let StreamEnd::Resync(reason) = &end {
+            tracing::debug!(node = %node.name, ?reason, "上游要求重连");
+        }
+        attempt = next_attempt(&end, was_ok, attempt);
         tokio::time::sleep(backoff_delay(&node.name, attempt, options.backoff_base)).await;
+    }
+}
+
+/// 下一次重连的退避序号。
+///
+/// 失败按次数累加；刚恢复过的节点从第一次重来；上游要求 resync 不算失败，也因此回到最短等待。
+fn next_attempt(end: &StreamEnd, was_ok: bool, attempt: u32) -> u32 {
+    match end {
+        StreamEnd::Failure(_) if was_ok => 1,
+        StreamEnd::Failure(_) => attempt.saturating_add(1),
+        StreamEnd::Resync(_) => 1,
     }
 }
 
@@ -263,6 +282,27 @@ fn jitter(node: &NodeName, attempt: u32) -> f64 {
     hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     0.8 + 0.4 * (hash % 1001) as f64 / 1000.0
 }
+
+/// 一次上游订阅的结束原因。
+///
+/// `Failure` 写节点状态；`Resync` 只触发重连。节点要求 resync 时仍然健康，只是 hub 落后于
+/// agent 的内存广播容量。把它当成失败会短暂禁用该节点的全部命令，并让真正的不可达原因与
+/// 「hub 落后」混在同一条说明里（ADR 0030）。
+///
+/// `Resync` 不动 `last_id`：下一次订阅从最后消费的事实续传，agent 从 SQLite 补齐（ADR 0027）。
+enum StreamEnd {
+    Failure(Failure),
+    Resync(ResyncReason),
+}
+
+impl From<Failure> for StreamEnd {
+    fn from(failure: Failure) -> Self {
+        Self::Failure(failure)
+    }
+}
+
+/// 上游订阅只以错误结束：上游关闭事件流也按一次失败处理。
+type StreamResult = Result<Infallible, StreamEnd>;
 
 /// 探测或订阅失败。状态由失败本身决定，避免上层把它抹平成不可达。
 struct Failure {
@@ -292,7 +332,7 @@ async fn run_stream(
     node: &NodeMetadata,
     last_id: &mut Option<i64>,
     options: HubOptions,
-) -> Result<(), Failure> {
+) -> StreamResult {
     let base = node_probe::base_url(node);
     let name = &node.name;
     let health = client
@@ -306,10 +346,10 @@ async fn run_stream(
         .await
         .map_err(|error| Failure::unreachable(format!("health 响应无法解析: {error}")))?;
     if health.protocol_version != REQUIRED_AGENT_PROTOCOL_VERSION {
-        return Err(Failure::incompatible(format!(
+        return Err(StreamEnd::from(Failure::incompatible(format!(
             "agent 协议版本 {} 与 hub 要求的 {} 不一致",
             health.protocol_version, REQUIRED_AGENT_PROTOCOL_VERSION
-        )));
+        ))));
     }
     bus.set_view(
         name.clone(),
@@ -343,22 +383,22 @@ async fn run_stream(
     .map_err(|_| Failure::unreachable("等待事件流响应超时"))?
     .map_err(|error| Failure::unreachable(format!("订阅事件流失败: {error}")))?;
     if !response.status().is_success() {
-        return Err(Failure::unreachable(format!(
+        return Err(StreamEnd::from(Failure::unreachable(format!(
             "事件流返回 {}",
             response.status()
-        )));
+        ))));
     }
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
     loop {
         use futures_util::StreamExt;
         let chunk = match tokio::time::timeout(options.stream_idle_timeout, stream.next()).await {
-            Err(_) => return Err(Failure::unreachable("事件流空闲超时")),
+            Err(_) => return Err(Failure::unreachable("事件流空闲超时").into()),
             Ok(Some(Ok(chunk))) => chunk,
             Ok(Some(Err(error))) => {
-                return Err(Failure::unreachable(format!("读取事件流失败: {error}")));
+                return Err(Failure::unreachable(format!("读取事件流失败: {error}")).into());
             }
-            Ok(None) => return Err(Failure::unreachable("事件流结束")),
+            Ok(None) => return Err(Failure::unreachable("事件流结束").into()),
         };
         buffer.extend_from_slice(&chunk);
         while let Some(end) = buffer.windows(2).position(|window| window == b"\n\n") {
@@ -387,8 +427,8 @@ async fn run_stream(
                         text,
                         timestamp,
                     } => bus.delta(name.clone(), session_id, message_id, text, timestamp),
-                    StreamEvent::Resync { .. } => {
-                        return Err(Failure::unreachable("上游要求 resync"));
+                    StreamEvent::Resync { reason } => {
+                        return Err(StreamEnd::Resync(reason));
                     }
                 }
             }
@@ -455,6 +495,28 @@ mod tests {
         assert_eq!(
             backoff_delay(&name("laptop"), 3, base),
             backoff_delay(&name("laptop"), 3, base)
+        );
+    }
+
+    /// 上游要求 resync 不是失败：重连走最短等待，不按失败次数翻倍。
+    #[test]
+    fn resync_restarts_backoff_at_shortest_wait() {
+        let base = Duration::from_millis(100);
+        let laptop = name("laptop");
+        let resync = StreamEnd::Resync(ResyncReason::Lagged { skipped: 3 });
+        let failure = StreamEnd::Failure(Failure::unreachable("读取事件流失败"));
+
+        let after_resync = next_attempt(&resync, false, 5);
+        assert_eq!(
+            backoff_delay(&laptop, after_resync, base),
+            backoff_delay(&laptop, 1, base),
+            "resync 后的等待必须与第一次重连相同"
+        );
+        assert_eq!(next_attempt(&failure, false, 5), 6, "持续失败才累加");
+        assert_eq!(
+            next_attempt(&failure, true, 5),
+            1,
+            "刚恢复过的节点从第一次重来"
         );
     }
 
