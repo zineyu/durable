@@ -25,12 +25,24 @@
 | 命令 | 作用 |
 | --- | --- |
 | `devenv shell -- durable-build` | 先构建 client，再构建 Rust workspace |
-| `devenv shell -- durable-test` | 提交前的全部检查 |
+| `devenv shell -- durable-lint` | 全部静态检查，不含测试 |
+| `devenv shell -- durable-test` | 提交前的全部检查：lint 与测试 |
 | `devenv shell -- durable-e2e` | 端到端测试：构建后由 Playwright 驱动真实 agent、hub 与浏览器 |
 | `devenv shell -- durable-typegen` | 重新生成 TS 协议类型 |
 | `devenv shell -- storybook` | Storybook 开发服务器 |
 
-`durable-test` 依次执行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`cargo test --workspace`、TS 类型一致性、ESLint、`tsc --noEmit`、Vitest。提交前必须全部通过。
+`durable-test` 先跑 `durable-lint`，再跑 `cargo test --workspace`、Vitest 与 TS 类型一致性比对。提交前必须全部通过。
+
+`durable-lint` 依次执行 `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --lib --document-private-items`、`cargo machete`、`cargo deny check`、`typos`、`taplo fmt --check`、`actionlint`、`nixfmt --check devenv.nix`、ESLint（`--max-warnings=0`）、stylelint、`tsc --noEmit`。规则与理由见 `docs/adr/0032-strict-lint-gate.md`。
+
+## 检查门禁
+
+所有告警与错误都阻断。代码里不允许出现抑制：
+
+- Rust 用 `#[expect(<lint>, reason = "…")]`，不用 `#[allow]`。`#[expect]` 在不触发时自身报错，因此过时抑制会被发现。
+- 生产代码（`crates/*/src/`）不出现 `#[expect]`。环境所限的最小例外已在 ADR-0032 列出。
+- 测试脚手架在文件头用一条 `#![expect(…, reason = "…")]`，不逐行散放。
+- TS 侧 `reportUnusedDisableDirectives` 为错误；新代码不应需要 `eslint-disable`。
 
 `durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 hub 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
 
@@ -51,6 +63,7 @@
 - 组件只消费 `client/src/styles/tokens.css` 的语义 token，不写颜色字面量与硬编码长度。
 - 页面不含注释性说明。
 - 组件样式由确定性检查与截图脚本断言：见 `docs/adr/0010-client-style-verification.md`。
+- ESLint 开启类型感知严格集：禁止 `any`、非空断言与未处理联合分支。
 
 ## 工作区噪声
 

@@ -10,7 +10,8 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 | --- | --- |
 | `npm run dev` | Vite 开发服务器，`/api` 代理到 `127.0.0.1:8080`（`hub`） |
 | `npm run build` | 构建到 `client/dist` |
-| `npm run lint` | ESLint |
+| `npm run lint` | ESLint（类型感知严格集，`--max-warnings=0`） |
+| `npm run lint:css` | stylelint（语法、废弃关键字、颜色字面量） |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run test` | Vitest（reducer、工具卡片、设计 token 与交互状态检查） |
 | `npm run test:e2e` | Playwright 端到端测试（真实 agent、hub 与浏览器） |
