@@ -1,6 +1,6 @@
 mod support;
 
-use support::Harness;
+use support::harness::Harness;
 
 /// 规格「进程与部署」：hub 托管内嵌的客户端资源。
 #[tokio::test]

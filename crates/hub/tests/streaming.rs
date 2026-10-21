@@ -3,7 +3,7 @@ mod support;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use support::{AgentHandle, Harness};
+use support::harness::{AgentHandle, Harness};
 
 /// 规格 user story H-26：节点作用域的 SSE 原样透传，上游发一段就转一段。
 #[tokio::test]

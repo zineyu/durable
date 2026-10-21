@@ -7,8 +7,11 @@ mod support;
 
 use std::time::Duration;
 
-use support::scripted::{EventsMode, ScriptedNode, fact, wait_for_after, wait_for_upstream};
-use support::{EventStream, Harness};
+use support::fixtures::EventStream;
+use support::fixtures::scripted::{
+    EventsMode, ScriptedNode, fact, wait_for_after, wait_for_upstream,
+};
+use support::harness::Harness;
 
 fn options() -> hub::HubOptions {
     hub::HubOptions {

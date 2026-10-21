@@ -3,7 +3,8 @@ mod support;
 use std::time::{Duration, Instant};
 
 use reqwest::StatusCode;
-use support::{AgentHandle, Harness, start_fake_agent};
+use support::fixtures::start_fake_agent;
+use support::harness::{AgentHandle, Harness};
 
 /// 规格 user story H-23：一次 bootstrap 取得全部节点的状态与元数据。
 #[tokio::test]
@@ -153,7 +154,7 @@ async fn times_out_hung_command_with_node_unavailable() {
         ..hub::HubOptions::default()
     })
     .await;
-    let node = support::scripted::ScriptedNode::start().await;
+    let node = support::fixtures::scripted::ScriptedNode::start().await;
     harness.register_node("laptop", &node.url).await;
     harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
 
@@ -188,7 +189,7 @@ async fn forwards_event_stream_beyond_command_timeout() {
         ..hub::HubOptions::default()
     })
     .await;
-    let node = support::scripted::ScriptedNode::start().await;
+    let node = support::fixtures::scripted::ScriptedNode::start().await;
     harness.register_node("laptop", &node.url).await;
     harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
 
@@ -205,7 +206,7 @@ async fn forwards_event_stream_beyond_command_timeout() {
     let mut received = String::new();
 
     for id in 0..4 {
-        node.publish_fact(id, support::scripted::fact());
+        node.publish_fact(id, support::fixtures::scripted::fact());
         while !received.contains(&format!("id\":{id}")) {
             let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
                 .await
@@ -240,7 +241,7 @@ async fn times_out_command_with_stalled_body() {
         ..hub::HubOptions::default()
     })
     .await;
-    let node = support::scripted::ScriptedNode::start().await;
+    let node = support::fixtures::scripted::ScriptedNode::start().await;
     harness.register_node("laptop", &node.url).await;
     harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
 

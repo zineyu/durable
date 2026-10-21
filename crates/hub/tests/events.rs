@@ -6,8 +6,9 @@
 
 mod support;
 
-use support::scripted::{ScriptedNode, fact, wait_for_upstream};
-use support::{AgentHandle, EventStream, Harness};
+use support::fixtures::EventStream;
+use support::fixtures::scripted::{ScriptedNode, fact, wait_for_upstream};
+use support::harness::{AgentHandle, Harness};
 
 fn is_fact(event: &hub::HubStreamEvent) -> bool {
     matches!(event, hub::HubStreamEvent::Fact { .. })

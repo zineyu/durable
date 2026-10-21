@@ -6,7 +6,7 @@
 mod support;
 
 use reqwest::StatusCode;
-use support::{AgentHandle, Harness};
+use support::harness::{AgentHandle, Harness};
 
 async fn error_code(response: reqwest::Response) -> hub::HubErrorCode {
     let body: hub::HubErrorResponse = response.json().await.expect("解析错误响应");
@@ -161,7 +161,7 @@ async fn broadcasts_rename_as_remove_and_register() {
         .register_node("laptop", "http://127.0.0.1:18081")
         .await;
     let cursor = harness.bootstrap().await.max_hub_seq;
-    let mut stream = support::EventStream::connect(&harness, cursor).await;
+    let mut stream = support::fixtures::EventStream::connect(&harness, cursor).await;
 
     let response = harness.rename_node("laptop", "studio").await;
     assert_eq!(response.status(), StatusCode::OK);
