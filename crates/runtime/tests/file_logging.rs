@@ -1,3 +1,5 @@
+#![expect(clippy::expect_used, reason = "日志夹具失败必须立刻指向具体位置。")]
+
 use std::path::PathBuf;
 
 use runtime::logging::{LogConfig, with_logs};
@@ -7,11 +9,8 @@ fn log_file(directory: &std::path::Path) -> PathBuf {
         .expect("读取日志目录")
         .map(|entry| entry.expect("读取日志项").path())
         .find(|path| {
-            let name = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("");
-            name.ends_with(".log")
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("log"))
         })
         .expect("日志文件已建立")
 }

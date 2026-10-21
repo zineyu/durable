@@ -40,6 +40,7 @@ impl LogConfig {
 }
 
 /// 读取日志过滤器；未设置或为空白时使用 [`DEFAULT_FILTER`]。
+#[must_use]
 pub fn filter_from_env() -> String {
     filter_or_default(env::var(FILTER_ENV).ok())
 }
@@ -80,7 +81,11 @@ pub struct LogGuard {
 /// 标准错误在终端中带颜色，重定向时不带颜色。
 /// 过滤器无效时在标准错误给出警告，并回退到 [`DEFAULT_FILTER`]。
 ///
-/// 失败：日志目录或日志文件无法建立，或全局订阅者已安装。
+/// # Errors
+///
+/// - [`LogError::Directory`]：日志目录无法建立。
+/// - [`LogError::File`]：日志文件无法建立。
+/// - [`LogError::Install`]：全局订阅者已安装，无法再安装新的订阅者。
 pub fn init(config: &LogConfig) -> Result<LogGuard, LogError> {
     let (subscriber, guard) = build(config)?;
     tracing::subscriber::set_global_default(subscriber)
@@ -93,7 +98,12 @@ pub fn init(config: &LogConfig) -> Result<LogGuard, LogError> {
 /// 测试用它读取文件日志，因此多个用例可以在同一进程内并行运行。
 /// 返回时文件写入已刷新。
 ///
-/// 失败：与 [`init`] 相同，但不会因已有全局订阅者失败。
+/// # Errors
+///
+/// 不会因已有全局订阅者失败。
+///
+/// - [`LogError::Directory`]：日志目录无法建立。
+/// - [`LogError::File`]：日志文件无法建立。
 pub fn with_logs<T>(config: &LogConfig, body: impl FnOnce() -> T) -> Result<T, LogError> {
     let (subscriber, guard) = build(config)?;
     let output = tracing::subscriber::with_default(subscriber, body);
@@ -133,6 +143,10 @@ fn build(
 }
 
 /// 解析过滤器。无效指令回退到 [`DEFAULT_FILTER`]，并在标准错误说明。
+#[expect(
+    clippy::print_stderr,
+    reason = "过滤器在订阅者建立之前校验，此时日志不可用，只能写标准错误。"
+)]
 fn parse_filter(config: &LogConfig) -> EnvFilter {
     match EnvFilter::try_new(&config.filter) {
         Ok(filter) => filter,

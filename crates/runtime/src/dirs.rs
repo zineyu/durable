@@ -62,7 +62,11 @@ pub enum DirError {
 
 /// 按当前进程环境解析标准目录。
 ///
-/// 失败：所需的基础环境变量缺失。
+/// # Errors
+///
+/// - [`DirError::MissingHome`]：环境变量 `HOME` 未设置，且 Linux 下所需的 `XDG_DATA_HOME` 或
+///   `XDG_STATE_HOME` 同样未设置。
+/// - [`DirError::MissingLocalAppData`]：Windows 下环境变量 `LOCALAPPDATA` 与 `HOME` 均未设置。
 pub fn app_dirs() -> Result<AppDirs, DirError> {
     resolve(&Env::from_process())
 }
@@ -79,7 +83,13 @@ pub struct StartupPaths {
 /// `database_file` 是数据库在数据目录下的文件名。只在确有缺省项时读取进程环境，
 /// 因此同时给出两个路径时不需要基础环境变量。
 ///
-/// 失败：缺省项需要标准目录，而所需的基础环境变量缺失。
+/// # Errors
+///
+/// 仅当存在缺省项时才可能返回错误。
+///
+/// - [`DirError::MissingHome`]：环境变量 `HOME` 未设置，且 Linux 下所需的 `XDG_DATA_HOME` 或
+///   `XDG_STATE_HOME` 同样未设置。
+/// - [`DirError::MissingLocalAppData`]：Windows 下环境变量 `LOCALAPPDATA` 与 `HOME` 均未设置。
 pub fn startup_paths(
     database: Option<&Path>,
     log_directory: Option<&Path>,
@@ -104,6 +114,11 @@ pub fn startup_paths(
     })
 }
 
+/// 按 macOS 惯例解析标准目录。
+///
+/// # Errors
+///
+/// - [`DirError::MissingHome`]：环境变量 `HOME` 未设置。
 #[cfg(target_os = "macos")]
 pub fn resolve(env: &Env) -> Result<AppDirs, DirError> {
     let home = env.home.as_ref().ok_or(DirError::MissingHome)?;
@@ -116,6 +131,11 @@ pub fn resolve(env: &Env) -> Result<AppDirs, DirError> {
     })
 }
 
+/// 按 Windows 惯例解析标准目录。
+///
+/// # Errors
+///
+/// - [`DirError::MissingLocalAppData`]：环境变量 `LOCALAPPDATA` 与 `HOME` 均未设置。
 #[cfg(windows)]
 pub fn resolve(env: &Env) -> Result<AppDirs, DirError> {
     let base = match &env.local_app_data {
@@ -133,6 +153,11 @@ pub fn resolve(env: &Env) -> Result<AppDirs, DirError> {
     })
 }
 
+/// 按 XDG 基础目录规范解析标准目录。
+///
+/// # Errors
+///
+/// - [`DirError::MissingHome`]：`XDG_DATA_HOME` 或 `XDG_STATE_HOME` 未设置，且环境变量 `HOME` 同样未设置。
 #[cfg(not(any(target_os = "macos", windows)))]
 pub fn resolve(env: &Env) -> Result<AppDirs, DirError> {
     let data = match &env.xdg_data_home {
