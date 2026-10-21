@@ -1,5 +1,7 @@
 mod support;
 
+use std::time::{Duration, Instant};
+
 use reqwest::StatusCode;
 use support::{AgentHandle, Harness, start_fake_agent};
 
@@ -137,5 +139,124 @@ fn required_agent_protocol_version_matches_agent() {
         hub::REQUIRED_AGENT_PROTOCOL_VERSION,
         agent::PROTOCOL_VERSION,
         "hub 与 agent 的协议版本不一致"
+    );
+}
+
+/// 规格 user story 4：节点卡住时命令得到显式的 node_unavailable，而不是无限等待。
+#[tokio::test]
+async fn times_out_hung_command_with_node_unavailable() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        connect_timeout: Duration::from_millis(200),
+        command_timeout: Duration::from_millis(300),
+        stream_idle_timeout: Duration::from_secs(5),
+        backoff_base: Duration::from_millis(50),
+        ..hub::HubOptions::default()
+    })
+    .await;
+    let node = support::scripted::ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+
+    let started = Instant::now();
+    let response = reqwest::get(harness.url("/api/n/laptop/hang"))
+        .await
+        .expect("请求挂起的命令");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: hub::HubErrorResponse = response.json().await.expect("解析错误响应");
+    assert_eq!(body.code, hub::HubErrorCode::NodeUnavailable);
+    assert!(
+        body.message.contains("命令超时"),
+        "说明必须点明超时: {}",
+        body.message
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "必须在超时内返回"
+    );
+}
+
+/// 转发的上游事件流只受空闲超时约束：命令总超时不会切断已建立的流。
+#[tokio::test]
+async fn forwards_event_stream_beyond_command_timeout() {
+    use futures_util::StreamExt;
+
+    let harness = Harness::start_with_options(hub::HubOptions {
+        connect_timeout: Duration::from_millis(200),
+        command_timeout: Duration::from_millis(100),
+        stream_idle_timeout: Duration::from_secs(2),
+        backoff_base: Duration::from_millis(50),
+        ..hub::HubOptions::default()
+    })
+    .await;
+    let node = support::scripted::ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+
+    let response = reqwest::get(harness.url("/api/n/laptop/events?after=0"))
+        .await
+        .expect("订阅转发的上游事件流");
+    assert_eq!(response.status(), StatusCode::OK);
+    assert!(
+        node.after_requests().contains(&Some(0)),
+        "转发必须原样带上客户端游标: {:?}",
+        node.after_requests()
+    );
+    let mut stream = response.bytes_stream();
+    let mut received = String::new();
+
+    for id in 0..4 {
+        node.publish_fact(id, support::scripted::fact());
+        while !received.contains(&format!("id\":{id}")) {
+            let chunk = tokio::time::timeout(Duration::from_secs(2), stream.next())
+                .await
+                .expect("流在命令超时之后仍然存活")
+                .expect("有数据")
+                .expect("读取数据");
+            received.push_str(&String::from_utf8_lossy(&chunk));
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let ended = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(chunk) = stream.next().await {
+            assert!(
+                chunk.is_ok(),
+                "转发流必须以正常结束收尾，而不是读错误: {chunk:?}"
+            );
+        }
+    })
+    .await;
+    assert!(ended.is_ok(), "空闲超过超时后转发的流必须结束");
+}
+
+/// 命令在响应头之后卡住时同样按时限返回 node_unavailable。
+#[tokio::test]
+async fn times_out_command_with_stalled_body() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        connect_timeout: Duration::from_millis(200),
+        command_timeout: Duration::from_millis(300),
+        stream_idle_timeout: Duration::from_secs(5),
+        backoff_base: Duration::from_millis(50),
+        ..hub::HubOptions::default()
+    })
+    .await;
+    let node = support::scripted::ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+
+    let response = tokio::time::timeout(
+        Duration::from_secs(5),
+        reqwest::get(harness.url("/api/n/laptop/stall")),
+    )
+    .await
+    .expect("转发必须在时限内结束")
+    .expect("请求卡住的命令");
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body: hub::HubErrorResponse = response.json().await.expect("解析错误响应");
+    assert_eq!(body.code, hub::HubErrorCode::NodeUnavailable);
+    assert!(
+        body.message.contains("命令超时"),
+        "说明必须点明超时: {}",
+        body.message
     );
 }
