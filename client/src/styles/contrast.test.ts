@@ -27,7 +27,7 @@ for (const [name, value] of parseDeclarations(source.slice(darkIndex))) {
 }
 
 function resolve(declarations: Map<string, string>, value: string): string {
-  const reference = value.match(/^var\(\s*(--[a-zA-Z0-9-]+)\s*\)$/);
+  const reference = /^var\(\s*(--[a-zA-Z0-9-]+)\s*\)$/.exec(value);
   if (reference === null) {
     return value;
   }
@@ -43,7 +43,7 @@ function resolve(declarations: Map<string, string>, value: string): string {
 }
 
 function toRgb(value: string): [number, number, number] {
-  const hex = value.match(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/);
+  const hex = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(value);
   if (hex !== null) {
     const raw = hex[1];
     if (raw === undefined) {
@@ -56,7 +56,7 @@ function toRgb(value: string): [number, number, number] {
       Number.parseInt(digits.slice(4, 6), 16),
     ];
   }
-  const rgb = value.match(/^rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\)$/);
+  const rgb = /^rgb\(\s*(\d+)\s+(\d+)\s+(\d+)\s*\)$/.exec(value);
   if (rgb !== null) {
     const red = rgb[1];
     const green = rgb[2];

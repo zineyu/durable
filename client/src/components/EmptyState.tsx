@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { Button } from './Button';
 import styles from './EmptyState.module.css';
 
@@ -8,7 +9,7 @@ export type EmptyStateProps = {
   onAction?: () => void;
 };
 
-export function EmptyState({ title, description, actionLabel, onAction }: EmptyStateProps) {
+export function EmptyState({ title, description, actionLabel, onAction }: EmptyStateProps): ReactElement {
   return (
     <div className={styles.empty}>
       <h2 className={styles.title}>{title}</h2>

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FocusEvent, KeyboardEvent } from 'react';
+import type { FocusEvent, KeyboardEvent, ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import { StatusDot } from './StatusDot';
 import styles from './SessionListItem.module.css';
@@ -34,7 +34,7 @@ export function SessionListItem({
   onDeleteRequest,
   onDeleteConfirm,
   defaultMenuOpen = false,
-}: SessionListItemProps) {
+}: SessionListItemProps): ReactElement {
   const [menuOpen, setMenuOpen] = useState(defaultMenuOpen);
   const menuVisible = menuOpen || view === 'deleting';
 
@@ -108,9 +108,9 @@ export function SessionListItem({
       )}
       <div
         className={styles.menu}
-        onMouseEnter={() => setMenuOpen(true)}
-        onMouseLeave={() => setMenuOpen(false)}
-        onFocus={() => setMenuOpen(true)}
+        onMouseEnter={() => { setMenuOpen(true); }}
+        onMouseLeave={() => { setMenuOpen(false); }}
+        onFocus={() => { setMenuOpen(true); }}
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
       >
@@ -119,7 +119,7 @@ export function SessionListItem({
           label={menuLabel}
           aria-expanded={menuVisible}
           aria-haspopup="true"
-          onClick={() => setMenuOpen(true)}
+          onClick={() => { setMenuOpen(true); }}
         />
         {menuVisible ? (
           <div className={styles.menuPanel}>

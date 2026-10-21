@@ -40,7 +40,7 @@ const paths: Record<IconName, ReactElement> = {
   plus: <path d="M12 5v14M5 12h14" />,
 };
 
-export function Icon({ name }: IconProps) {
+export function Icon({ name }: IconProps): ReactElement {
   return (
     <svg
       className={styles.icon}

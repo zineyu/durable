@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import type { NodeStatus } from '../api/generated/NodeStatus';
 import { StatusDot } from './StatusDot';
 import styles from './NodeStatusBadge.module.css';
@@ -8,7 +9,7 @@ export type NodeStatusBadgeProps = {
   detail?: string | null;
 };
 
-export function NodeStatusBadge({ status, detail }: NodeStatusBadgeProps) {
+export function NodeStatusBadge({ status, detail }: NodeStatusBadgeProps): ReactElement {
   const label = nodeStatusLabel[status];
   return (
     <span

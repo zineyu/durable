@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import styles from './MainHeader.module.css';
 import { ConnectionChip } from './ConnectionChip';
 import { NodeStatusBadge } from './NodeStatusBadge';
@@ -25,7 +26,7 @@ export function MainHeader({
   workspacePath,
   state,
   connection,
-}: MainHeaderProps) {
+}: MainHeaderProps): ReactElement {
   return (
     <header className={styles.header}>
       <div className={styles.inner}>

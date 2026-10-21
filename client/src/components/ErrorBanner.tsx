@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import styles from './ErrorBanner.module.css';
 
@@ -7,7 +8,7 @@ export type ErrorBannerProps = {
   onDismiss?: () => void;
 };
 
-export function ErrorBanner({ code, message, onDismiss }: ErrorBannerProps) {
+export function ErrorBanner({ code, message, onDismiss }: ErrorBannerProps): ReactElement {
   return (
     <div className={styles.banner} role="alert">
       <span className={styles.code}>{code}</span>

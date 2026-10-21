@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from 'react';
+import type { ButtonHTMLAttributes, ReactElement } from 'react';
 import { Icon } from './Icon';
 import styles from './IconButton.module.css';
 import type { IconName } from './Icon';
@@ -18,7 +18,7 @@ export function IconButton({
   size = 'sm',
   className,
   ...rest
-}: IconButtonProps) {
+}: IconButtonProps): ReactElement {
   const classes = [styles.button, styles[tone], styles[size], className].filter(Boolean).join(' ');
   return (
     <button type="button" className={classes} aria-label={label} title={label} {...rest}>

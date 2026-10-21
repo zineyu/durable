@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { Button } from './Button';
 import styles from './Dialog.module.css';
 
@@ -20,7 +20,7 @@ export function Dialog({
   children,
   confirmDisabled = false,
   danger = false,
-}: DialogProps) {
+}: DialogProps): ReactElement {
   return (
     <div className={styles.overlay} onClick={onCancel}>
       <div
@@ -28,7 +28,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => { event.stopPropagation(); }}
       >
         <h2 className={styles.title}>{title}</h2>
         {children !== undefined ? <div className={styles.body}>{children}</div> : null}

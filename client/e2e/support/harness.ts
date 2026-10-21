@@ -197,7 +197,7 @@ export class Harness {
     try {
       const bootstrap = await this.bootstrap();
       const node = bootstrap.nodes.find((entry) => entry.name === this.nodeName);
-      return node !== undefined && node.status === 'ok' && node.bootstrap !== null;
+      return node?.status === 'ok' && node.bootstrap !== null;
     } catch {
       return false;
     }

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { Button } from './Button';
 import { NodeSwitcher } from './NodeSwitcher';
 import { SessionListItem } from './SessionListItem';
@@ -60,7 +61,7 @@ export function Sidebar({
   onCreateSession,
   onAddWorkspace,
   onRemoveWorkspace,
-}: SidebarProps) {
+}: SidebarProps): ReactElement {
   return (
     <div className={styles.sidebar}>
       <header className={styles.brand}>
@@ -86,8 +87,8 @@ export function Sidebar({
             key={workspace.id}
             path={workspace.path}
             sessionCount={workspace.sessions.length}
-            {...(onCreateSession ? { onCreateSession: () => onCreateSession(workspace.path) } : {})}
-            {...(onRemoveWorkspace ? { onRemove: () => onRemoveWorkspace(workspace.path) } : {})}
+            {...(onCreateSession ? { onCreateSession: () => { onCreateSession(workspace.path); } } : {})}
+            {...(onRemoveWorkspace ? { onRemove: () => { onRemoveWorkspace(workspace.path); } } : {})}
           >
             {workspace.sessions.length === 0 ? (
               <p className={styles.emptySessions}>暂无 session</p>

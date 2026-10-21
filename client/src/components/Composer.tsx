@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import styles from './Composer.module.css';
 
@@ -17,7 +18,7 @@ export function Composer({
   onCancel,
   disabled = false,
   busy = false,
-}: ComposerProps) {
+}: ComposerProps): ReactElement {
   return (
     <form
       className={styles.composer}
@@ -33,7 +34,7 @@ export function Composer({
         placeholder={busy ? '当前 run 结束后执行队列中的消息' : '描述要完成的任务'}
         rows={3}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => { onChange(event.target.value); }}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
             event.preventDefault();

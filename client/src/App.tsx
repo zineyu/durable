@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { api } from './api/client';
 import type { ApiFailure, ApiResult } from './api/client';
 import { openEventStream } from './api/events';
@@ -77,7 +77,7 @@ function unavailableNotice(
   return record.detail ?? nodeStatusLabel[record.status];
 }
 
-export function App() {
+export function App(): ReactElement {
   const [state, dispatch] = useReducer(reduce, undefined, initialStateFromHash);
   const [selectedSessionId, setSelectedSessionId] = useState<SessionId | null>(
     () => readLocationFromHash(window.location.hash)?.sessionId ?? null,
@@ -134,15 +134,12 @@ export function App() {
       const next = readLocationFromHash(window.location.hash);
       dispatch({ type: 'select-node', node: next?.node ?? null });
       setSelectedSessionId(next?.sessionId ?? null);
+      setDialog(null);
+      setEditing(null);
     };
     window.addEventListener('hashchange', apply);
-    return () => window.removeEventListener('hashchange', apply);
+    return () => { window.removeEventListener('hashchange', apply); };
   }, []);
-
-  useEffect(() => {
-    setDialog(null);
-    setEditing(null);
-  }, [selectedNode]);
 
   const missingKey = state.hub.nodes
     .filter((entry) => entry.status === 'ok' && state.nodes[entry.name] === undefined)
@@ -154,11 +151,11 @@ export function App() {
       return;
     }
     const missing = missingKey.split(',');
-    let active = true;
+    const liveness = new AbortController();
     void (async () => {
       for (const name of missing) {
         const outcome = await api.nodeBootstrap(name);
-        if (!active) {
+        if (liveness.signal.aborted) {
           return;
         }
         if (!outcome.ok) {
@@ -169,12 +166,12 @@ export function App() {
       }
     })();
     return () => {
-      active = false;
+      liveness.abort();
     };
   }, [missingKey, report]);
 
   useEffect(() => {
-    let active = true;
+    const liveness = new AbortController();
     let retry: ReturnType<typeof setTimeout> | null = null;
 
     const delay = (milliseconds: number) =>
@@ -184,7 +181,7 @@ export function App() {
 
     const refresh = async (): Promise<number | null> => {
       const outcome = await api.bootstrap();
-      if (!active) {
+      if (liveness.signal.aborted) {
         return null;
       }
       if (!outcome.ok) {
@@ -196,7 +193,7 @@ export function App() {
       const selection = selectionRef.current;
       if (selection.node !== null && selection.sessionId !== null) {
         const tree = await api.sessionTree(selection.node, selection.sessionId);
-        if (!active) {
+        if (liveness.signal.aborted) {
           return null;
         }
         if (!tree.ok) {
@@ -211,7 +208,7 @@ export function App() {
     const reconnect = async () => {
       for (;;) {
         const cursor = await refresh();
-        if (!active) {
+        if (liveness.signal.aborted) {
           return;
         }
         if (cursor !== null) {
@@ -219,7 +216,7 @@ export function App() {
           return;
         }
         await delay(RECONNECT_DELAY_MS);
-        if (!active) {
+        if (liveness.signal.aborted) {
           return;
         }
       }
@@ -229,8 +226,8 @@ export function App() {
       const cursor = snapshotCursor(cursorRef.current, bootstrap.maxHubSeq);
       dispatch({ type: 'bootstrap', bootstrap });
       streamRef.current = openEventStream(cursor, {
-        onEvent: (event) => dispatch({ type: 'stream', event }),
-        onState: (connection) => dispatch({ type: 'connection', connection }),
+        onEvent: (event) => { dispatch({ type: 'stream', event }); },
+        onState: (connection) => { dispatch({ type: 'connection', connection }); },
         onDisconnect: () => {
           void reconnect();
         },
@@ -239,7 +236,7 @@ export function App() {
 
     void (async () => {
       const outcome = await api.bootstrap();
-      if (!active) {
+      if (liveness.signal.aborted) {
         return;
       }
       if (!outcome.ok) {
@@ -251,7 +248,7 @@ export function App() {
     })();
 
     return () => {
-      active = false;
+      liveness.abort();
       if (retry !== null) {
         clearTimeout(retry);
       }
@@ -268,10 +265,10 @@ export function App() {
     }
     const node = selectedNode;
     const id = selectedSessionId;
-    let active = true;
+    const liveness = new AbortController();
     void (async () => {
       const outcome = await api.sessionTree(node, id);
-      if (!active) {
+      if (liveness.signal.aborted) {
         return;
       }
       if (!outcome.ok) {
@@ -281,7 +278,7 @@ export function App() {
       dispatch({ type: 'tree', node, tree: outcome.value });
     })();
     return () => {
-      active = false;
+      liveness.abort();
     };
   }, [selectedNode, selectedSessionId, sessionExists, report]);
 
@@ -389,7 +386,7 @@ export function App() {
       return;
     }
     const current = dialog;
-    const close = () => setDialog(null);
+    const close = () => { setDialog(null); };
 
     if (isNodeDialog(current)) {
       void (async () => {
@@ -500,7 +497,7 @@ export function App() {
           title="选择一个 session"
           description="从左侧选择 session，或者注册新的 workspace 后创建 session。"
           actionLabel="注册 workspace"
-          onAction={() => setDialog({ kind: 'register-workspace', path: '' })}
+          onAction={() => { setDialog({ kind: 'register-workspace', path: '' }); }}
         />
       );
     }
@@ -521,11 +518,10 @@ export function App() {
       const previousId = position.previousId;
       const nextId = position.nextId;
       if (previousId !== null) {
-        control.onPrev = () =>
-          runCommand(api.switchActiveLeaf(nodeName, current.id, previousId));
+        control.onPrev = () => { runCommand(api.switchActiveLeaf(nodeName, current.id, previousId)); };
       }
       if (nextId !== null) {
-        control.onNext = () => runCommand(api.switchActiveLeaf(nodeName, current.id, nextId));
+        control.onNext = () => { runCommand(api.switchActiveLeaf(nodeName, current.id, nextId)); };
       }
       return { branch: control };
     };
@@ -536,13 +532,12 @@ export function App() {
           <UserMessage
             key={message.id}
             text={message.text}
-            onEdit={() =>
-              setDialog({
+            onEdit={() => { setDialog({
                 kind: 'edit',
                 sessionId: current.id,
                 messageId: message.id,
                 text: message.text,
-              })
+              }); }
             }
             editDisabled={!idle}
             {...controls(message)}
@@ -555,8 +550,7 @@ export function App() {
           key={message.id}
           state={view.state}
           {...(view.note === null ? {} : { note: view.note })}
-          onRetry={() =>
-            setDialog({ kind: 'retry', sessionId: current.id, messageId: message.id })
+          onRetry={() => { setDialog({ kind: 'retry', sessionId: current.id, messageId: message.id }); }
           }
           retryDisabled={!idle}
           {...controls(message)}
@@ -591,8 +585,7 @@ export function App() {
         </Transcript>
         <QueueStrip
           items={queue}
-          onRemove={(viewId) =>
-            runCommand(api.removeQueueItem(nodeName, current.id, Number(viewId)))
+          onRemove={(viewId) => { runCommand(api.removeQueueItem(nodeName, current.id, Number(viewId))); }
           }
         />
         <Composer
@@ -616,9 +609,9 @@ export function App() {
             nodes={state.hub.nodes}
             selectedNode={selectedNode}
             onSelectNode={selectNode}
-            onRegisterNode={() => setDialog({ kind: 'register-node', name: '', url: '' })}
-            onRenameNode={(name) => setDialog({ kind: 'rename-node', name, next: name })}
-            onRemoveNode={(name) => setDialog({ kind: 'remove-node', name })}
+            onRegisterNode={() => { setDialog({ kind: 'register-node', name: '', url: '' }); }}
+            onRenameNode={(name) => { setDialog({ kind: 'rename-node', name, next: name }); }}
+            onRemoveNode={(name) => { setDialog({ kind: 'remove-node', name }); }}
             notice={notice}
             commandsDisabled={!nodeReady}
             modelName={shard?.modelName ?? ''}
@@ -626,14 +619,14 @@ export function App() {
             selectedSessionId={selectedSessionId}
             editing={editing}
             onSelectSession={selectSession}
-            onRenameRequest={(id) => setEditing({ sessionId: id, view: 'renaming' })}
+            onRenameRequest={(id) => { setEditing({ sessionId: id, view: 'renaming' }); }}
             onRenameSubmit={handleRenameSubmit}
-            onDeleteRequest={(id) => setEditing({ sessionId: id, view: 'deleting' })}
+            onDeleteRequest={(id) => { setEditing({ sessionId: id, view: 'deleting' }); }}
             onDeleteConfirm={handleDeleteConfirm}
-            onEditCancel={() => setEditing(null)}
+            onEditCancel={() => { setEditing(null); }}
             onCreateSession={handleCreateSession}
-            onAddWorkspace={() => setDialog({ kind: 'register-workspace', path: '' })}
-            onRemoveWorkspace={(path) => setDialog({ kind: 'remove-workspace', path })}
+            onAddWorkspace={() => { setDialog({ kind: 'register-workspace', path: '' }); }}
+            onRemoveWorkspace={(path) => { setDialog({ kind: 'remove-workspace', path }); }}
           />
         }
       >
@@ -641,7 +634,7 @@ export function App() {
           <ErrorBanner
             code={state.error.code}
             message={state.error.message}
-            onDismiss={() => dispatch({ type: 'dismiss-error' })}
+            onDismiss={() => { dispatch({ type: 'dismiss-error' }); }}
           />
         ) : null}
         {renderMain()}
@@ -653,7 +646,7 @@ export function App() {
           confirmDisabled={dialogConfirmDisabled(dialog)}
           danger={dialog.kind === 'remove-node'}
           onConfirm={handleDialogConfirm}
-          onCancel={() => setDialog(null)}
+          onCancel={() => { setDialog(null); }}
         >
           {renderDialogBody(dialog, setDialog)}
         </Dialog>
@@ -683,7 +676,10 @@ function dialogConfirmDisabled(dialog: DialogState): boolean {
       return dialog.name.trim().length === 0 || dialog.url.trim().length === 0;
     case 'rename-node':
       return dialog.next.trim().length === 0;
-    default:
+    case 'edit':
+    case 'retry':
+    case 'remove-workspace':
+    case 'remove-node':
       return false;
   }
 }
@@ -746,7 +742,7 @@ function renderDialogBody(
           aria-label="消息正文"
           rows={4}
           autoFocus
-          onChange={(event) => setDialog({ ...dialog, text: event.target.value })}
+          onChange={(event) => { setDialog({ ...dialog, text: event.target.value }); }}
         />
       );
     case 'retry':
@@ -762,7 +758,7 @@ function renderDialogBody(
           aria-label="workspace 路径"
           placeholder="/absolute/path"
           autoFocus
-          onChange={(event) => setDialog({ ...dialog, path: event.target.value })}
+          onChange={(event) => { setDialog({ ...dialog, path: event.target.value }); }}
         />
       );
     case 'remove-workspace':
@@ -779,13 +775,13 @@ function renderDialogBody(
             aria-label="节点名"
             placeholder="macbook-air-02"
             autoFocus
-            onChange={(event) => setDialog({ ...dialog, name: event.target.value })}
+            onChange={(event) => { setDialog({ ...dialog, name: event.target.value }); }}
           />
           <input
             value={dialog.url}
             aria-label="节点 URL"
             placeholder="http://127.0.0.1:8081"
-            onChange={(event) => setDialog({ ...dialog, url: event.target.value })}
+            onChange={(event) => { setDialog({ ...dialog, url: event.target.value }); }}
           />
         </>
       );
@@ -796,7 +792,7 @@ function renderDialogBody(
             value={dialog.next}
             aria-label="新节点名"
             autoFocus
-            onChange={(event) => setDialog({ ...dialog, next: event.target.value })}
+            onChange={(event) => { setDialog({ ...dialog, next: event.target.value }); }}
           />
           <p>改名后旧链接失效，指向旧名的页面会显示「未知节点」。</p>
         </>

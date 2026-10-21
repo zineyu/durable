@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { StatusDot } from './StatusDot';
 import styles from './ToolCard.module.css';
 import { toolStateLabel, toolStateTone } from '../view/labels';
@@ -23,7 +24,7 @@ export function ToolCard({
   truncated = false,
   durationLabel,
   defaultOpen = false,
-}: ToolCardProps) {
+}: ToolCardProps): ReactElement {
   return (
     <details className={styles.card} open={defaultOpen}>
       <summary className={styles.header}>

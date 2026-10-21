@@ -24,8 +24,8 @@ export function openEventStream(after: number, handlers: EventStreamHandlers): E
     }
     const stream = new EventSource(`/api/events?after=${cursor}`);
     source = stream;
-    stream.onopen = () => handlers.onState('connected');
-    stream.onmessage = (message) => {
+    stream.onopen = () => { handlers.onState('connected'); };
+    stream.onmessage = (message: MessageEvent<string>) => {
       const data: unknown = JSON.parse(message.data);
       const event = data as HubStreamEvent;
       handlers.onEvent(event);
@@ -33,7 +33,7 @@ export function openEventStream(after: number, handlers: EventStreamHandlers): E
         disconnect();
       }
     };
-    stream.onerror = () => disconnect();
+    stream.onerror = () => { disconnect(); };
   }
 
   function stop() {

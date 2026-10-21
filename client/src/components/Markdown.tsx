@@ -1,5 +1,5 @@
 import { Children, isValidElement } from 'react';
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ReactElement, ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { CodeBlock } from './CodeBlock';
 import styles from './Markdown.module.css';
@@ -13,7 +13,7 @@ type CodeElementProps = {
   children?: ReactNode;
 };
 
-export function Markdown({ text }: MarkdownProps) {
+export function Markdown({ text }: MarkdownProps): ReactElement {
   return (
     <div className={styles.markdown}>
       <ReactMarkdown components={{ pre: Pre }}>{text}</ReactMarkdown>

@@ -29,9 +29,6 @@ export async function launchProcess(options: LaunchOptions): Promise<LaunchedPro
   });
   const stdout = child.stdout;
   const stderr = child.stderr;
-  if (stdout === null || stderr === null) {
-    throw new Error(`${options.label} 未提供标准输出`);
-  }
 
   const errors: string[] = [];
   let url: string;
@@ -122,7 +119,7 @@ async function stop(child: ChildProcess, label: string): Promise<void> {
     return;
   }
   const exited = new Promise<void>((resolve) => {
-    child.once('exit', () => resolve());
+    child.once('exit', () => { resolve(); });
   });
   if (await terminate(child, 'SIGTERM', exited)) {
     return;
@@ -148,6 +145,6 @@ async function terminate(
 
 function stopTimer(): Promise<false> {
   return new Promise<false>((resolve) => {
-    setTimeout(() => resolve(false), STOP_TIMEOUT_MS).unref();
+    setTimeout(() => { resolve(false); }, STOP_TIMEOUT_MS).unref();
   });
 }

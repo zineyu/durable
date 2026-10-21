@@ -76,7 +76,7 @@ export class ModelServer {
     this.held.clear();
     this.server.closeAllConnections();
     await new Promise<void>((resolve) => {
-      this.server.close(() => resolve());
+      this.server.close(() => { resolve(); });
       setTimeout(resolve, CLOSE_TIMEOUT_MS).unref();
     });
   }
@@ -158,8 +158,10 @@ function writeEvent(response: ServerResponse, payload: unknown): void {
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
 }
 
+const graphemes = new Intl.Segmenter('zh', { granularity: 'grapheme' });
+
 function writeText(response: ServerResponse, text: string): void {
-  const characters = [...text];
+  const characters = Array.from(graphemes.segment(text), (part) => part.segment);
   for (let index = 0; index < characters.length; index += 4) {
     const piece = characters.slice(index, index + 4).join('');
     writeEvent(response, { choices: [{ delta: { content: piece } }] });

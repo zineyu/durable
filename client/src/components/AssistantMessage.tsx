@@ -2,7 +2,7 @@ import { BranchSwitcher } from './BranchSwitcher';
 import { IconButton } from './IconButton';
 import styles from './AssistantMessage.module.css';
 import { messageStateLabel } from '../view/labels';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import type { BranchControl, MessageState } from '../view/types';
 
 export type AssistantMessageProps = {
@@ -21,7 +21,7 @@ export function AssistantMessage({
   branch,
   onRetry,
   retryDisabled = false,
-}: AssistantMessageProps) {
+}: AssistantMessageProps): ReactElement {
   const showStatus = state !== 'complete' || note !== undefined;
   const showFooter = branch !== undefined || onRetry !== undefined;
   return (

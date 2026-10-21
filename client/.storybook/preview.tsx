@@ -1,8 +1,17 @@
-import type { Preview } from '@storybook/react-vite';
+import type { Decorator, Preview } from '@storybook/react-vite';
 import { useEffect } from 'react';
 import '../src/styles/tokens.css';
 import '../src/styles/global.css';
 import './frame.css';
+
+const ThemeDecorator: Decorator = (Story, context) => {
+  const theme = context.globals.theme === 'dark' ? 'dark' : 'light';
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+  const frame = String(context.parameters.frame ?? 'page');
+  return <div className={frame}>{Story()}</div>;
+};
 
 const preview: Preview = {
   parameters: {
@@ -25,16 +34,7 @@ const preview: Preview = {
     },
   },
   initialGlobals: { theme: 'light' },
-  decorators: [
-    (Story, context) => {
-      const theme = context.globals.theme === 'dark' ? 'dark' : 'light';
-      useEffect(() => {
-        document.documentElement.dataset.theme = theme;
-      }, [theme]);
-      const frame = context.parameters.frame ?? 'page';
-      return <div className={frame}>{Story()}</div>;
-    },
-  ],
+  decorators: [ThemeDecorator],
 };
 
 export default preview;

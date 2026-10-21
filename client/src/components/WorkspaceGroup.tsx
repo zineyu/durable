@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { IconButton } from './IconButton';
 import styles from './WorkspaceGroup.module.css';
 
@@ -21,7 +21,7 @@ export function WorkspaceGroup({
   defaultOpen = true,
   onCreateSession,
   onRemove,
-}: WorkspaceGroupProps) {
+}: WorkspaceGroupProps): ReactElement {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section className={styles.group}>
@@ -29,7 +29,7 @@ export function WorkspaceGroup({
         <button
           type="button"
           className={styles.toggle}
-          onClick={() => setOpen((current) => !current)}
+          onClick={() => { setOpen((current) => !current); }}
           aria-expanded={open}
         >
           <span className={open ? styles.chevronOpen : styles.chevron} aria-hidden="true">

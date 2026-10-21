@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { BranchSwitcher } from './BranchSwitcher';
 import { IconButton } from './IconButton';
 import styles from './UserMessage.module.css';
@@ -10,7 +11,7 @@ export type UserMessageProps = {
   branch?: BranchControl;
 };
 
-export function UserMessage({ text, onEdit, editDisabled = false, branch }: UserMessageProps) {
+export function UserMessage({ text, onEdit, editDisabled = false, branch }: UserMessageProps): ReactElement {
   return (
     <article className={styles.message}>
       <p className={styles.bubble}>{text}</p>

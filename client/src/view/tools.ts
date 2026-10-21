@@ -29,11 +29,11 @@ function summarize(argumentsText: string): string {
   if (parsed === null) {
     return argumentsText;
   }
-  const path = parsed['path'];
+  const path = parsed.path;
   if (typeof path === 'string') {
     return path;
   }
-  const command = parsed['command'];
+  const command = parsed.command;
   if (typeof command === 'string') {
     return command;
   }

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import styles from './AppShell.module.css';
 
 export type AppShellProps = {
@@ -6,7 +6,7 @@ export type AppShellProps = {
   children: ReactNode;
 };
 
-export function AppShell({ sidebar, children }: AppShellProps) {
+export function AppShell({ sidebar, children }: AppShellProps): ReactElement {
   return (
     <div className={styles.shell}>
       <aside className={styles.sidebar}>{sidebar}</aside>

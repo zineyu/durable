@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { FocusEvent, KeyboardEvent } from 'react';
+import type { FocusEvent, KeyboardEvent, ReactElement } from 'react';
 import type { NodeName } from '../api/generated/NodeName';
 import { IconButton } from './IconButton';
 import styles from './NodeSwitcher.module.css';
@@ -25,7 +25,7 @@ export function NodeSwitcher({
   onRename,
   onRemove,
   defaultMenuOpen = false,
-}: NodeSwitcherProps) {
+}: NodeSwitcherProps): ReactElement {
   const [menuOpen, setMenuOpen] = useState(defaultMenuOpen);
 
   const handleBlur = (event: FocusEvent<HTMLElement>) => {
@@ -81,7 +81,7 @@ export function NodeSwitcher({
               label={`节点操作：${selected}`}
               aria-haspopup="true"
               aria-expanded={menuOpen}
-              onClick={() => setMenuOpen(true)}
+              onClick={() => { setMenuOpen(true); }}
             />
             {menuOpen ? (
               <div className={styles.menuPanel}>

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { Markdown } from './Markdown';
 import { ToolCard } from './ToolCard';
 import { toolCardModel } from '../view/tools';
@@ -8,7 +9,7 @@ export type AssistantContentProps = {
   toolCalls: ToolCallRecord[];
 };
 
-export function AssistantContent({ text, toolCalls }: AssistantContentProps) {
+export function AssistantContent({ text, toolCalls }: AssistantContentProps): ReactElement {
   return (
     <>
       {text.length > 0 ? <Markdown text={text} /> : null}

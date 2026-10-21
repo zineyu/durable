@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { StatusDot } from './StatusDot';
 import styles from './ConnectionChip.module.css';
 import { connectionTone } from '../view/labels';
@@ -13,7 +14,7 @@ const labels: Record<ConnectionState, string> = {
   disconnected: '已断开',
 };
 
-export function ConnectionChip({ state }: ConnectionChipProps) {
+export function ConnectionChip({ state }: ConnectionChipProps): ReactElement {
   return (
     <span className={styles.chip}>
       <StatusDot tone={connectionTone[state]} />

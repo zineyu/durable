@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import styles from './BranchSwitcher.module.css';
 
 export type BranchSwitcherProps = {
@@ -7,7 +8,7 @@ export type BranchSwitcherProps = {
   onNext?: () => void;
 };
 
-export function BranchSwitcher({ index, total, onPrev, onNext }: BranchSwitcherProps) {
+export function BranchSwitcher({ index, total, onPrev, onNext }: BranchSwitcherProps): ReactElement {
   return (
     <span className={styles.switcher}>
       <button
