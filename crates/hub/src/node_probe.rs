@@ -4,14 +4,17 @@ use agent::BootstrapResponse;
 use durable::NodeMetadata;
 
 /// 读取节点的 bootstrap 元数据。状态由总线负责，这里只管取数据。
+///
+/// timeout 是「发送 + 读体」的总时限：探测卡在响应体上也不会挂住调用方。
 pub async fn fetch_bootstrap(
     client: &reqwest::Client,
     node: &NodeMetadata,
+    timeout: Duration,
 ) -> Result<BootstrapResponse, String> {
     let url = format!("{}/api/bootstrap", base_url(node));
     let response = client
         .get(url)
-        .timeout(Duration::from_secs(5))
+        .timeout(timeout)
         .send()
         .await
         .map_err(|error| format!("连接节点失败: {error}"))?;

@@ -3,6 +3,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::rejection::JsonRejection;
@@ -13,6 +14,7 @@ use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
 use durable::{NodeMetadata, NodeName, Store};
 use futures_util::TryStreamExt;
+use futures_util::future::join_all;
 use rust_embed::Embed;
 use serde::de::DeserializeOwned;
 use ts_rs::TS;
@@ -38,16 +40,19 @@ pub const DEFAULT_DATABASE_FILE: &str = "hub.sqlite";
 pub const LOG_FILE_PREFIX: &str = "hub";
 const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
 const DEFAULT_REPLAY_WINDOW: usize = 4096;
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Embed)]
 #[folder = "$CARGO_MANIFEST_DIR/../../client/dist"]
 struct Assets;
 
-/// hub 的可调参数。测试用较小的容量以覆盖落后与窗口外游标。
+/// hub 的可调参数。测试用较小的容量以覆盖落后与窗口外游标，用较短的连接超时以覆盖探测失败。
 #[derive(Debug, Clone, Copy)]
 pub struct HubOptions {
     pub broadcast_capacity: usize,
     pub replay_window: usize,
+    /// 连接上游的超时，也是 health 与 bootstrap 探测的总时限。
+    pub connect_timeout: Duration,
 }
 
 impl Default for HubOptions {
@@ -55,6 +60,7 @@ impl Default for HubOptions {
         Self {
             broadcast_capacity: DEFAULT_BROADCAST_CAPACITY,
             replay_window: DEFAULT_REPLAY_WINDOW,
+            connect_timeout: DEFAULT_CONNECT_TIMEOUT,
         }
     }
 }
@@ -64,6 +70,7 @@ pub struct HubState {
     pub store: Arc<Store>,
     pub bus: Arc<Bus>,
     client: reqwest::Client,
+    options: HubOptions,
     watchers: Arc<Mutex<HashMap<NodeName, bus::NodeWatcher>>>,
 }
 
@@ -71,10 +78,15 @@ impl HubState {
     /// 打开状态并为节点表中已有的节点启动上游订阅。
     pub async fn start(store: Arc<Store>, options: HubOptions) -> std::io::Result<Self> {
         let bus = Arc::new(Bus::new(options.broadcast_capacity, options.replay_window));
+        let client = reqwest::Client::builder()
+            .connect_timeout(options.connect_timeout)
+            .build()
+            .map_err(std::io::Error::other)?;
         let state = Self {
             store,
             bus,
-            client: reqwest::Client::new(),
+            client,
+            options,
             watchers: Arc::new(Mutex::new(HashMap::new())),
         };
         let nodes = match state.store.nodes().await {
@@ -182,27 +194,36 @@ async fn health() -> Json<HubHealth> {
 }
 
 async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, ApiError> {
+    let max_hub_seq = state.bus.max_seq();
     let nodes = state.store.nodes().await?;
-    let mut snapshots = Vec::with_capacity(nodes.len());
-    for node in nodes {
-        let view = state.bus.view(&node.name);
-        let snapshot = match view.status {
-            NodeStatus::Ok => match node_probe::fetch_bootstrap(&state.client, &node).await {
-                Ok(bootstrap) => NodeSnapshot::ok(node, bootstrap),
-                Err(detail) => NodeSnapshot::failed(node, NodeStatus::Unreachable, detail),
-            },
-            status => NodeSnapshot::failed(
-                node,
-                status,
-                view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
-            ),
-        };
-        snapshots.push(snapshot);
-    }
+    let snapshots = join_all(nodes.into_iter().map(|node| snapshot_of(&state, node))).await;
     Ok(Json(HubBootstrap {
         nodes: snapshots,
-        max_hub_seq: state.bus.max_seq(),
+        max_hub_seq,
     }))
+}
+
+/// 单个节点的快照。总线认为不可达的节点不再探测，直接回它的说明。
+///
+/// 探测失败只体现在这次快照里，不回写总线视图：节点状态的唯一写入者是 watcher
+/// （ADR 0028）。「这次能否取到元数据」与「上游事件流是否通」是两个观测，允许短暂不一致。
+async fn snapshot_of(state: &HubState, node: NodeMetadata) -> NodeSnapshot {
+    let view = state.bus.view(&node.name);
+    match view.status {
+        NodeStatus::Ok => {
+            match node_probe::fetch_bootstrap(&state.client, &node, state.options.connect_timeout)
+                .await
+            {
+                Ok(bootstrap) => NodeSnapshot::ok(node, bootstrap),
+                Err(detail) => NodeSnapshot::failed(node, NodeStatus::Unreachable, detail),
+            }
+        }
+        status => NodeSnapshot::failed(
+            node,
+            status,
+            view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
+        ),
+    }
 }
 
 async fn register_node(

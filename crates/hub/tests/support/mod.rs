@@ -20,6 +20,7 @@ pub use agent_handle::AgentHandle;
 pub struct Harness {
     pub directory: TempDir,
     pub address: SocketAddr,
+    task: tokio::task::JoinHandle<()>,
 }
 
 impl Harness {
@@ -45,12 +46,25 @@ impl Harness {
             .await
             .expect("绑定 hub 端口");
         let address = listener.local_addr().expect("读取 hub 地址");
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             hub::serve_with(listener, Arc::new(store), options)
                 .await
                 .expect("hub 服务运行")
         });
-        Self { directory, address }
+        Self {
+            directory,
+            address,
+            task,
+        }
+    }
+
+    /// 结束本实例并取回临时目录，用于在同一数据库上重启 hub。
+    ///
+    /// 必须等任务真正退出：否则旧实例仍持有 SQLite 连接与监听端口，重启会与之竞争。
+    pub async fn stop(self) -> TempDir {
+        self.task.abort();
+        let _ = self.task.await;
+        self.directory
     }
 
     pub fn url(&self, path: &str) -> String {
@@ -136,7 +150,7 @@ fn database_path(directory: &TempDir) -> PathBuf {
 }
 
 mod agent_handle {
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, SocketAddr};
     use std::sync::Arc;
 
     use tempfile::TempDir;
@@ -287,5 +301,305 @@ impl EventStream {
             }
         }
         panic!("未等到满足条件的事件");
+    }
+}
+
+/// 可编程的假 node：把上游时序变成事件驱动，用于覆盖游标、状态说明与超时。
+///
+/// - `/api/health` 永远报协议版本一致。
+/// - `/api/bootstrap` 可由闸门挂起，`maxEventId` 是测试设定的水位。
+/// - `/api/events` 记录收到的 `after`，按脚本推送事实，也可置为失败或立即结束。
+/// - 其余路径永不响应，用于覆盖命令转发超时。
+pub mod scripted {
+    use std::convert::Infallible;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use axum::extract::Query;
+    use axum::http::StatusCode;
+    use axum::response::sse::{Event, Sse};
+    use axum::response::{IntoResponse, Response};
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use tokio::sync::{Notify, broadcast, oneshot};
+
+    /// 事件流的行为。
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum EventsMode {
+        /// 按脚本推送事实。
+        Scripted,
+        /// 连接后立即结束。
+        End,
+        /// 接受连接但永不返回响应头。
+        Stall,
+    }
+
+    /// hub 的订阅请求。记录游标是否为缺失，因此能区分「没带游标」与「带 0」。
+    #[derive(Debug, serde::Deserialize)]
+    pub struct EventsQuery {
+        pub after: Option<i64>,
+    }
+
+    struct Inner {
+        watermark: AtomicI64,
+        mode: Mutex<EventsMode>,
+        after: Mutex<Vec<Option<i64>>>,
+        facts: broadcast::Sender<String>,
+        health_body: Mutex<Option<String>>,
+        bootstrap_stall: AtomicBool,
+        bootstrap_wait: Mutex<Option<oneshot::Receiver<()>>>,
+        bootstrap_release: Mutex<Option<oneshot::Sender<()>>>,
+        bootstrap_started: Notify,
+    }
+
+    pub struct ScriptedNode {
+        pub url: String,
+        address: SocketAddr,
+        inner: Arc<Inner>,
+        task: tokio::task::AbortHandle,
+    }
+
+    impl ScriptedNode {
+        pub async fn start() -> Self {
+            let inner = Arc::new(Inner {
+                watermark: AtomicI64::new(0),
+                mode: Mutex::new(EventsMode::Scripted),
+                after: Mutex::new(Vec::new()),
+                facts: broadcast::channel(64).0,
+                health_body: Mutex::new(None),
+                bootstrap_stall: AtomicBool::new(false),
+                bootstrap_wait: Mutex::new(None),
+                bootstrap_release: Mutex::new(None),
+                bootstrap_started: Notify::new(),
+            });
+
+            let router =
+                Router::new()
+                    .route(
+                        "/api/health",
+                        get({
+                            let inner = Arc::clone(&inner);
+                            move || async move {
+                                let body = inner.health_body.lock().expect("健康说明锁").clone();
+                                match body {
+                                    Some(body) => (
+                                        StatusCode::OK,
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        body,
+                                    )
+                                        .into_response(),
+                                    None => Json(serde_json::json!({
+                                        "status": "ok",
+                                        "version": "0.0.0",
+                                        "protocolVersion": hub::REQUIRED_AGENT_PROTOCOL_VERSION,
+                                    }))
+                                    .into_response(),
+                                }
+                            }
+                        }),
+                    )
+                    .route("/api/stall", get(|| async { stalled_response() }))
+                    .route(
+                        "/api/bootstrap",
+                        get({
+                            let inner = Arc::clone(&inner);
+                            move || async move {
+                                if inner.bootstrap_stall.load(Ordering::SeqCst) {
+                                    return stalled_response();
+                                }
+                                let waiting = inner.bootstrap_wait.lock().expect("闸门锁").take();
+                                if let Some(receiver) = waiting {
+                                    inner.bootstrap_started.notify_one();
+                                    let _ = receiver.await;
+                                }
+                                Json(serde_json::json!({
+                                    "model": "scripted",
+                                    "maxEventId": inner.watermark.load(Ordering::SeqCst),
+                                    "workspaces": [],
+                                    "sessions": [],
+                                }))
+                                .into_response()
+                            }
+                        }),
+                    )
+                    .route(
+                        "/api/events",
+                        get({
+                            let inner = Arc::clone(&inner);
+                            move |Query(query): Query<EventsQuery>| async move {
+                                events(inner, query).await
+                            }
+                        }),
+                    )
+                    .fallback(|| async { std::future::pending::<()>().await });
+
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("绑定假节点端口");
+            let address = listener.local_addr().expect("读取假节点地址");
+            let task = tokio::spawn(async move {
+                axum::serve(listener, router).await.expect("假节点运行")
+            });
+            Self {
+                url: format!("http://{address}"),
+                address,
+                inner,
+                task: task.abort_handle(),
+            }
+        }
+
+        /// 设定 bootstrap 返回的 `maxEventId`，即上游水位。
+        pub fn set_watermark(&self, value: i64) {
+            self.inner.watermark.store(value, Ordering::SeqCst);
+        }
+
+        /// 停止监听。之后对该端口的连接被拒绝，用于构造「连接失败」这一类原因。
+        pub fn stop(&self) {
+            self.task.abort();
+        }
+
+        /// 让 bootstrap 只返回响应头、body 永不结束，用于覆盖探测的读体时限。
+        pub fn stall_bootstrap_body(&self) {
+            self.inner.bootstrap_stall.store(true, Ordering::SeqCst);
+        }
+
+        /// 等待端口真正拒绝连接。stop 的 abort 是异步生效的。
+        pub async fn wait_until_refused(&self) {
+            for _ in 0..200 {
+                if tokio::net::TcpStream::connect(self.address).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            panic!("假节点未在超时内停止监听");
+        }
+
+        /// 让健康检查返回指定原文。原文按 JSON 反序列化，非法内容触发「health 响应无法解析」。
+        pub fn set_health_body(&self, body: &str) {
+            *self.inner.health_body.lock().expect("健康说明锁") = Some(body.to_owned());
+        }
+
+        pub fn set_events_mode(&self, mode: EventsMode) {
+            *self.inner.mode.lock().expect("模式锁") = mode;
+        }
+
+        /// 上游收到的全部游标。缺失游标的请求记为 None。
+        pub fn after_requests(&self) -> Vec<Option<i64>> {
+            self.inner.after.lock().expect("after 锁").clone()
+        }
+
+        /// 向上游推送一条事实。
+        pub fn publish_fact(&self, id: i64, event: durable::FactEvent) {
+            let frame = durable::StreamEvent::Fact {
+                id,
+                session_id: None,
+                timestamp: id,
+                event,
+            };
+            let payload = serde_json::to_string(&frame).expect("序列化事实");
+            self.inner
+                .facts
+                .send(payload)
+                .expect("推送事实需要上游事件流已订阅");
+        }
+
+        /// 挂起下一次 bootstrap 响应，直到 `release_bootstrap`。
+        pub fn hold_bootstrap(&self) {
+            let (sender, receiver) = oneshot::channel();
+            {
+                let mut waiting = self.inner.bootstrap_wait.lock().expect("闸门锁");
+                assert!(waiting.is_none(), "已有挂起的 bootstrap 闸门");
+                *waiting = Some(receiver);
+            }
+            *self.inner.bootstrap_release.lock().expect("闸门锁") = Some(sender);
+        }
+
+        /// 等待被挂起的 bootstrap 请求到达。
+        pub async fn wait_for_bootstrap_request(&self) {
+            self.inner.bootstrap_started.notified().await;
+        }
+
+        pub fn release_bootstrap(&self) {
+            let sender = self
+                .inner
+                .bootstrap_release
+                .lock()
+                .expect("闸门锁")
+                .take()
+                .expect("没有待释放的 bootstrap 闸门");
+            sender.send(()).expect("闸门接收端已结束");
+        }
+    }
+
+    /// 一条事实事件，用于验证上游事实进入合并流。
+    pub fn fact() -> durable::FactEvent {
+        durable::FactEvent::SessionDeleted {
+            session_id: durable::SessionId::parse("s1").expect("合法 session id"),
+        }
+    }
+
+    /// 等待上游以指定游标订阅。
+    pub async fn wait_for_after(node: &ScriptedNode, expected: i64) {
+        for _ in 0..500 {
+            if node.after_requests().last().copied().flatten() == Some(expected) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!(
+            "上游未在超时内以 {expected} 订阅，实际 {:?}",
+            node.after_requests()
+        );
+    }
+
+    /// 等待上游事件流建立。请求到达即代表订阅已注册。
+    pub async fn wait_for_upstream(node: &ScriptedNode) {
+        for _ in 0..500 {
+            if !node.after_requests().is_empty() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        panic!("上游事件流未在超时内建立");
+    }
+
+    /// 只发响应头、body 永不结束的响应。
+    fn stalled_response() -> Response {
+        let body = axum::body::Body::from_stream(async_stream::stream! {
+            std::future::pending::<()>().await;
+            yield Ok::<axum::body::Bytes, Infallible>(axum::body::Bytes::new());
+        });
+        Response::builder()
+            .status(StatusCode::OK)
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .expect("构造卡住的响应")
+    }
+
+    async fn events(inner: Arc<Inner>, query: EventsQuery) -> Response {
+        if *inner.mode.lock().expect("模式锁") == EventsMode::Stall {
+            std::future::pending::<()>().await;
+        }
+        let mut receiver = inner.facts.subscribe();
+        inner.after.lock().expect("after 锁").push(query.after);
+        match *inner.mode.lock().expect("模式锁") {
+            EventsMode::End => {
+                Sse::new(futures_util::stream::empty::<Result<Event, Infallible>>()).into_response()
+            }
+            EventsMode::Stall => (StatusCode::SERVICE_UNAVAILABLE, "已停止响应").into_response(),
+            EventsMode::Scripted => {
+                let stream = async_stream::stream! {
+                    loop {
+                        match receiver.recv().await {
+                            Ok(payload) => yield Ok::<Event, Infallible>(Event::default().data(payload)),
+                            Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                            Err(broadcast::error::RecvError::Closed) => return,
+                        }
+                    }
+                };
+                Sse::new(stream).into_response()
+            }
+        }
     }
 }
