@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -15,7 +19,22 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client", "node"]
+    "noImplicitOverride": true,
+    "noUncheckedSideEffectImports": true,
+    "noImplicitReturns": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "vite/client",
+      "node"
+    ]
   },
-  "include": ["src", ".storybook", "e2e", "playwright.config.ts", "vite.config.ts"]
+  "include": [
+    "src",
+    ".storybook/**/*",
+    "e2e",
+    "playwright.config.ts",
+    "vite.config.ts"
+  ]
 }
