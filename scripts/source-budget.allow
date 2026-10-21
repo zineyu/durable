@@ -6,7 +6,6 @@
 # 检查脚本：scripts/check-source-budget.sh。
 
 crates/agent/src/engine.rs 663
-crates/core/src/storage/sqlite.rs 828
 crates/hub/src/bus.rs 705
 client/src/App.tsx 811
 client/src/view/node-state.ts 446
