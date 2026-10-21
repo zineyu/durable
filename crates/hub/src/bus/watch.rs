@@ -1,270 +1,21 @@
-use std::collections::{HashMap, VecDeque};
+//! 单个节点的常驻上游订阅：健康探测、水位起点、逐帧分发与指数退避重连。
+//! 事件如何进入总线在父模块；resync 语义见 ADR 0030。
+
 use std::convert::Infallible;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 use std::time::Duration;
 
 use agent::HealthResponse;
 use axum::body::Bytes;
-use durable::{NodeMetadata, NodeName, ResyncReason, SessionId, StreamEvent};
+use durable::{NodeMetadata, NodeName, ResyncReason, StreamEvent};
 use futures_util::StreamExt;
-use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
+use super::Bus;
+use super::view::NodeView;
 use crate::node_probe;
-use crate::protocol::{HubStreamEvent, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION};
+use crate::protocol::{NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION};
 use crate::{ApiError, HubOptions};
-
-/// 一个客户端订阅时得到的内容：可回放的事件、实时接收端，或一条 resync 指示。
-pub struct Subscription {
-    pub replay: Vec<HubStreamEvent>,
-    pub receiver: Option<broadcast::Receiver<HubStreamEvent>>,
-    pub resync: Option<ResyncReason>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NodeView {
-    pub status: NodeStatus,
-    pub detail: Option<String>,
-}
-
-/// hub 的广播总线：分配广播序号、保留有界回放窗口、向所有客户端分发。
-pub struct Bus {
-    sender: broadcast::Sender<HubStreamEvent>,
-    state: Mutex<BusState>,
-    replay_window: usize,
-}
-
-struct BusState {
-    seq: u64,
-    window: VecDeque<HubStreamEvent>,
-    views: HashMap<NodeName, NodeView>,
-}
-
-impl Bus {
-    #[must_use]
-    pub fn new(broadcast_capacity: usize, replay_window: usize) -> Self {
-        let (sender, _) = broadcast::channel(broadcast_capacity);
-        Self {
-            sender,
-            state: Mutex::new(BusState {
-                seq: 0,
-                window: VecDeque::new(),
-                views: HashMap::new(),
-            }),
-            replay_window,
-        }
-    }
-
-    /// 取总线状态锁。
-    ///
-    /// 持锁线程 panic 会毒化锁。毒化之后共享状态不再可信，所以作为内部错误上报，而不是恢复使用。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    fn state(&self) -> Result<MutexGuard<'_, BusState>, ApiError> {
-        self.state
-            .lock()
-            .map_err(|_| ApiError::internal("bus 状态锁已毒化".to_owned()))
-    }
-
-    /// 当前最大广播序号。客户端用它作为续传游标的起点。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn max_seq(&self) -> Result<u64, ApiError> {
-        Ok(self.state()?.seq)
-    }
-
-    /// 节点视图。没有记录的节点按「尚未连接」的不可达处理。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn view(&self, name: &NodeName) -> Result<NodeView, ApiError> {
-        let state = self.state()?;
-        Ok(state.views.get(name).cloned().unwrap_or(NodeView {
-            status: NodeStatus::Unreachable,
-            detail: Some("尚未连接".to_owned()),
-        }))
-    }
-
-    /// 订阅广播。`after` 落在回放窗口之外时返回 resync，而不是回放。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn subscribe(&self, after: u64) -> Result<Subscription, ApiError> {
-        let state = self.state()?;
-        let seq = state.seq;
-        let window_start = match state.window.front() {
-            Some(event) => seq_of(event),
-            None => seq.saturating_add(1),
-        };
-        let outside = after > seq || (after + 1 < window_start);
-        let receiver = self.sender.subscribe();
-        if outside {
-            return Ok(Subscription {
-                replay: Vec::new(),
-                receiver: None,
-                resync: Some(ResyncReason::Lagged {
-                    skipped: seq.saturating_sub(after),
-                }),
-            });
-        }
-        let replay = state
-            .window
-            .iter()
-            .filter(|event| seq_of(event) > after)
-            .cloned()
-            .collect();
-        Ok(Subscription {
-            replay,
-            receiver: Some(receiver),
-            resync: None,
-        })
-    }
-
-    /// 写入节点视图。只有视图真的变了才广播。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn set_view(&self, name: NodeName, view: NodeView) -> Result<(), ApiError> {
-        let previous = self.state()?.views.insert(name.clone(), view.clone());
-        if previous.as_ref() == Some(&view) {
-            return Ok(());
-        }
-        match view.status {
-            NodeStatus::Ok => tracing::info!(node = %name, "节点可用"),
-            status => tracing::warn!(
-                node = %name,
-                status = ?status,
-                detail = view.detail.as_deref().unwrap_or(""),
-                "节点不可用"
-            ),
-        }
-        self.publish_fact(|hub_seq| HubStreamEvent::NodeStatusChanged {
-            hub_seq,
-            name,
-            status: view.status,
-            detail: view.detail,
-        })
-    }
-
-    /// 记录节点登记并广播。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn node_registered(&self, node: NodeMetadata) -> Result<(), ApiError> {
-        self.publish_fact(|hub_seq| HubStreamEvent::NodeRegistered { hub_seq, node })
-    }
-
-    /// 清除节点视图并广播删除。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn node_removed(&self, name: NodeName) -> Result<(), ApiError> {
-        self.state()?.views.remove(&name);
-        self.publish_fact(|hub_seq| HubStreamEvent::NodeRemoved { hub_seq, name })
-    }
-
-    /// 广播一条事实事件。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    pub fn node_fact(
-        &self,
-        node: NodeName,
-        id: i64,
-        session_id: Option<SessionId>,
-        timestamp: i64,
-        event: durable::FactEvent,
-    ) -> Result<(), ApiError> {
-        self.publish_fact(|hub_seq| HubStreamEvent::Fact {
-            hub_seq,
-            node,
-            id,
-            session_id,
-            timestamp,
-            event,
-        })
-    }
-
-    /// 转发增量。仅实时，不进回放窗口。
-    pub fn delta(
-        &self,
-        node: NodeName,
-        session_id: SessionId,
-        message_id: durable::MessageId,
-        text: String,
-        timestamp: i64,
-    ) {
-        self.broadcast(HubStreamEvent::Delta {
-            node,
-            session_id,
-            message_id,
-            text,
-            timestamp,
-        });
-    }
-
-    /// 转发重试提示。仅实时，不进回放窗口。
-    pub fn retry(
-        &self,
-        node: NodeName,
-        session_id: SessionId,
-        attempt: u32,
-        max_attempts: u32,
-        delay_ms: u64,
-    ) {
-        self.broadcast(HubStreamEvent::Retry {
-            node,
-            session_id,
-            attempt,
-            max_attempts,
-            delay_ms,
-        });
-    }
-
-    /// 分配广播序号，进入回放窗口后广播。
-    ///
-    /// # Errors
-    ///
-    /// - `ApiError::internal`：hub 的状态锁已被毒化。
-    fn publish_fact(&self, build: impl FnOnce(u64) -> HubStreamEvent) -> Result<(), ApiError> {
-        let mut state = self.state()?;
-        state.seq += 1;
-        let event = build(state.seq);
-        state.window.push_back(event.clone());
-        while state.window.len() > self.replay_window {
-            state.window.pop_front();
-        }
-        self.broadcast(event);
-        Ok(())
-    }
-
-    /// 尽力广播。没有订阅者时 `send` 返回错误，这不是失败路径，因此只记录接收者数量。
-    fn broadcast(&self, event: HubStreamEvent) {
-        let _receivers = self.sender.send(event);
-    }
-}
-
-fn seq_of(event: &HubStreamEvent) -> u64 {
-    match event {
-        HubStreamEvent::Fact { hub_seq, .. }
-        | HubStreamEvent::NodeRegistered { hub_seq, .. }
-        | HubStreamEvent::NodeRemoved { hub_seq, .. }
-        | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
-        HubStreamEvent::Delta { .. }
-        | HubStreamEvent::Retry { .. }
-        | HubStreamEvent::Resync { .. } => 0,
-    }
-}
 
 /// 为单个节点维持常驻上游事件流，带指数退避重连。
 pub(crate) struct NodeWatcher {
@@ -588,13 +339,6 @@ mod tests {
         NodeName::parse(raw).expect("合法节点名")
     }
 
-    fn view(status: NodeStatus, detail: &str) -> NodeView {
-        NodeView {
-            status,
-            detail: Some(detail.to_owned()),
-        }
-    }
-
     /// 退避序列：底数翻倍、抖动 ±20%、抖动之后仍不超过上限。
     #[test]
     fn backoff_delay_stays_within_jittered_bounds() {
@@ -661,45 +405,6 @@ mod tests {
             next_attempt(&failure, true, 5),
             1,
             "刚恢复过的节点从第一次重来"
-        );
-    }
-
-    /// 状态说明变化也广播；连续相同的组合不发。
-    #[test]
-    fn set_view_broadcasts_detail_changes_once() {
-        let bus = Bus::new(16, 16);
-        let mut receiver = bus.sender.subscribe();
-        let laptop = name("laptop");
-
-        bus.set_view(
-            laptop.clone(),
-            view(NodeStatus::Unreachable, "连接节点失败"),
-        )
-        .expect("写入视图");
-        bus.set_view(
-            laptop.clone(),
-            view(NodeStatus::Unreachable, "连接节点失败"),
-        )
-        .expect("写入视图");
-        bus.set_view(laptop.clone(), view(NodeStatus::Unreachable, "事件流结束"))
-            .expect("写入视图");
-
-        assert_eq!(
-            bus.max_seq().expect("取最大序号"),
-            2,
-            "相同的 (status, detail) 只广播一次"
-        );
-
-        let mut details = Vec::new();
-        while let Ok(HubStreamEvent::NodeStatusChanged { detail, .. }) = receiver.try_recv() {
-            details.push(detail);
-        }
-        assert_eq!(
-            details,
-            vec![
-                Some("连接节点失败".to_owned()),
-                Some("事件流结束".to_owned())
-            ]
         );
     }
 }

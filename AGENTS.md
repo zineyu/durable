@@ -53,7 +53,7 @@
 | `protocol.rs` | 对外协议 DTO 与协议版本 |
 | `config.rs`、`error.rs`、`cancel.rs` | 配置解析、HTTP 错误信封、取消信号 |
 
-`hub`：`lib.rs` 路由、节点增删改、节点作用域转发与静态资源；`bus.rs` 广播序号、回放窗口、节点视图与上游 watcher；`sse.rs` 合并事件流；`node_probe.rs` 上游探测；`protocol.rs` 与 `error.rs`。
+`hub`：`lib.rs` 路由、节点增删改、节点作用域转发与静态资源；`bus/` 广播序号、回放窗口、节点视图与上游 watcher；`sse.rs` 合并事件流；`node_probe.rs` 上游探测；`protocol.rs` 与 `error.rs`。
 
 `client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer 与状态推导；`components/`、`stories/`、`styles/`。
 
