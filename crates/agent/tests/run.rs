@@ -7,15 +7,44 @@ mod support;
 use support::provider::ToolCallSpec;
 use support::{Harness, Script};
 
-fn user_texts(tree: &agent::SessionTree) -> Vec<&str> {
-    tree.nodes
-        .iter()
-        .filter(|node| node.role == agent::MessageRole::User)
-        .map(|node| node.text.as_str())
+/// 指定角色的全部消息文本，按树序。
+async fn texts(
+    harness: &Harness,
+    session: &agent::SessionId,
+    role: agent::MessageRole,
+) -> Vec<String> {
+    let tree = harness.tree(session).await;
+    let mut texts = Vec::new();
+    for node in tree.nodes.iter().filter(|node| node.role == role) {
+        texts.push(harness.text(session, node.id).await);
+    }
+    texts
+}
+
+/// 一条消息的工具结果块。
+async fn tool_states(
+    harness: &Harness,
+    session: &agent::SessionId,
+    message: agent::MessageId,
+) -> Vec<(String, agent::ToolResultState)> {
+    harness
+        .body(session, message)
+        .await
+        .tool_results()
+        .map(|(call_id, state)| (call_id.to_owned(), state.clone()))
         .collect()
 }
 
-/// 规格 user story A-8：assistant 文本流式落库，run 结束后内容一致。
+/// 工具成功的结局。
+fn succeeded(content: &str) -> agent::ToolResultState {
+    agent::ToolResultState::Finished {
+        outcome: agent::ToolOutcome::Succeeded {
+            content: content.to_owned(),
+        },
+    }
+}
+
+/// 规格 user story A-8：assistant 文本流式传输，run 结束时定型入树。
 #[tokio::test]
 async fn streams_assistant_text_and_finishes_run() {
     let harness = Harness::start_with(
@@ -35,10 +64,10 @@ async fn streams_assistant_text_and_finishes_run() {
     let user = &tree.nodes[0];
     let assistant = &tree.nodes[1];
     assert_eq!(user.role, agent::MessageRole::User);
-    assert_eq!(user.text.as_str(), "打个招呼");
+    assert_eq!(harness.text(&session.id, user.id).await, "打个招呼");
     assert_eq!(user.parent_id, None);
     assert_eq!(assistant.role, agent::MessageRole::Assistant);
-    assert_eq!(assistant.text.as_str(), "你好，世界");
+    assert_eq!(harness.text(&session.id, assistant.id).await, "你好，世界");
     assert_eq!(assistant.parent_id, Some(user.id));
     assert_eq!(tree.active_leaf, Some(assistant.id));
 
@@ -69,17 +98,17 @@ async fn records_run_lifecycle_events_in_order() {
             "session_created",
             "message_queued",
             "message_appended",
-            "message_appended",
             "active_leaf_changed",
             "queue_item_removed",
             "run_started",
-            "message_updated",
+            "message_appended",
+            "active_leaf_changed",
             "run_finished",
         ]
     );
 }
 
-/// 规格「模型调用」：同一轮多个工具调用按序执行，收集结果后再请求下一轮。
+/// 规格「模型调用」：同一轮多个工具调用按序执行，结果作为独立 tool 节点入树后再请求下一轮。
 #[tokio::test]
 async fn executes_tool_calls_in_order_and_continues() {
     let harness = Harness::start_with(
@@ -101,23 +130,41 @@ async fn executes_tool_calls_in_order_and_continues() {
     harness.submit_message(&session.id, "写入并读取").await;
     let tree = harness.wait_idle(&session.id).await;
 
+    assert_eq!(tree.nodes.len(), 5);
     let assistant = &tree.nodes[1];
-    assert_eq!(assistant.tool_calls.len(), 2);
-    assert_eq!(assistant.tool_calls[0].name, "write_file");
+    assert_eq!(assistant.role, agent::MessageRole::Assistant);
+    let calls = harness.body(&session.id, assistant.id).await;
     assert_eq!(
-        assistant.tool_calls[0].outcome,
-        agent::ToolOutcome::Succeeded {
-            content: "写入 6 字节: notes.txt".into(),
-        }
+        calls.tool_calls().collect::<Vec<_>>(),
+        vec![
+            (
+                "call_1",
+                "write_file",
+                r#"{"path":"notes.txt","content":"记录"}"#
+            ),
+            ("call_2", "read_file", r#"{"path":"notes.txt"}"#),
+        ]
     );
-    assert_eq!(assistant.tool_calls[1].name, "read_file");
+
+    let first = &tree.nodes[2];
+    let second = &tree.nodes[3];
+    assert_eq!(first.role, agent::MessageRole::Tool);
+    assert_eq!(second.role, agent::MessageRole::Tool);
+    assert_eq!(first.parent_id, Some(assistant.id));
+    assert_eq!(second.parent_id, Some(first.id));
     assert_eq!(
-        assistant.tool_calls[1].outcome,
-        agent::ToolOutcome::Succeeded {
-            content: "1\t记录\n".into(),
-        }
+        tool_states(&harness, &session.id, first.id).await,
+        vec![("call_1".to_owned(), succeeded("写入 6 字节: notes.txt"))]
     );
-    assert_eq!(assistant.text.as_str(), "完成");
+    assert_eq!(
+        tool_states(&harness, &session.id, second.id).await,
+        vec![("call_2".to_owned(), succeeded("1\t记录\n"))]
+    );
+
+    let final_assistant = &tree.nodes[4];
+    assert_eq!(final_assistant.role, agent::MessageRole::Assistant);
+    assert_eq!(harness.text(&session.id, final_assistant.id).await, "完成");
+    assert_eq!(tree.active_leaf, Some(final_assistant.id));
     assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
     assert_eq!(
         std::fs::read_to_string(harness.workspace_path("workspace").join("notes.txt"))
@@ -132,13 +179,19 @@ async fn executes_tool_calls_in_order_and_continues() {
             "session_created",
             "message_queued",
             "message_appended",
-            "message_appended",
             "active_leaf_changed",
             "queue_item_removed",
             "run_started",
-            "tool_call_recorded",
-            "tool_call_recorded",
+            "message_appended",
+            "active_leaf_changed",
+            "message_appended",
+            "active_leaf_changed",
             "message_updated",
+            "message_appended",
+            "active_leaf_changed",
+            "message_updated",
+            "message_appended",
+            "active_leaf_changed",
             "run_finished",
         ]
     );
@@ -188,14 +241,14 @@ async fn executes_queued_messages_in_fifo_order() {
     }
     let tree = harness.wait_idle(&session.id).await;
 
-    assert_eq!(user_texts(&tree), vec!["一", "二", "三"]);
-    let assistant_texts: Vec<&str> = tree
-        .nodes
-        .iter()
-        .filter(|node| node.role == agent::MessageRole::Assistant)
-        .map(|node| node.text.as_str())
-        .collect();
-    assert_eq!(assistant_texts, vec!["A", "B", "C"]);
+    assert_eq!(
+        texts(&harness, &session.id, agent::MessageRole::User).await,
+        vec!["一", "二", "三"]
+    );
+    assert_eq!(
+        texts(&harness, &session.id, agent::MessageRole::Assistant).await,
+        vec!["A", "B", "C"]
+    );
     assert_eq!(tree.runs.len(), 3);
     assert!(
         tree.runs
@@ -240,15 +293,18 @@ async fn removes_pending_queue_item_before_execution() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     let tree = harness.wait_idle(&session.id).await;
-    assert_eq!(user_texts(&tree), vec!["一", "二"]);
+    assert_eq!(
+        texts(&harness, &session.id, agent::MessageRole::User).await,
+        vec!["一", "二"]
+    );
     assert_eq!(tree.queue.len(), 0);
     assert_eq!(tree.runs[0].status, agent::RunStatus::Cancelled);
     assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
 }
 
-/// 规格 user story A-10：取消保留已收到的部分 assistant 文本，队列继续。
+/// 规格 ADR 0037：取消丢弃未定型的 assistant 内容，队列继续。
 #[tokio::test]
-async fn cancels_running_run_and_keeps_partial_text() {
+async fn cancels_running_run_and_discards_partial_text() {
     let harness = Harness::start_with(
         agent::EngineConfig::default(),
         vec![
@@ -258,16 +314,28 @@ async fn cancels_running_run_and_keeps_partial_text() {
     )
     .await;
     let session = harness.session("workspace").await;
+    let cursor = harness.bootstrap().await.max_event_id;
+    let mut events = harness.subscribe(cursor).await;
 
     harness.submit_message(&session.id, "开始").await;
     harness.submit_message(&session.id, "队列中的消息").await;
-    harness
-        .wait_for_tree(&session.id, |tree| {
-            tree.nodes.iter().any(|node| {
-                node.role == agent::MessageRole::Assistant && !node.text.as_str().is_empty()
-            })
-        })
-        .await;
+
+    let mut partial = String::new();
+    while partial.is_empty() {
+        let event = tokio::time::timeout(Duration::from_secs(10), events.next())
+            .await
+            .expect("等待 SSE 事件")
+            .expect("事件流未结束");
+        if let agent::StreamEvent::Delta {
+            kind: agent::DeltaKind::Text,
+            text,
+            ..
+        } = event
+        {
+            partial.push_str(&text);
+        }
+    }
+    assert_eq!(partial, "部分输出");
 
     let response = harness.cancel_run(&session.id).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -275,9 +343,19 @@ async fn cancels_running_run_and_keeps_partial_text() {
     let tree = harness.wait_idle(&session.id).await;
     assert_eq!(tree.runs[0].status, agent::RunStatus::Cancelled);
     assert_eq!(tree.runs[0].failure, None);
-    assert_eq!(tree.nodes[1].text.as_str(), "部分输出");
+    assert_eq!(
+        texts(&harness, &session.id, agent::MessageRole::Assistant).await,
+        vec!["下一项"],
+        "取消的步不入树"
+    );
+    assert_eq!(
+        tree.nodes
+            .iter()
+            .filter(|node| node.role == agent::MessageRole::User)
+            .count(),
+        2
+    );
     assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
-    assert_eq!(tree.nodes[3].text.as_str(), "下一项");
 }
 
 /// 规格 user story A-23：多个标签页订阅同一条事件流，任一命令对全部订阅者生效。
@@ -319,11 +397,11 @@ async fn broadcasts_facts_to_every_subscriber() {
             vec![
                 "message_queued",
                 "message_appended",
-                "message_appended",
                 "active_leaf_changed",
                 "queue_item_removed",
                 "run_started",
-                "message_updated",
+                "message_appended",
+                "active_leaf_changed",
                 "run_finished",
             ]
         );
@@ -351,16 +429,25 @@ async fn passes_tool_failure_to_model_and_continues() {
         .await;
     let tree = harness.wait_idle(&session.id).await;
 
-    let assistant = &tree.nodes[1];
+    let tool = &tree.nodes[2];
+    assert_eq!(tool.role, agent::MessageRole::Tool);
     assert_eq!(
-        assistant.tool_calls[0].outcome,
-        agent::ToolOutcome::Failed {
-            code: agent::ToolErrorCode::FileNotFound,
-            message: "文件不存在: absent.txt".into(),
-        }
+        tool_states(&harness, &session.id, tool.id).await,
+        vec![(
+            "call_1".to_owned(),
+            agent::ToolResultState::Finished {
+                outcome: agent::ToolOutcome::Failed {
+                    code: agent::ToolErrorCode::FileNotFound,
+                    message: "文件不存在: absent.txt".into(),
+                },
+            },
+        )]
     );
     assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
-    assert_eq!(assistant.text.as_str(), "已记录失败");
+    assert_eq!(
+        harness.text(&session.id, tree.nodes[3].id).await,
+        "已记录失败"
+    );
 
     let requests = harness.provider.requests();
     assert_eq!(requests.len(), 2, "失败后继续请求下一轮");
@@ -378,9 +465,9 @@ async fn passes_tool_failure_to_model_and_continues() {
     );
 }
 
-/// 规格「事实事件」与 user story 9：工具调用在 run 结束前就以事实事件广播。
+/// 规格 ADR 0038：tool 节点在执行前入树，结局用 `message_updated` 广播。
 #[tokio::test]
-async fn broadcasts_tool_call_fact_while_run_is_running() {
+async fn broadcasts_tool_node_before_and_after_execution() {
     let harness = Harness::start_with(
         agent::EngineConfig::default(),
         vec![
@@ -399,8 +486,9 @@ async fn broadcasts_tool_call_fact_while_run_is_running() {
 
     harness.submit_message(&session.id, "写入").await;
 
-    let mut kinds = Vec::new();
-    let recorded = loop {
+    let mut running = None;
+    let mut finished = None;
+    while finished.is_none() {
         let event = tokio::time::timeout(Duration::from_secs(10), events.next())
             .await
             .expect("等待 SSE 事件")
@@ -408,31 +496,36 @@ async fn broadcasts_tool_call_fact_while_run_is_running() {
         let agent::StreamEvent::Fact { event, .. } = event else {
             continue;
         };
-        let kind = serde_json::to_value(&event).expect("事件可序列化")["kind"]
-            .as_str()
-            .expect("事件有 kind")
-            .to_owned();
-        kinds.push(kind);
-        if let agent::FactEvent::ToolCallRecorded { tool_call, .. } = event {
-            break tool_call;
+        match event {
+            agent::FactEvent::MessageAppended { message, .. }
+                if message.role == agent::MessageRole::Tool =>
+            {
+                running = Some(message);
+            }
+            agent::FactEvent::MessageUpdated { message, .. }
+                if message.role == agent::MessageRole::Tool =>
+            {
+                finished = Some(message);
+            }
+            agent::FactEvent::RunFinished { .. } => panic!("工具节点必须在 run 结束前广播"),
+            _ => {}
         }
-        assert!(
-            !matches!(event, agent::FactEvent::RunFinished { .. }),
-            "工具调用必须在 run 结束前广播: {kinds:?}"
-        );
-    };
+    }
 
-    assert_eq!(recorded.name, "write_file");
+    let running = running.expect("tool 节点先以执行中状态入树");
+    assert_eq!(running.parts.len(), 1);
+    assert_eq!(running.parts[0].state, agent::PartState::Running);
+    let finished = finished.expect("结局以 message_updated 广播");
+    assert_eq!(finished.id, running.id);
+    assert_eq!(finished.parts[0].state, agent::PartState::Complete);
     assert_eq!(
-        recorded.outcome,
-        agent::ToolOutcome::Succeeded {
-            content: "写入 6 字节: notes.txt".into(),
-        }
+        tool_states(&harness, &session.id, finished.id).await,
+        vec![("call_1".to_owned(), succeeded("写入 6 字节: notes.txt"))]
     );
 
     let tree = harness.tree(&session.id).await;
     assert!(tree.session.busy, "run 仍在运行");
-    assert_eq!(tree.nodes[1].tool_calls, vec![recorded]);
+    assert_eq!(tree.nodes[2].id, finished.id);
 
     let response = harness.cancel_run(&session.id).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);

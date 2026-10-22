@@ -21,7 +21,7 @@ export type RetryState = {
   delayMs: number;
 };
 
-export type ToolState = 'running' | 'succeeded' | 'failed';
+export type ToolState = 'running' | 'succeeded' | 'failed' | 'unknown';
 
 export type SessionSummary = {
   id: SessionId;

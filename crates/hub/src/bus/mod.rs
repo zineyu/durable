@@ -94,6 +94,7 @@ impl Bus {
         node: NodeName,
         session_id: SessionId,
         message_id: durable::MessageId,
+        kind: durable::DeltaKind,
         text: String,
         timestamp: i64,
     ) {
@@ -101,6 +102,7 @@ impl Bus {
             node,
             session_id,
             message_id,
+            kind,
             text,
             timestamp,
         });

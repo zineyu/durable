@@ -317,9 +317,10 @@ fn dispatch(
         StreamEvent::Delta {
             session_id,
             message_id,
+            kind,
             text,
             timestamp,
-        } => bus.delta(name.clone(), session_id, message_id, text, timestamp),
+        } => bus.delta(name.clone(), session_id, message_id, kind, text, timestamp),
         StreamEvent::Retry {
             session_id,
             attempt,

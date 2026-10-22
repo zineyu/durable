@@ -118,6 +118,7 @@ mod tests {
             &StreamEvent::Delta {
                 session_id: SessionId::parse("s-1").expect("合法 session id"),
                 message_id: durable::MessageId::parse(2).expect("合法消息 id"),
+                kind: durable::DeltaKind::Text,
                 text: "增量".to_owned(),
                 timestamp: 9,
             },

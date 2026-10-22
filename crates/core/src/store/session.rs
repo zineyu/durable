@@ -1,12 +1,12 @@
 //! session 的创建、改名、删除与读取，以及分支命令共用的空闲判定。
 //! 队列写入在 `queue`，run 生命周期在 `run`，分支命令在 `branch`。
 
-use super::{Store, now_millis, path_to_leaf, snapshot_into_tree};
+use super::{Store, now_millis, snapshot_into_tree};
 use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::FactEvent;
-use crate::id::{SessionId, SessionTitle, WorkspacePath};
-use crate::message::MessageNode;
+use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
+use crate::message::{MessageBody, MessageNode};
 use crate::session::{SessionMetadata, SessionRecord, SessionTree};
 use crate::storage::SessionSnapshot;
 
@@ -145,8 +145,24 @@ impl Store {
     /// - `StoreError::Database`：数据库读取失败。
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn transcript(&self, id: &SessionId) -> Result<Vec<MessageNode>, StoreError> {
-        let tree = self.session_tree(id).await?;
-        Ok(path_to_leaf(&tree.nodes, tree.active_leaf))
+        self.find_session(id).await?;
+        self.storage.transcript(id).await
+    }
+
+    /// 按消息 id 批量读取块正文。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    pub async fn message_bodies(
+        &self,
+        id: &SessionId,
+        ids: &[MessageId],
+    ) -> Result<Vec<MessageBody>, StoreError> {
+        self.find_session(id).await?;
+        self.storage.message_bodies(id, ids).await
     }
 
     /// 分支命令的前置条件：session 空闲且队列为空。队列非空优先于 run 进行中报告。
@@ -177,6 +193,16 @@ impl Store {
     /// - `StoreError::Database`：数据库读取失败。
     pub async fn busy(&self, id: &SessionId) -> Result<bool, StoreError> {
         self.storage.busy(id).await
+    }
+
+    /// 需要执行循环的 session：有 running 的 run 或队列非空。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
+    pub async fn sessions_with_work(&self) -> Result<Vec<SessionId>, StoreError> {
+        self.storage.sessions_with_work().await
     }
 
     /// 队列非空的全部 session。

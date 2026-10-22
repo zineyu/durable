@@ -1,14 +1,21 @@
 import type { BootstrapResponse } from '../api/generated/BootstrapResponse';
 import type { HubBootstrap } from '../api/generated/HubBootstrap';
 import type { HubStreamEvent } from '../api/generated/HubStreamEvent';
+import type { MessageBody } from '../api/generated/MessageBody';
 import type { NodeName } from '../api/generated/NodeName';
-import type { NodeStatus } from '../api/generated/NodeStatus';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTree } from '../api/generated/SessionTree';
 import {
   applyDelta,
+  applyMessageBodies,
+  failMessageBodies,
+  requestMessageBodies,
+  retryMessageBodies,
+} from './bodies';
+import {
   applyNodeFact,
   applyRetry,
+  clearRetry,
   emptyNodeState,
   loadNodeBootstrap,
   loadSessionTree,
@@ -16,15 +23,7 @@ import {
   storeSession,
 } from './node-state';
 import type { NodeState } from './node-state';
-import type { ConnectionState } from './types';
-
-/// 节点表的一项。`detail` 是节点状态的具体说明。
-export type NodeRecord = {
-  name: NodeName;
-  url: string;
-  status: NodeStatus;
-  detail: string | null;
-};
+import type { ConnectionState, NodeRecord } from './types';
 
 export type HubState = {
   nodes: NodeRecord[];
@@ -52,6 +51,10 @@ export type ClientAction =
   | { type: 'stream'; event: HubStreamEvent }
   | { type: 'tree'; node: NodeName; tree: SessionTree }
   | { type: 'session'; node: NodeName; session: SessionMetadata }
+  | { type: 'bodies-request'; node: NodeName; ids: number[] }
+  | { type: 'bodies-failed'; node: NodeName; ids: number[] }
+  | { type: 'bodies-retry'; node: NodeName; ids: number[] }
+  | { type: 'bodies'; node: NodeName; ids: number[]; messages: MessageBody[] }
   | { type: 'select-node'; node: NodeName | null }
   | { type: 'connection'; connection: ConnectionState }
   | { type: 'error'; error: ClientError }
@@ -87,6 +90,16 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
         state,
         action.node,
         storeSession(state.nodes[action.node] ?? emptyNodeState, action.session),
+      );
+    case 'bodies-request':
+      return mapShard(state, action.node, (shard) => requestMessageBodies(shard, action.ids));
+    case 'bodies-failed':
+      return mapShard(state, action.node, (shard) => failMessageBodies(shard, action.ids));
+    case 'bodies-retry':
+      return mapShard(state, action.node, (shard) => retryMessageBodies(shard, action.ids));
+    case 'bodies':
+      return mapShard(state, action.node, (shard) =>
+        applyMessageBodies(shard, action.ids, action.messages),
       );
     case 'select-node':
       return { ...state, hub: { ...state.hub, selected: action.node } };
@@ -147,7 +160,10 @@ export function applyStreamEvent(state: ClientState, event: HubStreamEvent): Cli
       if (shard === undefined) {
         return state;
       }
-      const next = applyDelta(shard, event.sessionId, event.messageId, event.text);
+      const next = clearRetry(
+        applyDelta(shard, event.sessionId, event.messageId, event.kind, event.text),
+        event.sessionId,
+      );
       return next === shard ? state : withShard(state, event.node, next);
     }
     case 'retry': {
@@ -228,6 +244,20 @@ function advanceCursor(state: ClientState, hubSeq: number): ClientState | null {
 
 function withShard(state: ClientState, node: NodeName, shard: NodeState): ClientState {
   return { ...state, nodes: { ...state.nodes, [node]: shard } };
+}
+
+/// 只作用于已有分片；分片不存在时保持原状态。
+function mapShard(
+  state: ClientState,
+  node: NodeName,
+  update: (shard: NodeState) => NodeState,
+): ClientState {
+  const shard = state.nodes[node];
+  if (shard === undefined) {
+    return state;
+  }
+  const next = update(shard);
+  return next === shard ? state : withShard(state, node, next);
 }
 
 function withNodeRecords(state: ClientState, nodes: NodeRecord[]): ClientState {

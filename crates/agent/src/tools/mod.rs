@@ -37,6 +37,8 @@ pub struct ToolDefinition {
     pub name: &'static str,
     pub description: &'static str,
     pub parameters: Value,
+    /// 重复执行给出相同结果且无额外副作用。只有幂等工具允许在崩溃后重跑。
+    pub idempotent: bool,
 }
 
 impl ToolDefinition {
@@ -60,6 +62,13 @@ pub trait ToolBox: Send + Sync {
     fn definitions(&self) -> Vec<ToolDefinition>;
 
     async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolOutcome;
+
+    /// 该工具是否幂等。未登记的工具按非幂等处理。
+    fn idempotent(&self, name: &str) -> bool {
+        self.definitions()
+            .iter()
+            .any(|definition| definition.name == name && definition.idempotent)
+    }
 }
 
 /// 未注册任何工具的占位执行器：所有调用返回 `unknown_tool`。

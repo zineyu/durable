@@ -81,6 +81,8 @@ pub struct ChatToolCall {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChatChunk {
     Text(String),
+    /// 供应商的推理内容，与正文分开累积。
+    Reasoning(String),
     ToolCall {
         index: usize,
         id: Option<String>,
@@ -304,6 +306,14 @@ fn chunks_from_value(value: &serde_json::Value) -> Result<Vec<ChatChunk>, Provid
         && !content.is_empty()
     {
         chunks.push(ChatChunk::Text(content.to_owned()));
+    }
+    for key in ["reasoning_content", "reasoning"] {
+        if let Some(reasoning) = delta.get(key).and_then(serde_json::Value::as_str)
+            && !reasoning.is_empty()
+        {
+            chunks.push(ChatChunk::Reasoning(reasoning.to_owned()));
+            break;
+        }
     }
     if let Some(calls) = delta
         .get("tool_calls")

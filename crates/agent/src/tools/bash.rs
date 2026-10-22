@@ -28,6 +28,7 @@ pub(crate) struct Arguments {
 
 pub(crate) fn definition() -> ToolDefinition {
     ToolDefinition {
+        idempotent: false,
         name: "bash",
         description: "在 workspace 根内以 sh -c 执行命令。stdin 关闭，stdout 与 stderr 合并返回，返回退出码与耗时。",
         parameters: json!({

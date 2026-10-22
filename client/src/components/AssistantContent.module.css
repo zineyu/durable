@@ -1,0 +1,38 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.reasoning {
+  border-left: var(--marker-size) solid var(--color-border-3);
+  padding-left: var(--space-3);
+}
+
+.summary {
+  cursor: pointer;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-tertiary);
+  list-style: none;
+}
+
+.summary:hover {
+  color: var(--color-text-secondary);
+}
+
+.summary:active {
+  color: var(--color-text);
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.reasoningBody {
+  padding-top: var(--space-1-5);
+  font-size: var(--text-sm);
+  line-height: var(--leading-sm);
+  color: var(--color-text-secondary);
+}

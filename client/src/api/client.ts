@@ -6,7 +6,9 @@ import type { ErrorResponse } from './generated/ErrorResponse';
 import type { HubBootstrap } from './generated/HubBootstrap';
 import type { HubErrorCode } from './generated/HubErrorCode';
 import type { HubErrorResponse } from './generated/HubErrorResponse';
-import type { MessageNode } from './generated/MessageNode';
+import type { MessageBodiesRequest } from './generated/MessageBodiesRequest';
+import type { MessageBodiesResponse } from './generated/MessageBodiesResponse';
+import type { MessageSkeleton } from './generated/MessageSkeleton';
 import type { NodeName } from './generated/NodeName';
 import type { NodeSnapshot } from './generated/NodeSnapshot';
 import type { QueueItem } from './generated/QueueItem';
@@ -31,11 +33,19 @@ export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: ApiFailu
 
 type FailureBody = ErrorResponse | HubErrorResponse;
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<ApiResult<T>> {
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+): Promise<ApiResult<T>> {
   const init: RequestInit = { method };
   if (body !== undefined) {
     init.headers = { 'content-type': 'application/json' };
     init.body = JSON.stringify(body);
+  }
+  if (signal !== undefined) {
+    init.signal = signal;
   }
   const response = await fetch(path, init).catch(() => null);
   if (response === null) {
@@ -121,9 +131,18 @@ export const api = {
     id: string,
     messageId: number,
     text: string,
-  ): Promise<ApiResult<MessageNode>> {
+  ): Promise<ApiResult<MessageSkeleton>> {
     const body: EditMessageRequest = { text };
     return request('POST', `${sessionPath(node, id)}/messages/${messageId}/edit`, body);
+  },
+  messageBodies(
+    node: NodeName,
+    id: string,
+    messageIds: number[],
+    signal?: AbortSignal,
+  ): Promise<ApiResult<MessageBodiesResponse>> {
+    const body: MessageBodiesRequest = { messageIds };
+    return request('POST', `${sessionPath(node, id)}/message-bodies`, body, signal);
   },
   retryAssistantMessage(
     node: NodeName,

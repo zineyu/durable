@@ -1,7 +1,10 @@
-//! run 引擎的门面：执行循环、run 生命周期与结果归类。
-//! 模型流与限流退避在 `step`，工具循环在 `tools`，请求装配在 `prompt`。
+//! run 引擎的门面：执行循环、run 生命周期与续跑点驱动。
+//! 模型流在 `step`，工具循环在 `tools`，请求装配在 `prompt`，续跑推导在 `recover`，
+//! 上下文压缩在 `compact`。
 
+mod compact;
 mod prompt;
+mod recover;
 mod step;
 mod tools;
 
@@ -9,17 +12,18 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use durable::{
-    EventBus, MessageContent, MessageNode, RunFailure, RunFailureCode, RunStart, RunStatus,
-    SessionId, Store, StoreError, ToolCallRecord,
+    EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunStart, RunStatus, SessionId,
+    Store, StoreError, ToolResultState,
 };
 use tokio::sync::{Mutex, Notify};
 
+use self::recover::ResumePoint;
 use crate::cancel::Cancellation;
 use crate::config::EngineConfig;
-use crate::provider::{ChatStream, ModelProvider, ProviderError};
+use crate::provider::ModelProvider;
 use crate::tools::ToolBox;
 
-/// run 引擎：session 内串行、session 间并发、流式生成、工具循环与取消。
+/// run 引擎：session 内串行、session 间并发、流式生成、工具循环与续跑。
 pub struct RunEngine {
     store: Arc<Store>,
     provider: Arc<dyn ModelProvider>,
@@ -36,27 +40,29 @@ struct RunControl {
     done: Arc<Notify>,
 }
 
+/// run 的结束方式。
 struct RunOutcome {
     status: RunStatus,
     failure: Option<RunFailure>,
-    text: MessageContent,
-    tool_calls: Vec<ToolCallRecord>,
 }
 
-/// 一次模型调用的结果：流、取消，或彻底失败。
+/// 一次模型调用的流：打开、取消，或彻底失败。
 enum StreamOpen {
-    Opened(ChatStream),
+    Opened(crate::provider::ChatStream),
     Cancelled,
-    Failed(ProviderError),
+    Failed(crate::provider::ProviderError),
 }
 
-/// 一轮流式生成的结束方式。
+/// 一次模型调用的结束方式。
 enum StepEnd {
-    /// 流正常结束，带回累积的工具调用片段。
-    Completed(Vec<ToolCallBuilder>),
-    /// 被取消；已生成的部分输出已落库。
+    /// 流正常结束，带回本步定型的消息 id 与内容块。
+    Completed {
+        id: MessageId,
+        parts: Vec<durable::ContentPart>,
+    },
+    /// 被取消；已生成的内容丢弃，该步重跑。
     Cancelled,
-    /// 上游失败；已生成的部分输出已落库。
+    /// 上游失败。
     Failure(RunFailure),
 }
 
@@ -86,17 +92,17 @@ impl RunEngine {
         })
     }
 
-    /// 启动恢复：把中断的 run 标记为 failed，并为仍有队列项的 session 启动执行。
+    /// 启动恢复：把中断的工具节点标成结局，并为需要执行的 session 启动驱动。
     ///
     /// # Errors
     ///
-    /// - `StoreError::Database`：读取中断的 run、读取队列或提交恢复结果时数据库操作失败。
-    /// - `StoreError::Serialization`：恢复过程读出或写出的记录无法序列化。
+    /// - `StoreError::Database`：读取中断的 run、消息或队列时数据库操作失败。
+    /// - `StoreError::Serialization`：恢复过程写出的记录无法序列化。
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     /// - `StoreError::Invariant`：存储不变量被破坏。
     pub async fn recover(self: &Arc<Self>) -> Result<(), StoreError> {
-        self.store.recover_running_runs().await?;
-        for session in self.store.sessions_with_queue().await? {
+        for session in self.store.sessions_with_work().await? {
+            self.resolve_interrupted_tools(&session).await?;
             self.ensure_driver(session).await;
         }
         Ok(())
@@ -129,10 +135,12 @@ impl RunEngine {
 
     async fn drive_loop(self: Arc<Self>, session: SessionId) {
         loop {
+            if let Some(start) = self.resume_existing(&session).await {
+                self.run_once(start).await;
+                continue;
+            }
             match self.store.start_run(&session).await {
-                Ok(Some(start)) => {
-                    self.run_once(start).await;
-                }
+                Ok(Some(start)) => self.run_once(start).await,
                 Ok(None) => {
                     if self.release_driver(&session).await {
                         return;
@@ -145,6 +153,19 @@ impl RunEngine {
                 }
             }
         }
+    }
+
+    /// 进程重启后接管仍是 running 的 run。
+    async fn resume_existing(&self, session: &SessionId) -> Option<RunStart> {
+        let run = self.store.running_run(session).await.ok().flatten()?;
+        let workspace = self
+            .store
+            .session_record(session)
+            .await
+            .ok()?
+            .workspace()
+            .clone();
+        Some(RunStart { run, workspace })
     }
 
     /// 通过注销与重新登记决定是否继续执行。
@@ -179,12 +200,7 @@ impl RunEngine {
                 done: Arc::clone(&done),
             },
         );
-        let outcome = self.generate(&start, &cancellation).await;
-        let assistant = MessageNode {
-            text: outcome.text,
-            tool_calls: outcome.tool_calls,
-            ..start.assistant.clone()
-        };
+        let outcome = self.drive_run(&start, &cancellation).await;
         if let Some(failure) = &outcome.failure {
             tracing::warn!(
                 session = %session.as_str(),
@@ -196,13 +212,7 @@ impl RunEngine {
         }
         if let Err(error) = self
             .store
-            .finish_run(
-                &session,
-                &start.run,
-                outcome.status,
-                outcome.failure,
-                assistant,
-            )
+            .finish_run(&session, &start.run, outcome.status, outcome.failure)
             .await
         {
             tracing::error!(session = %session.as_str(), run, error = %error, "结束 run 失败");
@@ -218,91 +228,143 @@ impl RunEngine {
         done.notify_waiters();
     }
 
-    async fn generate(&self, start: &RunStart, cancellation: &Cancellation) -> RunOutcome {
-        let session = start.run.session_id.clone();
-        let assistant_id = start.assistant.id;
-        let mut text = String::new();
-        let mut records: Vec<ToolCallRecord> = Vec::new();
-        for step in 1..=self.config.max_steps {
-            let messages = match self.step_messages(&session).await {
-                Ok(messages) => messages,
-                Err(failure) => return failed(failure.code, failure.message, text, records),
-            };
-            let builders = match self
-                .stream_step(
-                    &session,
-                    &messages,
-                    cancellation,
-                    assistant_id,
-                    &mut text,
-                    &records,
-                )
-                .await
-            {
-                StepEnd::Completed(builders) => builders,
-                StepEnd::Cancelled => return cancelled(text, records),
-                StepEnd::Failure(failure) => {
-                    return failed(failure.code, failure.message, text, records);
+    /// 每一步先看树尾决定动作：发请求、执行工具，或收尾。
+    async fn drive_run(&self, start: &RunStart, cancellation: &Cancellation) -> RunOutcome {
+        let session = &start.run.session_id;
+        let mut steps: Option<usize> = None;
+        let mut compacted = false;
+        loop {
+            let transcript = match self.store.transcript(session).await {
+                Ok(transcript) => transcript,
+                Err(error) => {
+                    return failed(RunFailureCode::ModelUpstream, error.to_string());
                 }
             };
-            if builders.is_empty() {
-                return RunOutcome {
-                    status: RunStatus::Succeeded,
-                    failure: None,
-                    text: MessageContent::new(text),
-                    tool_calls: records,
-                };
-            }
-            if step == self.config.max_steps {
-                return failed(
-                    RunFailureCode::StepLimitExceeded,
-                    format!("超过 {} 步上限", self.config.max_steps),
-                    text,
-                    records,
-                );
-            }
-            let cancelled_run = self
-                .run_tool_calls(
-                    start,
-                    cancellation,
-                    assistant_id,
-                    builders,
-                    &text,
-                    &mut records,
-                )
-                .await;
-            if cancelled_run {
-                return cancelled(text, records);
+            let executed = *steps.get_or_insert_with(|| {
+                transcript
+                    .iter()
+                    .filter(|node| {
+                        node.role == MessageRole::Assistant && node.run_id == Some(start.run.id)
+                    })
+                    .count()
+            });
+            match recover::resume_point(&transcript) {
+                ResumePoint::Finish => return succeeded(),
+                ResumePoint::Request => {
+                    if executed >= self.config.max_steps {
+                        return failed(
+                            RunFailureCode::StepLimitExceeded,
+                            format!("超过 {} 步上限", self.config.max_steps),
+                        );
+                    }
+                    steps = Some(executed + 1);
+                    match self.stream_step(session, &transcript, cancellation).await {
+                        StepEnd::Completed { id, parts } => {
+                            if let Err(error) = self
+                                .store
+                                .append_assistant(session, start.run.id, id, parts)
+                                .await
+                            {
+                                return failed(RunFailureCode::ModelUpstream, error.to_string());
+                            }
+                        }
+                        StepEnd::Cancelled => return cancelled(),
+                        StepEnd::Failure(failure) => {
+                            if failure.code == RunFailureCode::ContextLimitExceeded && !compacted {
+                                compacted = true;
+                                tracing::info!(session = %session.as_str(), "上下文超限，压缩后重试本步");
+                                if let Err(failure) =
+                                    self.compact(session, &transcript, cancellation).await
+                                {
+                                    return RunOutcome {
+                                        status: RunStatus::Failed,
+                                        failure: Some(failure),
+                                    };
+                                }
+                                continue;
+                            }
+                            return RunOutcome {
+                                status: RunStatus::Failed,
+                                failure: Some(failure),
+                            };
+                        }
+                    }
+                }
+                ResumePoint::Tools(pending) => {
+                    match self.run_tool_calls(start, cancellation, pending).await {
+                        Ok(true) => {}
+                        Ok(false) => return cancelled(),
+                        Err(failure) => {
+                            return RunOutcome {
+                                status: RunStatus::Failed,
+                                failure: Some(failure),
+                            };
+                        }
+                    }
+                }
             }
         }
-        failed(
-            RunFailureCode::StepLimitExceeded,
-            format!("超过 {} 步上限", self.config.max_steps),
-            text,
-            records,
-        )
+    }
+
+    /// 启动恢复时处理执行中的工具节点：非幂等工具的结局写为未知，等待续跑时重跑幂等工具。
+    async fn resolve_interrupted_tools(&self, session: &SessionId) -> Result<(), StoreError> {
+        let transcript = self.store.transcript(session).await?;
+        for node in &transcript {
+            if node.role != MessageRole::Tool {
+                continue;
+            }
+            for (call_id, state) in node.tool_results() {
+                if !matches!(state, ToolResultState::Running) {
+                    continue;
+                }
+                let Some(name) = call_name(&transcript, call_id) else {
+                    tracing::warn!(message = node.id.get(), "执行中的工具节点找不到调用记录");
+                    continue;
+                };
+                if self.tools.idempotent(name) {
+                    tracing::info!(tool = name, message = node.id.get(), "重跑幂等工具");
+                    continue;
+                }
+                tracing::warn!(
+                    tool = name,
+                    message = node.id.get(),
+                    "非幂等工具结局记为未知"
+                );
+                self.store
+                    .finish_tool(session, node.id, call_id, ToolResultState::Unknown)
+                    .await?;
+            }
+        }
+        Ok(())
     }
 }
 
-fn cancelled(text: String, tool_calls: Vec<ToolCallRecord>) -> RunOutcome {
+/// 在 transcript 中找出某次工具调用的工具名。
+fn call_name<'a>(transcript: &'a [durable::MessageNode], call_id: &str) -> Option<&'a str> {
+    transcript
+        .iter()
+        .flat_map(durable::MessageNode::tool_calls)
+        .find(|(id, ..)| *id == call_id)
+        .map(|(_, name, _)| name)
+}
+
+fn succeeded() -> RunOutcome {
+    RunOutcome {
+        status: RunStatus::Succeeded,
+        failure: None,
+    }
+}
+
+fn cancelled() -> RunOutcome {
     RunOutcome {
         status: RunStatus::Cancelled,
         failure: None,
-        text: MessageContent::new(text),
-        tool_calls,
     }
 }
 
-fn failed(
-    code: RunFailureCode,
-    message: String,
-    text: String,
-    tool_calls: Vec<ToolCallRecord>,
-) -> RunOutcome {
+fn failed(code: RunFailureCode, message: String) -> RunOutcome {
     RunOutcome {
         status: RunStatus::Failed,
         failure: Some(RunFailure { code, message }),
-        text: MessageContent::new(text),
-        tool_calls,
     }
 }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::id::{MessageId, SessionId, SessionTitle, SessionTitleError, WorkspacePath};
-use crate::message::{MessageNode, MessageText};
+use crate::message::{MessageSkeleton, MessageText};
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 
@@ -38,6 +38,11 @@ pub struct SessionRecord {
 }
 
 impl SessionRecord {
+    #[must_use]
+    pub fn workspace(&self) -> &WorkspacePath {
+        &self.workspace
+    }
+
     #[must_use]
     pub fn metadata(&self, queue_length: u32, busy: bool) -> SessionMetadata {
         SessionMetadata {
@@ -76,7 +81,7 @@ pub struct SessionTree {
     pub max_event_id: i64,
     #[ts(type = "number | null")]
     pub active_leaf: Option<MessageId>,
-    pub nodes: Vec<MessageNode>,
+    pub nodes: Vec<MessageSkeleton>,
     pub queue: Vec<QueueItem>,
     pub runs: Vec<RunRecord>,
 }

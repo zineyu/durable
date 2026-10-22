@@ -8,7 +8,8 @@
     clippy::panic,
     clippy::let_underscore_must_use,
     let_underscore_drop,
-    reason = "测试脚手架用 panic 与 expect 直接报告夹具与断言失败；本模块被每个测试目标各编译一次，未被该目标用到的条目属正常情况。"
+    unused_imports,
+    reason = "测试脚手架用 panic 与 expect 直接报告夹具与断言失败；本模块被每个测试目标各编译一次，未被该目标用到的条目与再导出属正常情况。"
 )]
 
 use std::net::{Ipv4Addr, SocketAddr};
@@ -18,10 +19,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::{Response, StatusCode};
-use sqlx::{ConnectOptions, Row};
 use tempfile::TempDir;
 
+pub(crate) mod db;
 pub(crate) mod provider;
+
+pub(crate) use db::{
+    connect, recorded_event_ids, recorded_event_kinds, recorded_event_rows, recorded_events,
+};
 
 pub(crate) use provider::{Script, ScriptedProvider};
 
@@ -299,11 +304,11 @@ impl Harness {
     }
 
     pub(crate) async fn tree(&self, id: &agent::SessionId) -> agent::SessionTree {
-        self.session_tree(id)
-            .await
-            .json()
-            .await
-            .expect("解析消息树")
+        let response = self.session_tree(id).await;
+        let status = response.status();
+        let text = response.text().await.expect("读取消息树响应");
+        assert_eq!(status, StatusCode::OK, "读取消息树失败: {text}");
+        serde_json::from_str(&text).expect("解析消息树")
     }
 
     pub(crate) async fn submit_message(&self, id: &agent::SessionId, text: &str) -> Response {
@@ -384,6 +389,44 @@ impl Harness {
             .send()
             .await
             .expect("删除队列项")
+    }
+
+    /// 按消息 id 批量读取块正文。
+    pub(crate) async fn bodies(
+        &self,
+        id: &agent::SessionId,
+        messages: &[agent::MessageId],
+    ) -> Vec<agent::MessageBody> {
+        let response = self
+            .client
+            .post(self.url(&format!("/api/sessions/{}/message-bodies", id.as_str())))
+            .json(&serde_json::json!({
+                "messageIds": messages.iter().map(|id| id.get()).collect::<Vec<_>>(),
+            }))
+            .send()
+            .await
+            .expect("读取消息正文");
+        assert_eq!(response.status(), StatusCode::OK, "读取正文返回 200");
+        let body: agent::MessageBodiesResponse = response.json().await.expect("解析消息正文");
+        body.messages
+    }
+
+    /// 读取单条消息的块正文。
+    pub(crate) async fn body(
+        &self,
+        id: &agent::SessionId,
+        message: agent::MessageId,
+    ) -> agent::MessageBody {
+        self.bodies(id, &[message])
+            .await
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| panic!("消息 {} 没有正文", message.get()))
+    }
+
+    /// 读取单条消息的文本块拼接结果。
+    pub(crate) async fn text(&self, id: &agent::SessionId, message: agent::MessageId) -> String {
+        self.body(id, message).await.text()
     }
 
     /// 轮询直到该 session 不再忙碌且队列为空。
@@ -504,67 +547,6 @@ impl EventStream {
             self.buffer.extend_from_slice(&chunk);
         }
     }
-}
-
-pub(crate) async fn connect(database: &Path) -> sqlx::SqliteConnection {
-    sqlx::sqlite::SqliteConnectOptions::new()
-        .filename(database)
-        .busy_timeout(Duration::from_secs(5))
-        .connect()
-        .await
-        .expect("打开 SQLite")
-}
-
-pub(crate) async fn recorded_event_ids(database: &Path) -> Vec<i64> {
-    sqlx::query_scalar("SELECT id FROM event ORDER BY id")
-        .fetch_all(&mut connect(database).await)
-        .await
-        .expect("查询事件 id")
-}
-
-pub(crate) async fn recorded_events(database: &Path) -> Vec<agent::FactEvent> {
-    let payloads: Vec<String> = sqlx::query_scalar("SELECT event FROM event ORDER BY id")
-        .fetch_all(&mut connect(database).await)
-        .await
-        .expect("查询事件");
-    payloads
-        .iter()
-        .map(|payload| serde_json::from_str(payload).expect("解析事件"))
-        .collect()
-}
-
-pub(crate) async fn recorded_event_kinds(database: &Path) -> Vec<String> {
-    recorded_event_rows(database)
-        .await
-        .into_iter()
-        .map(|(_, _, _, payload)| {
-            let event: serde_json::Value = serde_json::from_str(&payload).expect("解析事件负载");
-            event
-                .get("kind")
-                .and_then(serde_json::Value::as_str)
-                .expect("事件负载有 kind")
-                .to_owned()
-        })
-        .collect()
-}
-
-pub(crate) async fn recorded_event_rows(
-    database: &Path,
-) -> Vec<(i64, Option<String>, i64, String)> {
-    sqlx::query("SELECT id, session_id, created_at, event FROM event ORDER BY id")
-        .fetch_all(&mut connect(database).await)
-        .await
-        .expect("查询事件")
-        .iter()
-        .map(|row| {
-            (
-                row.get::<i64, _>(0),
-                row.get::<Option<String>, _>(1),
-                row.get::<i64, _>(2),
-                row.get::<String, _>(3),
-            )
-        })
-        .collect()
 }
 
 pub(crate) async fn error_code(response: Response) -> agent::ErrorCode {

@@ -25,8 +25,9 @@ pub use id::{
     WorkspacePathError,
 };
 pub use message::{
-    Message, MessageContent, MessageNode, MessageRole, MessageRoleError, MessageText,
-    MessageTextError,
+    ContentKind, ContentKindError, ContentPart, Message, MessageBody, MessageNode, MessageRole,
+    MessageRoleError, MessageSkeleton, MessageText, MessageTextError, PartSkeleton, PartState,
+    PartStateError, ProviderMeta,
 };
 pub use node::{NodeMetadata, NodeName, NodeNameError};
 pub use queue::QueueItem;
@@ -34,6 +35,6 @@ pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTree};
 pub use storage::Snapshot;
 pub use store::{RunStart, Store};
-pub use stream::{EventBus, ResyncReason, StreamEvent};
-pub use tool::{ToolCallRecord, ToolErrorCode, ToolOutcome};
+pub use stream::{DeltaKind, EventBus, ResyncReason, StreamEvent};
+pub use tool::{ToolErrorCode, ToolOutcome, ToolResultState};
 pub use workspace::WorkspaceMetadata;

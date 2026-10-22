@@ -7,12 +7,13 @@ use sqlx::sqlite::SqliteRow;
 use super::corrupted;
 use crate::error::StoreError;
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
-use crate::message::{Message, MessageContent, MessageNode, MessageRole};
+use crate::message::{
+    ContentKind, ContentPart, MessageNode, MessageRole, MessageSkeleton, PartSkeleton, PartState,
+};
 use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
-use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
 pub(super) fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
@@ -89,31 +90,63 @@ pub(super) fn parse_queue_item(row: &SqliteRow) -> Result<QueueItem, StoreError>
     })
 }
 
-pub(super) fn parse_message(session: &SessionId, row: &SqliteRow) -> Result<Message, StoreError> {
+/// 骨架行：消息列 + 一个块的 `seq`、`kind`、`state`、`size`。
+pub(super) fn parse_skeleton(row: &SqliteRow) -> Result<MessageSkeleton, StoreError> {
     let parent_id: Option<i64> = row.get("parent_id");
     let run_id: Option<i64> = row.get("run_id");
-    Ok(Message {
-        session: session.clone(),
-        node: MessageNode {
-            id: MessageId::parse(row.get::<i64, _>("id"))
-                .map_err(|error| corrupted("message.id", error))?,
-            parent_id: parent_id
-                .map(MessageId::parse)
-                .transpose()
-                .map_err(|error| corrupted("message.parent_id", error))?,
-            role: MessageRole::parse(&row.get::<String, _>("role"))
-                .map_err(|error| corrupted("message.role", error))?,
-            text: MessageContent::new(row.get::<String, _>("text")),
-            run_id: run_id
-                .map(RunId::parse)
-                .transpose()
-                .map_err(|error| corrupted("message.run_id", error))?,
-            tool_calls: serde_json::from_str::<Vec<ToolCallRecord>>(
-                &row.get::<String, _>("tool_calls"),
-            )
-            .map_err(|error| corrupted("message.tool_calls", error))?,
-            created_at: row.get("created_at"),
-        },
+    Ok(MessageSkeleton {
+        id: MessageId::parse(row.get::<i64, _>("id"))
+            .map_err(|error| corrupted("message.id", error))?,
+        parent_id: parent_id
+            .map(MessageId::parse)
+            .transpose()
+            .map_err(|error| corrupted("message.parent_id", error))?,
+        role: MessageRole::parse(&row.get::<String, _>("role"))
+            .map_err(|error| corrupted("message.role", error))?,
+        run_id: run_id
+            .map(RunId::parse)
+            .transpose()
+            .map_err(|error| corrupted("message.run_id", error))?,
+        created_at: row.get("created_at"),
+        parts: Vec::new(),
+    })
+}
+
+/// 块骨架行。`size` 直接取存储中 `body` 的字节数，不读正文。
+pub(super) fn parse_part_skeleton(row: &SqliteRow) -> Result<PartSkeleton, StoreError> {
+    let size: i64 = row.get("size");
+    Ok(PartSkeleton {
+        seq: u32::try_from(row.get::<i64, _>("seq"))
+            .map_err(|error| corrupted("message_part.seq", error))?,
+        kind: ContentKind::parse(&row.get::<String, _>("kind"))
+            .map_err(|error| corrupted("message_part.kind", error))?,
+        size: u32::try_from(size).unwrap_or(u32::MAX),
+        state: PartState::parse(&row.get::<String, _>("state"))
+            .map_err(|error| corrupted("message_part.state", error))?,
+    })
+}
+
+pub(super) fn parse_message(
+    row: &SqliteRow,
+    parts: Vec<ContentPart>,
+) -> Result<MessageNode, StoreError> {
+    let parent_id: Option<i64> = row.get("parent_id");
+    let run_id: Option<i64> = row.get("run_id");
+    Ok(MessageNode {
+        id: MessageId::parse(row.get::<i64, _>("id"))
+            .map_err(|error| corrupted("message.id", error))?,
+        parent_id: parent_id
+            .map(MessageId::parse)
+            .transpose()
+            .map_err(|error| corrupted("message.parent_id", error))?,
+        role: MessageRole::parse(&row.get::<String, _>("role"))
+            .map_err(|error| corrupted("message.role", error))?,
+        parts,
+        run_id: run_id
+            .map(RunId::parse)
+            .transpose()
+            .map_err(|error| corrupted("message.run_id", error))?,
+        created_at: row.get("created_at"),
     })
 }
 

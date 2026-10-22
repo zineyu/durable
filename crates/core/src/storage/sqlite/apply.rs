@@ -7,12 +7,11 @@ use crate::change::Change;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
-use crate::message::{Message, MessageContent};
+use crate::message::{ContentPart, Message};
 use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
-use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
 /// 把单条变更写入事务；事实事件在写入后追加到 `committed`。
@@ -46,11 +45,9 @@ pub(super) async fn apply_change(
         }
         Change::DeleteSession(id) => delete_session(connection, id).await,
         Change::InsertMessage(message) => insert_message(connection, message).await,
-        Change::UpdateMessage {
-            id,
-            text,
-            tool_calls,
-        } => update_message(connection, id, text, tool_calls).await,
+        Change::ReplaceMessageParts { id, parts } => {
+            replace_message_parts(connection, *id, parts).await
+        }
         Change::BindMessageRun { id, run_id } => bind_message_run(connection, *id, *run_id).await,
         Change::InsertQueueItem { session, item } => {
             insert_queue_item(connection, session, item).await
@@ -162,6 +159,7 @@ async fn delete_session(
     for statement in [
         "DELETE FROM event WHERE session_id = ?1",
         "DELETE FROM queue_item WHERE session_id = ?1",
+        "DELETE FROM message_part WHERE message_id IN (SELECT id FROM message WHERE session_id = ?1)",
         "DELETE FROM message WHERE session_id = ?1",
         "DELETE FROM run WHERE session_id = ?1",
     ] {
@@ -182,35 +180,53 @@ async fn insert_message(
     message: &Message,
 ) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO message (id, session_id, parent_id, role, text, run_id, tool_calls, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO message (id, session_id, parent_id, role, run_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
     .bind(message.node.id.get())
     .bind(message.session.as_str())
     .bind(message.node.parent_id.map(MessageId::get))
     .bind(message.node.role.as_str())
-    .bind(message.node.text.as_str())
     .bind(message.node.run_id.map(RunId::get))
-    .bind(serde_json::to_string(&message.node.tool_calls)?)
     .bind(message.node.created_at)
     .execute(&mut *connection)
     .await?;
-    Ok(())
+    insert_parts(connection, message.node.id, &message.node.parts).await
 }
 
-async fn update_message(
+async fn replace_message_parts(
     connection: &mut SqliteConnection,
-    id: &MessageId,
-    text: &MessageContent,
-    tool_calls: &[ToolCallRecord],
+    id: MessageId,
+    parts: &[ContentPart],
 ) -> Result<(), StoreError> {
-    let result = sqlx::query("UPDATE message SET text = ?2, tool_calls = ?3 WHERE id = ?1")
+    sqlx::query("DELETE FROM message_part WHERE message_id = ?1")
         .bind(id.get())
-        .bind(text.as_str())
-        .bind(serde_json::to_string(tool_calls)?)
         .execute(&mut *connection)
         .await?;
-    ensure_written(&result, "更新消息")
+    insert_parts(connection, id, parts).await
+}
+
+async fn insert_parts(
+    connection: &mut SqliteConnection,
+    id: MessageId,
+    parts: &[ContentPart],
+) -> Result<(), StoreError> {
+    for (seq, part) in parts.iter().enumerate() {
+        let seq = i64::try_from(seq)
+            .map_err(|_| StoreError::Invariant("消息块序号超出 i64".to_owned()))?;
+        sqlx::query(
+            "INSERT INTO message_part (message_id, seq, kind, state, body)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )
+        .bind(id.get())
+        .bind(seq)
+        .bind(part.kind().as_str())
+        .bind(part.state().as_str())
+        .bind(serde_json::to_string(part)?)
+        .execute(&mut *connection)
+        .await?;
+    }
+    Ok(())
 }
 
 async fn bind_message_run(

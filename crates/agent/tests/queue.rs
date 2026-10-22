@@ -13,6 +13,27 @@ fn queue_texts(tree: &agent::SessionTree) -> Vec<&str> {
     tree.queue.iter().map(|item| item.text.as_str()).collect()
 }
 
+/// 按角色取整棵树的文本正文，顺序为消息 id 升序。
+async fn role_texts(
+    harness: &Harness,
+    session: &agent::SessionId,
+    tree: &agent::SessionTree,
+    role: agent::MessageRole,
+) -> Vec<String> {
+    let messages: Vec<agent::MessageId> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == role)
+        .map(|node| node.id)
+        .collect();
+    harness
+        .bodies(session, &messages)
+        .await
+        .into_iter()
+        .map(|body| body.text())
+        .collect()
+}
+
 async fn busy_ids(harness: &Harness, sessions: &[agent::SessionMetadata]) -> Vec<agent::SessionId> {
     let mut busy = Vec::new();
     for session in sessions {
@@ -36,6 +57,17 @@ async fn wait_for_busy_count(
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
     panic!("同时运行的 run 未达到 {count} 个")
+}
+
+/// 等待脚本化 provider 收到至少 `count` 次请求，用于确定脚本已被取走。
+async fn wait_for_requests(harness: &Harness, count: usize) {
+    for _ in 0..500 {
+        if harness.provider.requests().len() >= count {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("provider 未收到 {count} 次请求")
 }
 
 /// 规格「调度与会话状态」：run 进行中提交的消息留在队列，不打断当前 run。
@@ -94,48 +126,39 @@ async fn executes_queued_messages_in_fifo_order() {
     }
 
     let tree = harness.wait_idle(&session.id).await;
-    let users: Vec<&str> = tree
-        .nodes
-        .iter()
-        .filter(|node| node.role == agent::MessageRole::User)
-        .map(|node| node.text.as_str())
-        .collect();
+    let users = role_texts(&harness, &session.id, &tree, agent::MessageRole::User).await;
     assert_eq!(users, vec!["第一条", "第二条", "第三条"]);
     assert!(tree.queue.is_empty());
     assert_eq!(tree.session.queue_length, 0);
 }
 
-/// 规格「持久化」：重启后队列继续执行，中断的 run 标记为 failed。
+/// ADR 0037「崩溃恢复」：重启后接管仍是 running 的 run 从树尾续跑，队列继续执行。
 #[tokio::test]
 async fn continues_queue_after_restart() {
-    let harness = Harness::start_with(
-        agent::EngineConfig::default(),
-        vec![Script::Hang, Script::Text("B 完成".into())],
-    )
-    .await;
+    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
     let session = harness.session("workspace").await;
 
     harness.submit_message(&session.id, "重启前 A").await;
     harness.submit_message(&session.id, "重启前 B").await;
     harness.wait_busy(&session.id).await;
+    wait_for_requests(&harness, 1).await;
 
+    harness.provider.push(Script::Text("A 完成".into()));
+    harness.provider.push(Script::Text("B 完成".into()));
     let harness = harness.restart().await;
     let tree = harness.wait_idle(&session.id).await;
 
-    assert_eq!(tree.runs[0].status, agent::RunStatus::Failed);
-    assert_eq!(
-        tree.runs[0].failure.as_ref().expect("失败原因").code,
-        agent::RunFailureCode::Interrupted
-    );
+    assert_eq!(tree.runs.len(), 2, "崩溃不产生新的 run");
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
     assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
-    let users: Vec<&str> = tree
-        .nodes
-        .iter()
-        .filter(|node| node.role == agent::MessageRole::User)
-        .map(|node| node.text.as_str())
-        .collect();
+    let users = role_texts(&harness, &session.id, &tree, agent::MessageRole::User).await;
     assert_eq!(users, vec!["重启前 A", "重启前 B"]);
-    assert_eq!(tree.nodes[3].text.as_str(), "B 完成");
+    let assistants = role_texts(&harness, &session.id, &tree, agent::MessageRole::Assistant).await;
+    assert_eq!(
+        assistants,
+        vec!["A 完成", "B 完成"],
+        "中断的步重跑，队列项接着执行"
+    );
 }
 
 /// 规格 user story A-4：首条用户消息决定标题，后续消息不再改变。
@@ -363,12 +386,7 @@ async fn serializes_concurrent_submissions_into_fifo_order() {
         .map(|item| item.text.as_str().to_owned())
         .collect();
     let tree = harness.wait_idle(&session.id).await;
-    let users: Vec<String> = tree
-        .nodes
-        .iter()
-        .filter(|node| node.role == agent::MessageRole::User)
-        .map(|node| node.text.as_str().to_owned())
-        .collect();
+    let users = role_texts(&harness, &session.id, &tree, agent::MessageRole::User).await;
     assert_eq!(users, expected, "执行顺序等于队列项 id 顺序");
 }
 

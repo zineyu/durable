@@ -3,12 +3,11 @@
 
 use crate::event::FactEvent;
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
-use crate::message::{Message, MessageContent};
+use crate::message::{ContentPart, Message};
 use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
-use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
 /// 一次原子提交的全部变更。字段私有，只能经下面的方法逐个登记，保证顺序与意图明确。
@@ -77,17 +76,9 @@ impl Changeset {
         self.push(Change::DeleteQueueItem { session, item });
     }
 
-    pub fn update_message(
-        &mut self,
-        id: MessageId,
-        text: MessageContent,
-        tool_calls: Vec<ToolCallRecord>,
-    ) {
-        self.push(Change::UpdateMessage {
-            id,
-            text,
-            tool_calls,
-        });
+    /// 整体替换一条已存在消息的块。用于工具节点从执行中改为结局。
+    pub fn replace_message_parts(&mut self, id: MessageId, parts: Vec<ContentPart>) {
+        self.push(Change::ReplaceMessageParts { id, parts });
     }
 
     /// 把已存在的用户节点绑定到 run。用于编辑产生的节点在 run 开始时补上 run 关联。
@@ -151,10 +142,9 @@ pub(crate) enum Change {
         session: SessionId,
         item: QueueItemId,
     },
-    UpdateMessage {
+    ReplaceMessageParts {
         id: MessageId,
-        text: MessageContent,
-        tool_calls: Vec<ToolCallRecord>,
+        parts: Vec<ContentPart>,
     },
     BindMessageRun {
         id: MessageId,

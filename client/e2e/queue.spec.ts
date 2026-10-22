@@ -28,7 +28,7 @@ test('运行中的 run 把新消息留在队列，移除后不再执行', async 
   expect(app.provider.requests()).toHaveLength(1);
 });
 
-test('取消运行中的 run 保留部分回答并继续执行队列', async ({ page, app }) => {
+test('取消运行中的 run 丢弃未定型的输出并继续执行队列', async ({ page, app }) => {
   app.provider.push({ kind: 'hold', text: '被打断的回答。' });
   app.provider.push({ kind: 'text', text: '队列里那条的回答。' });
 
@@ -37,17 +37,18 @@ test('取消运行中的 run 保留部分回答并继续执行队列', async ({ 
 
   await sendMessage(page, '需要中断的任务');
   await expect(page.getByRole('button', { name: '取消' })).toBeVisible();
+  await expect(page.getByText('被打断的回答。')).toBeVisible();
 
   await sendMessage(page, '排队等待的任务');
   await expect(page.getByRole('button', { name: '移除队列项' })).toHaveCount(1);
 
   await page.getByRole('button', { name: '取消' }).click();
 
-  await expect(assistantMessages(page).first()).toHaveAttribute('data-state', 'cancelled');
-  await expect(page.getByText('已取消')).toBeVisible();
-  await expect(page.getByText('被打断的回答。')).toBeVisible();
+  await expect(page.getByText('被打断的回答。')).toHaveCount(0);
+  await expect(page.getByText('已取消')).toHaveCount(0);
 
   await expect(page.getByText('队列里那条的回答。')).toBeVisible();
+  await expect(assistantMessages(page)).toHaveCount(1);
   await expect(assistantMessages(page).last()).toHaveAttribute('data-state', 'complete');
   await expect(page.getByText('暂无排队消息')).toBeVisible();
   await expect(composer(page)).toBeVisible();

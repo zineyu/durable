@@ -2,12 +2,12 @@
 //! 变更落库在 `apply`，行解码在 `rows`；schema 在同级 `migrations/`。
 
 mod apply;
+mod message;
 mod rows;
 
 use self::apply::apply_change;
 use self::rows::{
-    parse_busy, parse_message, parse_node, parse_queue_item, parse_queue_length, parse_run,
-    parse_session, parse_session_metadata, parse_workspace,
+    parse_node, parse_queue_item, parse_run, parse_session, parse_session_metadata, parse_workspace,
 };
 
 use std::fmt;
@@ -21,12 +21,11 @@ use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
-use crate::message::Message;
 use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::session::SessionRecord;
-use crate::storage::{SessionSnapshot, Snapshot};
+use crate::storage::Snapshot;
 use crate::workspace::WorkspaceMetadata;
 
 pub(crate) struct SqliteStorage {
@@ -155,71 +154,6 @@ impl SqliteStorage {
         Ok(count)
     }
 
-    pub(crate) async fn session_tree(
-        &self,
-        id: &SessionId,
-    ) -> Result<Option<SessionSnapshot>, StoreError> {
-        let mut transaction = self.pool.begin().await?;
-        let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
-            .fetch_one(&mut *transaction)
-            .await?;
-        let row = sqlx::query(
-            "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf,
-                    (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
-                    (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
-             FROM session WHERE id = ?1",
-        )
-        .bind(id.as_str())
-        .fetch_optional(&mut *transaction)
-        .await?;
-        let Some(row) = row else {
-            transaction.commit().await?;
-            return Ok(None);
-        };
-        let session = parse_session(&row)?;
-        let queue_length = parse_queue_length(&row)?;
-        let busy = parse_busy(&row);
-        let messages = sqlx::query(
-            "SELECT id, parent_id, role, text, run_id, tool_calls, created_at FROM message
-             WHERE session_id = ?1 ORDER BY id ASC",
-        )
-        .bind(id.as_str())
-        .fetch_all(&mut *transaction)
-        .await?
-        .iter()
-        .map(|row| parse_message(id, row))
-        .collect::<Result<Vec<_>, _>>()?;
-        let queue = sqlx::query(
-            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC",
-        )
-        .bind(id.as_str())
-        .fetch_all(&mut *transaction)
-        .await?
-        .iter()
-        .map(parse_queue_item)
-        .collect::<Result<Vec<_>, _>>()?;
-        let runs = sqlx::query(
-            "SELECT id, session_id, status, failure, created_at, updated_at FROM run
-             WHERE session_id = ?1 ORDER BY id ASC",
-        )
-        .bind(id.as_str())
-        .fetch_all(&mut *transaction)
-        .await?
-        .iter()
-        .map(parse_run)
-        .collect::<Result<Vec<_>, _>>()?;
-        transaction.commit().await?;
-        Ok(Some(SessionSnapshot {
-            session,
-            busy,
-            queue_length,
-            messages,
-            queue,
-            runs,
-            max_event_id,
-        }))
-    }
-
     /// session 的最早队列项。
     pub(crate) async fn first_queue_item(
         &self,
@@ -254,25 +188,6 @@ impl SqliteStorage {
         .transpose()
     }
 
-    /// 指定 session 中的单个消息节点。
-    pub(crate) async fn message(
-        &self,
-        session: &SessionId,
-        id: MessageId,
-    ) -> Result<Option<Message>, StoreError> {
-        sqlx::query(
-            "SELECT id, parent_id, role, text, run_id, tool_calls, created_at FROM message
-             WHERE session_id = ?1 AND id = ?2",
-        )
-        .bind(session.as_str())
-        .bind(id.get())
-        .fetch_optional(&self.pool)
-        .await?
-        .as_ref()
-        .map(|row| parse_message(session, row))
-        .transpose()
-    }
-
     /// 全部仍为 running 的 run，按 id 升序。
     pub(crate) async fn running_runs(&self) -> Result<Vec<RunRecord>, StoreError> {
         let rows = sqlx::query(
@@ -302,6 +217,39 @@ impl SqliteStorage {
             .fetch_one(&self.pool)
             .await?;
         Ok(count)
+    }
+
+    /// 需要执行循环的 session：有 running 的 run 或队列非空，按最近更新排序。
+    pub(crate) async fn sessions_with_work(&self) -> Result<Vec<SessionId>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id FROM session
+             WHERE EXISTS (SELECT 1 FROM queue_item WHERE queue_item.session_id = session.id)
+                OR EXISTS (SELECT 1 FROM run WHERE run.session_id = session.id AND run.status = 'running')
+             ORDER BY updated_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                SessionId::parse(&row.get::<String, _>("id"))
+                    .map_err(|error| corrupted("session.id", error))
+            })
+            .collect()
+    }
+
+    /// 该 session 仍为 running 的 run，最多一条。
+    pub(crate) async fn running_run(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<RunRecord>, StoreError> {
+        let row = sqlx::query(
+            "SELECT id, session_id, status, failure, created_at, updated_at FROM run
+             WHERE session_id = ?1 AND status = 'running' ORDER BY id ASC LIMIT 1",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await?;
+        row.as_ref().map(parse_run).transpose()
     }
 
     /// 所有队列非空的 session，按最近更新排序。

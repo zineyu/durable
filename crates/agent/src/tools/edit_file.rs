@@ -17,6 +17,7 @@ pub(crate) struct Arguments {
 
 pub(crate) fn definition() -> ToolDefinition {
     ToolDefinition {
+        idempotent: false,
         name: "edit_file",
         description: "把 workspace 根内文件中唯一匹配的 old_string 替换为 new_string。不做正则与全部替换。",
         parameters: json!({

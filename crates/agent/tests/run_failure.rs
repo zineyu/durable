@@ -4,26 +4,145 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script};
+use support::{Harness, Script, recorded_events};
 
-/// 规格「模型调用」：上下文超限以对应错误码结束 run，且不发出模型请求。
+/// 规格 A-37：上下文超限时压缩历史并重试本步，摘要入树且不属于任何 run。
 #[tokio::test]
-async fn fails_run_when_context_limit_is_exceeded() {
+async fn compacts_history_and_retries_the_step() {
+    let answer = "答".repeat(200);
+    let summary = "摘要：用户先问了第一问，之后要求回答第二问。";
     let config = agent::EngineConfig {
-        context_char_limit: 20,
+        context_char_limit: 300,
         ..agent::EngineConfig::default()
     };
-    let harness = Harness::start_with(config, vec![Script::Text("不会用到".into())]).await;
+    let harness = Harness::start_with(
+        config,
+        vec![
+            Script::Text(answer.clone()),
+            Script::Text(summary.into()),
+            Script::Text("第二答".into()),
+        ],
+    )
+    .await;
     let session = harness.session("workspace").await;
 
-    harness.submit_message(&session.id, "你好").await;
+    harness.submit_message(&session.id, "第一问").await;
+    harness.wait_idle(&session.id).await;
+    harness.submit_message(&session.id, "第二问").await;
     let tree = harness.wait_idle(&session.id).await;
 
-    let run = &tree.runs[0];
-    assert_eq!(run.status, agent::RunStatus::Failed);
-    let failure = run.failure.as_ref().expect("失败原因");
+    assert_eq!(tree.runs.len(), 2, "压缩不产生新的 run");
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
+
+    let compacted = tree
+        .nodes
+        .iter()
+        .find(|node| node.role == agent::MessageRole::Compaction)
+        .expect("摘要作为消息入树");
+    assert_eq!(compacted.run_id, None, "压缩不属于任何 run");
+    assert_eq!(harness.text(&session.id, compacted.id).await, summary);
+
+    let last = tree.nodes.last().expect("重试后的 assistant 节点");
+    assert_eq!(last.role, agent::MessageRole::Assistant);
+    assert_eq!(last.parent_id, Some(compacted.id), "重试的步挂在摘要下");
+    assert_eq!(harness.text(&session.id, last.id).await, "第二答");
+    assert_eq!(tree.active_leaf, Some(last.id));
+    assert_eq!(
+        harness.provider.requests().len(),
+        3,
+        "两步加一次压缩请求，重试的步不再请求"
+    );
+
+    let events = recorded_events(&harness.database).await;
+    let compaction_metadata = events
+        .iter()
+        .find_map(|event| match event {
+            agent::FactEvent::MessageAppended { session, message }
+                if message.role == agent::MessageRole::Compaction =>
+            {
+                Some(session)
+            }
+            _ => None,
+        })
+        .expect("压缩消息的追加事件");
+    assert!(
+        compaction_metadata.busy,
+        "压缩发生在 run 内，事件里的 session 仍是忙碌"
+    );
+}
+
+/// 规格 A-37：压缩只重试一次，摘要仍超限时 run 以上下文超限结束。
+#[tokio::test]
+async fn fails_run_when_context_limit_survives_compaction() {
+    let config = agent::EngineConfig {
+        context_char_limit: 300,
+        ..agent::EngineConfig::default()
+    };
+    let harness = Harness::start_with(
+        config,
+        vec![
+            Script::Text("答".repeat(200)),
+            Script::Text("摘".repeat(400)),
+            Script::Text("不会用到".into()),
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "第一问").await;
+    harness.wait_idle(&session.id).await;
+    harness.submit_message(&session.id, "第二问").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let failure = tree.runs[1].failure.as_ref().expect("失败原因");
     assert_eq!(failure.code, agent::RunFailureCode::ContextLimitExceeded);
-    assert!(harness.provider.requests().is_empty());
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Failed);
+    assert_eq!(
+        harness.provider.requests().len(),
+        2,
+        "压缩后仍超限，不再发出模型请求"
+    );
+}
+
+/// 规格 A-37：压缩失败不写入任何消息，run 以上下文超限结束。
+#[tokio::test]
+async fn fails_run_when_compaction_request_fails() {
+    let config = agent::EngineConfig {
+        context_char_limit: 300,
+        ..agent::EngineConfig::default()
+    };
+    let harness = Harness::start_with(
+        config,
+        vec![
+            Script::Text("答".repeat(200)),
+            Script::Fail {
+                status: 500,
+                retry_after: None,
+            },
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "第一问").await;
+    harness.wait_idle(&session.id).await;
+    harness.submit_message(&session.id, "第二问").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    let failure = tree.runs[1].failure.as_ref().expect("失败原因");
+    assert_eq!(failure.code, agent::RunFailureCode::ContextLimitExceeded);
+    assert!(
+        failure.message.contains("压缩"),
+        "说明要点明压缩失败: {}",
+        failure.message
+    );
+    assert!(
+        tree.nodes
+            .iter()
+            .all(|node| node.role != agent::MessageRole::Compaction),
+        "压缩失败不留下消息"
+    );
+    assert_eq!(tree.nodes.len(), 3, "只有两条历史消息与本次用户消息");
 }
 
 /// 规格「模型调用」：步数超限以对应错误码结束 run。
@@ -85,26 +204,79 @@ async fn fails_run_on_model_upstream_error_and_continues_queue() {
     assert_eq!(failure.code, agent::RunFailureCode::ModelUpstream);
     assert_eq!(tree.runs[0].status, agent::RunStatus::Failed);
     assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
-    assert_eq!(tree.nodes[3].text.as_str(), "恢复");
+    let last = tree.nodes.last().expect("有恢复后的 assistant 节点");
+    assert_eq!(last.role, agent::MessageRole::Assistant);
+    assert_eq!(harness.text(&session.id, last.id).await, "恢复");
 }
 
-/// 规格「调度与会话状态」：重启把仍为 running 的 run 标记为 failed（进程中断）。
+/// 规格 ADR 0037：重启后从树尾继续仍是 running 的 run，不产生新的 run。
 #[tokio::test]
-async fn marks_interrupted_run_as_failed_after_restart() {
+async fn resumes_running_run_after_restart() {
     let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
     let session = harness.session("workspace").await;
     harness.submit_message(&session.id, "长时间运行").await;
     harness.wait_busy(&session.id).await;
+    harness.provider.push(Script::Text("恢复".into()));
 
     let harness = harness.restart().await;
-    let tree = harness.tree(&session.id).await;
+    let tree = harness.wait_idle(&session.id).await;
 
     assert!(!tree.session.busy);
-    let run = tree.runs.last().expect("有 run 记录");
-    assert_eq!(run.status, agent::RunStatus::Failed);
-    let failure = run.failure.as_ref().expect("失败原因");
-    assert_eq!(failure.code, agent::RunFailureCode::Interrupted);
+    assert_eq!(tree.runs.len(), 1, "崩溃不产生新的 run");
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
     assert_eq!(tree.queue.len(), 0, "队列在 run 开始时已消费");
+    let assistant = tree.nodes.last().expect("有 assistant 节点");
+    assert_eq!(assistant.role, agent::MessageRole::Assistant);
+    assert_eq!(harness.text(&session.id, assistant.id).await, "恢复");
+}
+
+/// 规格 ADR 0037：崩溃前未定型的 assistant 内容不落库，重启后该步重跑。
+#[tokio::test]
+async fn discards_unfinalized_text_after_restart() {
+    let harness = Harness::start_with(
+        agent::EngineConfig::default(),
+        vec![Script::PartialThenHang("半成品".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    let cursor = harness.bootstrap().await.max_event_id;
+    let mut events = harness.subscribe(cursor).await;
+    harness.submit_message(&session.id, "开始").await;
+
+    let mut partial = String::new();
+    while partial.is_empty() {
+        let event = tokio::time::timeout(Duration::from_secs(10), events.next())
+            .await
+            .expect("等待 SSE 事件")
+            .expect("事件流未结束");
+        if let agent::StreamEvent::Delta { text, .. } = event {
+            partial.push_str(&text);
+        }
+    }
+    assert_eq!(partial, "半成品");
+
+    let running = harness.wait_busy(&session.id).await;
+    assert!(
+        running
+            .nodes
+            .iter()
+            .all(|node| node.role != agent::MessageRole::Assistant),
+        "未定型的 assistant 内容不入树"
+    );
+
+    harness.provider.push(Script::Text("重跑".into()));
+    let harness = harness.restart().await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    assert_eq!(tree.runs.len(), 1, "崩溃不产生新的 run");
+    assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
+    let assistants: Vec<&agent::MessageSkeleton> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::Assistant)
+        .collect();
+    assert_eq!(assistants.len(), 1, "半成品不落库，只剩重跑的结果");
+    assert_eq!(harness.text(&session.id, assistants[0].id).await, "重跑");
 }
 
 /// 规格「协议」：单一全局 SSE 流同时输送 token 增量与事实事件。
@@ -152,11 +324,11 @@ async fn streams_deltas_and_facts_over_sse() {
         vec![
             "message_queued",
             "message_appended",
-            "message_appended",
             "active_leaf_changed",
             "queue_item_removed",
             "run_started",
-            "message_updated",
+            "message_appended",
+            "active_leaf_changed",
             "run_finished",
         ]
     );
@@ -276,11 +448,11 @@ async fn retries_rate_limited_call_and_reports_waiting_over_sse() {
         vec![
             "message_queued",
             "message_appended",
-            "message_appended",
             "active_leaf_changed",
             "queue_item_removed",
             "run_started",
-            "message_updated",
+            "message_appended",
+            "active_leaf_changed",
             "run_finished",
         ],
         "重试不产生额外事实事件"
@@ -288,7 +460,7 @@ async fn retries_rate_limited_call_and_reports_waiting_over_sse() {
 
     let tree = harness.wait_idle(&session.id).await;
     assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
-    assert_eq!(tree.nodes[1].text.as_str(), "恢复");
+    assert_eq!(harness.text(&session.id, tree.nodes[1].id).await, "恢复");
 }
 
 /// ADR 0031：`Retry-After` 优先于指数退避。

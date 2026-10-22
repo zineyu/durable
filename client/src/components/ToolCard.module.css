@@ -77,6 +77,10 @@
   color: var(--color-danger-text);
 }
 
+.state[data-tone='warn'] {
+  color: var(--color-warn-text);
+}
+
 .body {
   margin: var(--space-0-5) 0 var(--space-1) calc(var(--space-5) + var(--space-0-5));
   padding: var(--space-2) 0;

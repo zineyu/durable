@@ -45,6 +45,17 @@ export const Failed: Story = {
   },
 };
 
+export const Unknown: Story = {
+  args: {
+    name: 'bash',
+    state: 'unknown',
+    summary: 'cargo test --workspace',
+    input: '{"command": "cargo test --workspace"}',
+    result: '工具结果未知：执行中崩溃，结局没有观测到。',
+    defaultOpen: true,
+  },
+};
+
 export const Truncated: Story = {
   args: {
     name: 'bash',

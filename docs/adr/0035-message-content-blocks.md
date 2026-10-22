@@ -17,7 +17,7 @@
 
 **工具结果是独立节点**。每条工具结果是对应 assistant 节点的子节点，`role` 为 `tool`，块里带工具调用 id 与结构化结局。父子链因此严格线性：assistant → tool → tool → 下一个 assistant。理由：assistant 消息在流结束时定型，工具结果在各自执行完毕时产生并自带时间戳与失败码；独立节点让「已定型」与「仍在追加」不共用一行；取消发生在第 2 个工具时，第 1 个工具的结果作为完整事实已经落库。
 
-**落库为两表**：`message`（id、session_id、parent_id、role、run_id、created_at）与 `message_part`（message_id、seq、kind、body）。块一行一块，`body` 是该块主体的 JSON。
+**落库为两表**：`message`（id、session_id、parent_id、role、run_id、created_at）与 `message_part`（message_id、seq、kind、state、body）。块一行一块，`body` 是该块的 JSON。`kind` 与 `state` 是从 `body` 派生的冗余列，只为让骨架查询不必读出正文。
 
 **块级写入**。一块一行，写入与更新都以块为单位：定型消息的块一次写齐，工具节点的结局是一次块更新。流式中的部分输出不落库（ADR 0037）；大块（工具结果）一行写一次，此后不再重写。`kind` 与 Rust 的块枚举是同一形状的两面，数据库只保证 `seq` 顺序与 `kind` 合法性。
 

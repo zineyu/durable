@@ -31,6 +31,7 @@ export const toolStateLabel: Record<ToolState, string> = {
   running: '执行中',
   succeeded: '成功',
   failed: '失败',
+  unknown: '结果未知',
 };
 
 export const runFailureLabel: Record<RunFailureCode, string> = {
@@ -68,4 +69,5 @@ export const toolStateTone: Record<ToolState, StatusTone> = {
   running: 'running',
   succeeded: 'success',
   failed: 'danger',
+  unknown: 'warn',
 };

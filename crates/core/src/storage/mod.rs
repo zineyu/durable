@@ -3,7 +3,7 @@
 
 pub(crate) mod sqlite;
 
-use crate::message::Message;
+use crate::message::MessageSkeleton;
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::session::{SessionMetadata, SessionRecord};
@@ -23,7 +23,7 @@ pub(crate) struct SessionSnapshot {
     pub session: SessionRecord,
     pub busy: bool,
     pub queue_length: u32,
-    pub messages: Vec<Message>,
+    pub messages: Vec<MessageSkeleton>,
     pub queue: Vec<QueueItem>,
     pub runs: Vec<RunRecord>,
     /// 快照读取事务开始时的全局最大事实事件 id。

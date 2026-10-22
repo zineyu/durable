@@ -5,16 +5,26 @@ import type { ApiFailure, ApiResult } from './api/client';
 import { openEventStream } from './api/events';
 import type { EventStream } from './api/events';
 import type { HubBootstrap } from './api/generated/HubBootstrap';
-import type { MessageNode } from './api/generated/MessageNode';
+import type { MessageSkeleton } from './api/generated/MessageSkeleton';
 import type { NodeName } from './api/generated/NodeName';
 import { AppShell } from './components/AppShell';
 import { AssistantContent } from './components/AssistantContent';
 import { AssistantMessage } from './components/AssistantMessage';
 import { Composer } from './components/Composer';
+import { CompactionMessage } from './components/CompactionMessage';
 import { Dialog } from './components/Dialog';
+import {
+  dialogConfirmDisabled,
+  dialogConfirmLabel,
+  dialogTitle,
+  isNodeDialog,
+  renderDialogBody,
+} from './components/dialog-body';
+import type { DialogState } from './components/dialog-body';
 import { EmptyState } from './components/EmptyState';
 import { ErrorBanner } from './components/ErrorBanner';
 import { MainHeader } from './components/MainHeader';
+import { MessagePending } from './components/MessagePending';
 import { QueueStrip } from './components/QueueStrip';
 import { Sidebar } from './components/Sidebar';
 import type { SessionEditing } from './components/Sidebar';
@@ -22,29 +32,17 @@ import { Transcript } from './components/Transcript';
 import { UserMessage } from './components/UserMessage';
 import { toQueueItemId, toSessionId, toWorkspacePath } from './view/ids';
 import type { SessionId, WorkspacePath } from './view/ids';
-import {
-  branchPosition,
-  messageView,
-  sessionById,
-  sessionQueue,
-  sidebarWorkspaces,
-  snapshotCursor,
-  transcriptNodes,
-} from './view/node-state';
+import { bodyOf, placeholdersOf, toolResults } from './view/bodies';
+import { bodyText } from './view/content';
+import { branchPosition, messageView, sessionQueue, transcriptNodes } from './view/messages';
+import { sessionById, snapshotCursor } from './view/node-state';
+import { sidebarWorkspaces } from './view/sidebar';
+import { useMessageBodies } from './view/use-message-bodies';
 import { initialClientState, reduce } from './view/reducer';
 import type { ClientState } from './view/reducer';
 import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
 import { nodeStatusLabel } from './view/labels';
 import type { BranchControl, NodeRecord, SessionState } from './view/types';
-
-type DialogState =
-  | { kind: 'edit'; sessionId: string; messageId: number; text: string }
-  | { kind: 'retry'; sessionId: string; messageId: number }
-  | { kind: 'register-workspace'; path: string }
-  | { kind: 'remove-workspace'; path: string }
-  | { kind: 'register-node'; name: string; url: string }
-  | { kind: 'rename-node'; name: NodeName; next: string }
-  | { kind: 'remove-node'; name: NodeName };
 
 const RECONNECT_DELAY_MS = 1000;
 
@@ -258,7 +256,6 @@ export function App(): ReactElement {
   }, [report]);
 
   const sessionExists = session !== undefined;
-
   useEffect(() => {
     if (selectedNode === null || selectedSessionId === null || !sessionExists) {
       return;
@@ -281,6 +278,15 @@ export function App(): ReactElement {
       liveness.abort();
     };
   }, [selectedNode, selectedSessionId, sessionExists, report]);
+
+  useMessageBodies({
+    node: selectedNode,
+    sessionId: selectedSessionId,
+    shard,
+    dispatch,
+    onFailure: report,
+  });
+
 
   const selectNode = useCallback((node: NodeName) => {
     window.location.hash = writeLocationToHash(node, null);
@@ -506,7 +512,7 @@ export function App(): ReactElement {
     const idle = !current.busy && current.queueLength === 0;
     const nodeName = record.name;
 
-    const controls = (message: MessageNode): { branch?: BranchControl } => {
+    const controls = (message: MessageSkeleton): { branch?: BranchControl } => {
       const position = branchPosition(shard, current.id, message);
       if (position === null) {
         return {};
@@ -526,23 +532,33 @@ export function App(): ReactElement {
       return { branch: control };
     };
 
-    const entries = transcriptNodes(shard, current.id).map((message) => {
+    const results = toolResults(shard, current.id);
+
+    const renderEntry = (message: MessageSkeleton): ReactElement => {
+      const parts = bodyOf(shard, message.id);
       if (message.role === 'user') {
+        if (parts === null) {
+          return <MessagePending key={message.id} parts={message.parts} />;
+        }
+        const text = bodyText(parts);
         return (
           <UserMessage
             key={message.id}
-            text={message.text}
+            text={text}
             onEdit={() => { setDialog({
                 kind: 'edit',
                 sessionId: current.id,
                 messageId: message.id,
-                text: message.text,
+                text,
               }); }
             }
             editDisabled={!idle}
             {...controls(message)}
           />
         );
+      }
+      if (message.role === 'compaction') {
+        return <CompactionMessage key={message.id} parts={parts} skeleton={message.parts} />;
       }
       const view = messageView(shard, current.id, message);
       return (
@@ -555,10 +571,20 @@ export function App(): ReactElement {
           retryDisabled={!idle}
           {...controls(message)}
         >
-          <AssistantContent text={message.text} toolCalls={message.toolCalls} />
+          <AssistantContent parts={parts} skeleton={message.parts} toolResults={results} />
         </AssistantMessage>
       );
-    });
+    };
+
+    const entries = transcriptNodes(shard, current.id)
+      .filter((message) => message.role !== 'tool')
+      .map(renderEntry);
+
+    const pending = placeholdersOf(shard, current.id).map((placeholder) => (
+      <AssistantMessage key={`pending-${String(placeholder.id)}`} state="streaming">
+        <AssistantContent parts={placeholder.parts} skeleton={[]} toolResults={results} />
+      </AssistantMessage>
+    ));
 
     const queue = sessionQueue(shard, current.id).map((item) => ({
       id: toQueueItemId(String(item.id)),
@@ -577,10 +603,10 @@ export function App(): ReactElement {
           connection={state.connection}
         />
         <Transcript>
-          {entries.length === 0 ? (
+          {entries.length === 0 && pending.length === 0 ? (
             <EmptyState title="还没有消息" description="在下方输入框提交第一条消息。" />
           ) : (
-            entries
+            [...entries, ...pending]
           )}
         </Transcript>
         <QueueStrip
@@ -653,159 +679,4 @@ export function App(): ReactElement {
       ) : null}
     </>
   );
-}
-
-type NodeDialog = Extract<
-  DialogState,
-  { kind: 'register-node' | 'rename-node' | 'remove-node' }
->;
-
-function isNodeDialog(dialog: DialogState): dialog is NodeDialog {
-  return (
-    dialog.kind === 'register-node' ||
-    dialog.kind === 'rename-node' ||
-    dialog.kind === 'remove-node'
-  );
-}
-
-function dialogConfirmDisabled(dialog: DialogState): boolean {
-  switch (dialog.kind) {
-    case 'register-workspace':
-      return dialog.path.trim().length === 0;
-    case 'register-node':
-      return dialog.name.trim().length === 0 || dialog.url.trim().length === 0;
-    case 'rename-node':
-      return dialog.next.trim().length === 0;
-    case 'edit':
-    case 'retry':
-    case 'remove-workspace':
-    case 'remove-node':
-      return false;
-  }
-}
-
-function dialogTitle(dialog: DialogState): string {
-  switch (dialog.kind) {
-    case 'edit':
-      return '编辑用户消息';
-    case 'retry':
-      return '确认重试';
-    case 'register-workspace':
-      return '注册 workspace';
-    case 'remove-workspace':
-      return '移除 workspace';
-    case 'register-node':
-      return '注册节点';
-    case 'rename-node':
-      return '重命名节点';
-    case 'remove-node':
-      return '删除节点';
-    default: {
-      const unhandled: never = dialog;
-      throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
-
-function dialogConfirmLabel(dialog: DialogState): string {
-  switch (dialog.kind) {
-    case 'edit':
-      return '确认编辑';
-    case 'retry':
-      return '重试';
-    case 'register-workspace':
-      return '注册';
-    case 'remove-workspace':
-      return '移除';
-    case 'register-node':
-      return '注册';
-    case 'rename-node':
-      return '重命名';
-    case 'remove-node':
-      return '删除';
-    default: {
-      const unhandled: never = dialog;
-      throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
-    }
-  }
-}
-
-function renderDialogBody(
-  dialog: DialogState,
-  setDialog: (next: DialogState | null) => void,
-): ReactNode {
-  switch (dialog.kind) {
-    case 'edit':
-      return (
-        <textarea
-          value={dialog.text}
-          aria-label="消息正文"
-          rows={4}
-          autoFocus
-          onChange={(event) => { setDialog({ ...dialog, text: event.target.value }); }}
-        />
-      );
-    case 'retry':
-      return (
-        <p>
-          重试以父用户消息为锚新建 run，产生同父的 assistant 兄弟节点。原回答保留，此操作不可撤销。
-        </p>
-      );
-    case 'register-workspace':
-      return (
-        <input
-          value={dialog.path}
-          aria-label="workspace 路径"
-          placeholder="/absolute/path"
-          autoFocus
-          onChange={(event) => { setDialog({ ...dialog, path: event.target.value }); }}
-        />
-      );
-    case 'remove-workspace':
-      return (
-        <p>
-          移除只删除注册记录，不触碰磁盘文件。仍有 session 时 server 会拒绝并说明原因，此操作不可撤销。
-        </p>
-      );
-    case 'register-node':
-      return (
-        <>
-          <input
-            value={dialog.name}
-            aria-label="节点名"
-            placeholder="macbook-air-02"
-            autoFocus
-            onChange={(event) => { setDialog({ ...dialog, name: event.target.value }); }}
-          />
-          <input
-            value={dialog.url}
-            aria-label="节点 URL"
-            placeholder="http://127.0.0.1:8081"
-            onChange={(event) => { setDialog({ ...dialog, url: event.target.value }); }}
-          />
-        </>
-      );
-    case 'rename-node':
-      return (
-        <>
-          <input
-            value={dialog.next}
-            aria-label="新节点名"
-            autoFocus
-            onChange={(event) => { setDialog({ ...dialog, next: event.target.value }); }}
-          />
-          <p>改名后旧链接失效，指向旧名的页面会显示「未知节点」。</p>
-        </>
-      );
-    case 'remove-node':
-      return (
-        <p>
-          删除只移除节点表登记，不触碰那台机器上的 agent、SQLite 与在跑的 run。此操作不可撤销。
-        </p>
-      );
-    default: {
-      const unhandled: never = dialog;
-      throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
-    }
-  }
 }

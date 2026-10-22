@@ -25,18 +25,20 @@ pub use config::{
     MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
 };
 pub use durable::{
-    DEFAULT_SESSION_TITLE, FactEvent, MessageContent, MessageId, MessageNode, MessageRole,
-    MessageText, MessageTextError, QueueItem, QueueItemId, RunFailure, RunFailureCode, RunId,
-    RunRecord, RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle,
-    SessionTitleError, SessionTree, Store, StoreError, StreamEvent, ToolCallRecord, ToolErrorCode,
-    ToolOutcome, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    ContentKind, ContentPart, DEFAULT_SESSION_TITLE, DeltaKind, FactEvent, MessageBody, MessageId,
+    MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, PartSkeleton,
+    PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode, RunId, RunRecord,
+    RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle, SessionTitleError,
+    SessionTree, Store, StoreError, StreamEvent, ToolErrorCode, ToolOutcome, ToolResultState,
+    WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,
-    HealthResponse, HealthStatus, PROTOCOL_VERSION, RegisterWorkspaceRequest,
-    RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest, SwitchActiveLeafRequest,
+    HealthResponse, HealthStatus, MessageBodiesRequest, MessageBodiesResponse, PROTOCOL_VERSION,
+    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest,
+    SwitchActiveLeafRequest,
 };
 pub use provider::{
     ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,
@@ -104,10 +106,17 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     BootstrapResponse::export_all(&config)?;
     MessageRole::export_all(&config)?;
     MessageText::export_all(&config)?;
-    MessageContent::export_all(&config)?;
-    MessageNode::export_all(&config)?;
-    ToolCallRecord::export_all(&config)?;
+    ContentKind::export_all(&config)?;
+    PartState::export_all(&config)?;
+    ProviderMeta::export_all(&config)?;
     ToolOutcome::export_all(&config)?;
+    ToolResultState::export_all(&config)?;
+    ContentPart::export_all(&config)?;
+    PartSkeleton::export_all(&config)?;
+    MessageSkeleton::export_all(&config)?;
+    MessageBody::export_all(&config)?;
+    MessageBodiesRequest::export_all(&config)?;
+    MessageBodiesResponse::export_all(&config)?;
     ToolErrorCode::export_all(&config)?;
     QueueItem::export_all(&config)?;
     RunStatus::export_all(&config)?;

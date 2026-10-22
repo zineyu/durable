@@ -2,6 +2,6 @@
 import type { ToolErrorCode } from "./ToolErrorCode";
 
 /**
- * 工具调用的结局。
+ * 工具执行返回的结局。
  */
 export type ToolOutcome = { "status": "succeeded", content: string, } | { "status": "failed", code: ToolErrorCode, message: string, };

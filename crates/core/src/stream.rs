@@ -24,8 +24,10 @@ pub enum StreamEvent {
     },
     Delta {
         session_id: SessionId,
+        /// 该步定型后使用的消息 id；客户端据此建本地占位节点。
         #[ts(type = "number")]
         message_id: MessageId,
+        kind: DeltaKind,
         text: String,
         #[ts(type = "number")]
         timestamp: i64,
@@ -44,6 +46,14 @@ pub enum StreamEvent {
     Resync {
         reason: ResyncReason,
     },
+}
+
+/// 进行中的增量属于哪种块。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DeltaKind {
+    Text,
+    Reasoning,
 }
 
 /// 服务端要求客户端重连并刷新快照的原因。

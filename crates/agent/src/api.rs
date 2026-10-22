@@ -20,8 +20,8 @@ use crate::engine::RunEngine;
 use crate::error::ApiError;
 use crate::protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, HealthResponse, HealthStatus,
-    PROTOCOL_VERSION, RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest,
-    SubmitMessageRequest, SwitchActiveLeafRequest,
+    MessageBodiesRequest, MessageBodiesResponse, PROTOCOL_VERSION, RegisterWorkspaceRequest,
+    RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest, SwitchActiveLeafRequest,
 };
 use crate::provider::ModelProvider;
 use crate::sse;
@@ -181,6 +181,7 @@ pub fn router(state: AgentState) -> Router {
         .route("/api/workspaces/remove", post(remove_workspace))
         .route("/api/sessions", post(create_session))
         .route("/api/sessions/{id}/tree", get(session_tree))
+        .route("/api/sessions/{id}/message-bodies", post(message_bodies))
         .route("/api/sessions/{id}/rename", post(rename_session))
         .route("/api/sessions/{id}/delete", post(delete_session))
         .route("/api/sessions/{id}/messages", post(submit_message))
@@ -284,6 +285,18 @@ async fn session_tree(
     Ok(Json(state.store().session_tree(&id).await?))
 }
 
+async fn message_bodies(
+    State(state): State<AgentState>,
+    SessionPath(id): SessionPath,
+    JsonBody(request): JsonBody<MessageBodiesRequest>,
+) -> Result<Json<MessageBodiesResponse>, ApiError> {
+    let messages = state
+        .store()
+        .message_bodies(&id, &request.message_ids)
+        .await?;
+    Ok(Json(MessageBodiesResponse { messages }))
+}
+
 async fn submit_message(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
@@ -299,14 +312,14 @@ async fn edit_user_message(
     State(state): State<AgentState>,
     MessagePath { session, message }: MessagePath,
     JsonBody(request): JsonBody<EditMessageRequest>,
-) -> Result<(StatusCode, Json<durable::MessageNode>), ApiError> {
+) -> Result<(StatusCode, Json<durable::MessageSkeleton>), ApiError> {
     let text = MessageText::parse(&request.text)?;
     let node = state
         .store()
         .edit_user_message(&session, message, text)
         .await?;
     state.engine().notify_session(session).await;
-    Ok((StatusCode::CREATED, Json(node)))
+    Ok((StatusCode::CREATED, Json(node.skeleton())))
 }
 
 async fn retry_assistant_message(

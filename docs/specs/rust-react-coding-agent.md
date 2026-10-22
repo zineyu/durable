@@ -28,7 +28,7 @@
 - `list_dir` 工具；目录探查由 `bash` 完成。
 - diff 渲染、语法高亮、图片或文件附件、语音输入。
 - MCP、子代理、计划模式、自定义 system prompt、per-session 模型选择。
-- 上下文压缩或自动摘要。
+- 用户主动触发的压缩命令；压缩阈值与摘要质量调参。
 - 单分支删除、分支重命名、分支合并。
 - git 状态面板、提交操作、worktree 管理。
 - 成本与 token 统计、事件压缩与保留策略。
@@ -51,27 +51,27 @@
 - **A-7** 作为用户，我提交消息后立即收到入队确认；该消息进入 session 的 FIFO 队列。
 - **A-8** 作为用户，我看到 assistant 文本以流式增量显示；run 结束时文本完整落库，刷新后内容一致。
 - **A-9** 作为用户，我看到每个工具调用以可折叠卡片展示：工具名、入参、结果或错误。
-- **A-10** 作为用户，我可以在 run 进行中点击取消。server 中止在途模型请求、杀掉 bash 进程组，已收到的部分 assistant 文本作为「已取消」消息保留，状态为 cancelled，队列继续执行下一项。
+- **A-10** 作为用户，我可以在 run 进行中点击取消。server 中止在途模型请求、杀掉 bash 进程组，未定型的部分输出丢弃，状态为 cancelled，队列继续执行下一项。
 - **A-11** 作为用户，我可以删除尚未开始的队列项；已开始的 run 只能取消，不能删除。
 - **A-12** 作为用户，当工具执行失败（文件不存在、编辑不唯一、非零退出、超时）时，错误作为工具结果回传模型，run 继续。
-- **A-13** 作为用户，当模型请求失败、供应商限流、超出上下文上限或超出步数上限时，run 以明确错误结束，队列继续；UI 显示错误类别与说明。
+- **A-13** 作为用户，当模型请求失败、供应商限流、超出上下文上限或超出步数上限时，run 以明确错误结束，队列继续；UI 显示错误类别与说明。上下文超限时引擎先压缩历史并重试本步一次。
 - **A-14** 作为用户，我可以同时运行多个 session 的 run，没有并发上限。session 内仍按 FIFO 串行。
 - **A-15** 作为用户，我在同一个 session 的上一个 run 未结束时提交新消息，消息进入队列，不打断当前 run。
 
 ### 分支历史
 
 - **A-16** 作为用户，我可以编辑任意一条历史用户消息。server 在该消息的父节点下创建新的兄弟用户消息，把 active leaf 移到新消息，并把新消息入队执行；旧消息及其子树完整保留。
-- **A-17** 作为用户，我可以重试任意一条 assistant 消息。server 以其父用户消息为起点创建新 run，新 assistant 消息与旧消息同父，active leaf 移到新消息；不重复创建用户消息。
+- **A-17** 作为用户，我可以重试任意一条 assistant 消息。server 以该消息的父节点为起点创建新 run（父节点是工具结果时同样成立），新 assistant 消息与旧消息同父，active leaf 移到新消息；不重复创建用户消息。
 - **A-18** 作为用户，当某条消息存在兄弟时，我看到 `‹ 2/3 ›` 切换器。切换把 active leaf 移到目标子树中最近产生的叶子，transcript 随之改变。
 - **A-19** 作为用户，编辑、重试、切换分支都只在 session 空闲且队列为空时可用；不满足时 server 返回显式冲突错误，UI 置灰相应操作。
 - **A-20** 作为用户，我理解编辑、重试、切换分支都不可撤销；UI 对编辑与重试要求二次确认。
 
 ### 恢复与多客户端
 
-- **A-21** 作为用户，我刷新页面后通过 bootstrap 元数据与当前 session 的消息树恢复完整视图，正在进行的 run 显示已收到的部分输出。
+- **A-21** 作为用户，我刷新页面后通过 bootstrap 元数据与当前 session 的消息树恢复完整视图；正在进行的 run 的实时内容不落库，刷新后按骨架与正文接口重新装配。
 - **A-22** 作为用户，SSE 断线后客户端用最后事件 id 续传，不丢失也不重复应用事件。
 - **A-23** 作为用户，我可以在多个标签页同时打开 UI；所有标签页收到同一事件流，任一标签页的命令对全部标签页生效。
-- **A-24** 作为用户，server 重启后我看到全部 workspace、session、消息树与队列；重启前处于 running 的 run 显示为 failed，原因为进程中断。
+- **A-24** 作为用户，server 重启后我看到全部 workspace、session、消息树与队列；重启前处于 running 的 run 从树尾继续执行，不产生新的 run。
 - **A-25** 作为用户，我在 UI 中看到 SSE 连接状态；断线时显示重连中，恢复后自动回到实时状态。
 
 ### 工具契约
@@ -91,6 +91,10 @@
 - **A-35** 作为开发者，Rust 协议类型变更后重新生成 TS 类型；生成文件已提交，CI 校验重新生成后无差异。
 - **A-36** 作为开发者，我在 `devenv shell` 中执行构建、测试、类型生成与 Storybook 命令。
 
+### 上下文压缩
+
+- **A-37** 作为用户，当一轮请求超过上下文上限时，引擎把此前的对话压缩成一条摘要消息，重试本步一次；摘要作为链上的压缩消息保留，我能在 transcript 中看出它是摘要而不是模型回答。压缩失败或重试仍超限时，run 以上下文超限结束，队列继续。用户主动触发的压缩不在本期。
+
 ## 实现决策
 
 ### 进程与部署
@@ -106,11 +110,12 @@
 
 - 命令使用 HTTP + JSON；事件使用单一全局 SSE 流。
 - 事件信封包含：全局自增 id、`session_id`、类型、负载、时间戳。全局 id 单调递增，用作续传游标。
-- 事实事件持久化：session 创建/重命名/标题更新/删除、workspace 注册/移除、用户消息、assistant 完整消息、工具调用、工具结果、run 状态转换、active leaf 变更、队列项入队/移除。token 增量与限流重试提示只经 SSE 传输，不持久化，也不推进游标。
+- 事实事件持久化：session 创建/重命名/标题更新/删除、workspace 注册/移除、消息追加与消息更新（只带骨架）、run 状态转换、active leaf 变更、队列项入队/移除。token 增量与限流重试提示只经 SSE 传输，不持久化，也不推进游标。
 - SSE 每 15 秒发送注释行保活。多个标签页可同时订阅同一条事件流。
 - `agent` 提供以下命令面：
   - 读取 bootstrap 元数据：workspace 列表、session 元数据、模型名、当前最大事件 id。
-  - 读取单个 session 的消息树：全部节点、active leaf、队列、当前 run 状态与已收到的部分输出。
+  - 读取单个 session 的消息树：全部节点骨架、active leaf、队列与当前 run 状态。
+  - 按消息 id 批量读取块正文。
   - 订阅事件流，支持 `after` 游标。
   - 注册与移除 workspace。
   - 创建、重命名、删除 session。
@@ -118,7 +123,7 @@
   - 编辑历史用户消息、重试 assistant 消息、切换 active leaf。
 - 错误响应包含稳定的错误码、人类可读说明与 HTTP 状态。错误码至少区分：workspace 路径无效、workspace 重复、workspace 非空、session 不存在、run 进行中冲突、队列非空冲突、路径逃逸、文件不存在、非 UTF-8、编辑未匹配、编辑多处匹配、读取超限、bash 超时、模型上游错误、模型限流、上下文超限、步数超限、配置缺失。bash 输出截断不是错误，在工具结果中标注。
 - 协议类型由 Rust 定义，用 `ts-rs` 生成 TS 类型；生成文件写入前端固定目录并提交到仓库，CI 重新生成并比较。
-- 消息节点包含：id、parent_id、role（user/assistant）、文本、工具调用与结果、run 关联、创建时间。assistant 的取消状态与失败原因作为节点元数据保存。
+- 消息节点包含：id、parent_id、role（user/assistant/tool/compaction）、run 关联、创建时间与有序内容块。assistant 的取消状态与失败原因作为 run 元数据保存。事件与快照只带骨架，正文按消息 id 拉取。
 
 ### 调度与会话状态
 
@@ -132,7 +137,7 @@ stateDiagram-v2
     [*] --> queued
     queued --> running: 取出队首即启动
     running --> succeeded: assistant 不再请求工具
-    running --> failed: 模型错误 / 模型限流 / 上下文超限 / 步数超限 / 进程中断
+    running --> failed: 模型错误 / 模型限流 / 上下文超限 / 步数超限
     running --> cancelled: 用户取消 / 删除 session
     succeeded --> [*]
     failed --> [*]
@@ -142,8 +147,8 @@ stateDiagram-v2
 - 编辑、重试、切换分支要求 session 空闲且队列为空，否则拒绝。
 - assistant 消息的兄弟节点由「父节点 + 新建 run」产生；用户消息的兄弟节点由编辑产生。
 - 分支切换只修改 active leaf，并把变更作为事实事件广播与持久化。
-- 会话 transcript 等于 root 到 active leaf 的路径，也是每轮发给模型的上下文。
-- server 启动时把仍为 running 的 run 标记为 failed，原因为进程中断，并继续执行其队列。
+- 会话 transcript 是从 active leaf 向上回溯到根或最近一条压缩消息的路径，也是每轮发给模型的上下文。
+- server 启动时接管仍为 running 的 run：按树尾续跑，崩溃前未定型的 assistant 内容丢弃。队列在 run 开始时已消费，不重复入队。
 
 ### 模型调用
 
@@ -152,6 +157,7 @@ stateDiagram-v2
 - 同一 assistant 消息返回多个工具调用时，按顺序依次执行，收集全部结果后再请求下一轮。
 - assistant 不再请求工具时 run 成功结束。
 - 最大步数默认 50，可配置；超限以显式错误结束 run。
+- 上下文超限时先压缩一次再重试本步：压缩请求复用 provider，产出的一条摘要作为 `compaction` 消息挂在 active leaf 下，此后 transcript 从它开始。压缩不属于任何 run，没有 `run_id`；压缩失败或重试仍超限时 run 以 `context_limit_exceeded` 结束。见 `docs/adr/0036-compaction-message.md`。
 - 上下文按字符数限制，默认 200000，可配置；超限以显式错误结束 run，不截断、不摘要。
 - 模型上游错误（网络、非 2xx、流解析失败）终止当前 run，队列继续。
 - 供应商限流在单次模型调用内部有限重试：默认 3 次，指数退避，单次等待上限 30 秒；响应带 `Retry-After` 时以它为准。重试次数用 `DURABLE_MODEL_RETRY_LIMIT` 配置，`0` 表示不重试；退避底数用 `DURABLE_MODEL_RETRY_BACKOFF_MS` 配置。
@@ -221,6 +227,7 @@ stateDiagram-v2
 - 同一 session 连续提交三条消息，执行顺序为 FIFO；删除 pending 项后该项不再执行。
 - 取消运行中的 run：bash 子进程被终止，部分 assistant 文本保留，状态为 cancelled，队列继续。
 - 上下文超限与步数超限分别以对应错误码结束 run，队列继续。
+- 上下文超限时先压缩一次并重试：压缩后的 transcript 以摘要消息开头，摘要不带 `run_id`；压缩失败时 run 以 `context_limit_exceeded` 结束，且不留下摘要消息。
 - 编辑历史用户消息产生兄弟节点并执行新 run；重试 assistant 产生同父兄弟；切换 active leaf 后 transcript 与 bootstrap 一致。
 - 在同一 SQLite 上重启 agent：消息树、队列、active leaf 恢复；running 状态转为 failed。
 - 从 `after` 游标回放事件，客户端视角与 bootstrap 合并后状态一致。

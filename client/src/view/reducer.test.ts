@@ -1,27 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BootstrapResponse } from '../api/generated/BootstrapResponse';
+import type { ContentPart } from '../api/generated/ContentPart';
 import type { FactEvent } from '../api/generated/FactEvent';
 import type { HubBootstrap } from '../api/generated/HubBootstrap';
 import type { HubStreamEvent } from '../api/generated/HubStreamEvent';
-import type { MessageNode } from '../api/generated/MessageNode';
+import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { NodeSnapshot } from '../api/generated/NodeSnapshot';
 import type { NodeStatus } from '../api/generated/NodeStatus';
+import type { PartSkeleton } from '../api/generated/PartSkeleton';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTree } from '../api/generated/SessionTree';
-import type { ToolCallRecord } from '../api/generated/ToolCallRecord';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId } from './ids';
+import { bodyOf, missingBodyIds, placeholdersOf, toolResults } from './bodies';
 import {
   branchPosition,
-  loadSessionTree,
   messageView,
   sessionQueue,
-  sidebarWorkspaces,
-  snapshotCursor,
   transcriptNodes,
-} from './node-state';
+} from './messages';
+import { loadSessionTree, snapshotCursor } from './node-state';
+import { sidebarWorkspaces } from './sidebar';
 import type { NodeState } from './node-state';
 import { initialClientState, reduce } from './reducer';
 import type { ClientState } from './reducer';
@@ -52,19 +53,26 @@ function session(
 function message(
   id: number,
   parentId: number | null,
-  role: MessageNode['role'],
-  extra: Partial<MessageNode> = {},
-): MessageNode {
+  role: MessageSkeleton['role'],
+  extra: Partial<MessageSkeleton> = {},
+): MessageSkeleton {
   return {
     id,
     parentId,
     role,
-    text: '',
     runId: null,
-    toolCalls: [],
     createdAt: id,
+    parts: [],
     ...extra,
   };
+}
+
+function parts(kinds: PartSkeleton['kind'][]): PartSkeleton[] {
+  return kinds.map((kind, index) => ({ seq: index, kind, size: 1, state: 'complete' }));
+}
+
+function text(value: string): ContentPart[] {
+  return [{ kind: 'text', text: value, providerMeta: null }];
 }
 
 function bootstrap(
@@ -113,17 +121,26 @@ function delta(
   node: string,
   sessionId: string,
   messageId: number,
-  text: string,
+  value: string,
+  kind: 'text' | 'reasoning' = 'text',
 ): HubStreamEvent {
-  return { type: 'delta', node, sessionId: toSessionId(sessionId), messageId, text, timestamp: 1 };
+  return {
+    type: 'delta',
+    node,
+    sessionId: toSessionId(sessionId),
+    messageId,
+    kind,
+    text: value,
+    timestamp: 1,
+  };
 }
 
-function at(nodes: MessageNode[], index: number): MessageNode {
-  const node = nodes[index];
-  if (node === undefined) {
+function at<T>(entries: T[], index: number): T {
+  const entry = entries[index];
+  if (entry === undefined) {
     throw new Error('缺少测试节点');
   }
-  return node;
+  return entry;
 }
 
 function shardOf(state: ClientState, node: string): NodeState {
@@ -138,7 +155,7 @@ function tree(
   id: string,
   maxEventId: number,
   activeLeaf: number | null,
-  nodes: MessageNode[],
+  nodes: MessageSkeleton[],
 ): SessionTree {
   return {
     maxEventId,
@@ -319,11 +336,7 @@ describe('侧栏状态', () => {
   });
 
   it('重命名与删除 session', () => {
-    const state = withTree(
-      loaded(),
-      nodeA,
-      tree('s-1', 7, 1, [message(1, null, 'user', { text: '问' })]),
-    );
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
 
     const renamed = streamed(
       state,
@@ -367,10 +380,10 @@ describe('侧栏状态', () => {
 
 describe('transcript 推导', () => {
   const nodes = [
-    message(1, null, 'user', { text: '一' }),
-    message(2, 1, 'assistant', { text: '二' }),
-    message(3, 2, 'user', { text: '三' }),
-    message(4, 3, 'assistant', { text: '四' }),
+    message(1, null, 'user'),
+    message(2, 1, 'assistant'),
+    message(3, 2, 'user'),
+    message(4, 3, 'assistant'),
   ];
 
   it('取 root 到 active leaf 的路径', () => {
@@ -385,10 +398,10 @@ describe('transcript 推导', () => {
 
   it('切换 active leaf 后 transcript 跟随目标子树', () => {
     const branched = [
-      message(1, null, 'user', { text: '原始' }),
-      message(2, 1, 'assistant', { text: '原始回答' }),
-      message(3, 1, 'user', { text: '编辑' }),
-      message(4, 3, 'assistant', { text: '编辑回答' }),
+      message(1, null, 'user'),
+      message(2, 1, 'assistant'),
+      message(3, 1, 'user'),
+      message(4, 3, 'assistant'),
     ];
     const state = withTree(loaded(), nodeA, tree('s-1', 7, 4, branched));
     expect(transcriptNodes(shardOf(state, nodeA), 's-1').map((entry) => entry.id)).toEqual([
@@ -408,14 +421,30 @@ describe('transcript 推导', () => {
     ]);
   });
 
+  it('工具节点在链上但不计入分支兄弟', () => {
+    const chained = [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant', { parts: parts(['tool_call']) }),
+      message(3, 2, 'tool', { parts: parts(['tool_result']) }),
+      message(4, 2, 'tool', { parts: parts(['tool_result']) }),
+      message(5, 3, 'user'),
+    ];
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 5, chained));
+    const shard = shardOf(state, nodeA);
+
+    expect(transcriptNodes(shard, 's-1').map((entry) => entry.id)).toEqual([1, 2, 3, 5]);
+    expect(branchPosition(shard, 's-1', at(chained, 2))).toBeNull();
+    expect(branchPosition(shard, 's-1', at(chained, 4))).toBeNull();
+  });
+
   it('分支位置给出兄弟序号与相邻节点', () => {
     const branched = [
-      message(1, null, 'user', { text: '第一问' }),
-      message(2, 1, 'assistant', { text: '第一答' }),
-      message(3, 2, 'user', { text: '第二问' }),
-      message(4, 3, 'assistant', { text: '第二答' }),
-      message(5, 2, 'user', { text: '第二问改写' }),
-      message(6, 5, 'assistant', { text: '改写后的回答' }),
+      message(1, null, 'user'),
+      message(2, 1, 'assistant'),
+      message(3, 2, 'user'),
+      message(4, 3, 'assistant'),
+      message(5, 2, 'user'),
+      message(6, 5, 'assistant'),
     ];
     const state = withTree(loaded(), nodeA, tree('s-1', 7, 6, branched));
     const shard = shardOf(state, nodeA);
@@ -429,67 +458,290 @@ describe('transcript 推导', () => {
     });
     expect(branchPosition(shard, 's-1', at(branched, 0))).toBeNull();
   });
+
+  it('压缩消息不计入分支兄弟', () => {
+    const compacted = [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant'),
+      message(3, 1, 'compaction'),
+    ];
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 2, compacted));
+    const shard = shardOf(state, nodeA);
+
+    expect(branchPosition(shard, 's-1', at(compacted, 1))).toBeNull();
+    expect(branchPosition(shard, 's-1', at(compacted, 2))).toBeNull();
+  });
 });
 
-describe('流式增量与 run 状态', () => {
-  const withAssistant = (): ClientState =>
-    withTree(loaded(), nodeA, tree('s-1', 7, 2, [
-      message(1, null, 'user', { text: '问' }),
-      message(2, 1, 'assistant', { runId: 1 }),
+describe('正文缓存', () => {
+  it('缺失的正文按 id 批量请求，同一 id 不重复请求', () => {
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 2, [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant'),
     ]));
+    const shard = shardOf(state, nodeA);
 
-  it('同一 run 的多个 delta 按序合并为连续文本', () => {
-    let state = withAssistant();
-    state = streamed(state, delta(nodeA, 's-1', 2, '你'));
-    state = streamed(state, delta(nodeA, 's-1', 2, '好'));
-    expect(shardOf(state, nodeA).trees['s-1']?.nodes[1]?.text).toBe('你好');
+    expect(missingBodyIds(shard, 's-1')).toEqual([1, 2]);
+
+    const requested = reduce(state, { type: 'bodies-request', node: nodeA, ids: [1, 2] });
+    expect(missingBodyIds(shardOf(requested, nodeA), 's-1')).toEqual([]);
   });
 
-  it('delta 不推进广播游标', () => {
-    const state = streamed(withAssistant(), delta(nodeA, 's-1', 2, '你'));
-    expect(state.hub.cursor).toBe(7);
+  it('拉到的正文按消息 id 缓存，未返回的 id 记为空正文', () => {
+    const state = reduce(
+      withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')])),
+      { type: 'bodies-request', node: nodeA, ids: [1, 2] },
+    );
+    const loadedBodies = reduce(state, {
+      type: 'bodies',
+      node: nodeA,
+      ids: [1, 2],
+      messages: [{ id: 1, parts: text('问') }],
+    });
+    const shard = shardOf(loadedBodies, nodeA);
+
+    expect(bodyOf(shard, 1)).toEqual(text('问'));
+    expect(bodyOf(shard, 2)).toEqual([]);
+    expect(bodyOf(shard, 3)).toBeNull();
+    expect(shard.bodyRequests).toEqual([]);
   });
 
-  it('工具调用事实事件在 run 进行中追加到 assistant 节点', () => {
-    const record: ToolCallRecord = {
-      id: 'call_1',
-      name: 'read_file',
-      arguments: '{"path":"devenv.nix"}',
-      outcome: { status: 'succeeded', content: 'scripts.build.exec = "durable-build"' },
-    };
-    let state = withAssistant();
-    state = streamed(
-      state,
+  it('message_updated 使该消息的正文失效，其它消息不变', () => {
+    const state = reduce(withTree(loaded(), nodeA, tree('s-1', 7, 3, [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant', { parts: parts(['tool_call']) }),
+      message(3, 2, 'tool', { parts: parts(['tool_result']) }),
+    ])), { type: 'bodies-request', node: nodeA, ids: [2, 3] });
+    const withBodies = reduce(state, {
+      type: 'bodies',
+      node: nodeA,
+      ids: [2, 3],
+      messages: [
+        { id: 2, parts: [{ kind: 'tool_call', callId: 'call_1', name: 'read_file', arguments: '{}', providerMeta: null }] },
+        { id: 3, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'running' }, providerMeta: null }] },
+      ],
+    });
+
+    const updated = streamed(
+      withBodies,
       fact(nodeA, 8, 108, {
-        kind: 'tool_call_recorded',
-        session: session('s-1', '/work/a', 200, { busy: true }),
-        message: 2,
-        toolCall: record,
+        kind: 'message_updated',
+        session: session('s-1', '/work/a', 200),
+        message: message(3, 2, 'tool', { parts: parts(['tool_result']) }),
       }),
     );
+    const shard = shardOf(updated, nodeA);
+
+    expect(bodyOf(shard, 2)).not.toBeNull();
+    expect(bodyOf(shard, 3)).toBeNull();
+    expect(missingBodyIds(shard, 's-1')).toEqual([1, 3]);
+  });
+
+  it('拉取失败的消息不再自动重试，快照重载后恢复', () => {
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+    const requested = reduce(state, { type: 'bodies-request', node: nodeA, ids: [1] });
+    const failed = reduce(requested, { type: 'bodies-failed', node: nodeA, ids: [1] });
+
+    expect(missingBodyIds(shardOf(failed, nodeA), 's-1')).toEqual([]);
+
+    const reloaded = withTree(failed, nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+    expect(missingBodyIds(shardOf(reloaded, nodeA), 's-1')).toEqual([1]);
+  });
+
+  it('快照重载清空在途请求，被中断的正文可以重新拉取', () => {
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+    const requested = reduce(state, { type: 'bodies-request', node: nodeA, ids: [1] });
+    expect(missingBodyIds(shardOf(requested, nodeA), 's-1')).toEqual([]);
+
+    const reloaded = withTree(requested, nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+    expect(missingBodyIds(shardOf(reloaded, nodeA), 's-1')).toEqual([1]);
+  });
+
+  it('失效后迟到的正文响应被丢弃，并重新拉取', () => {
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 2, [
+      message(1, null, 'user'),
+      message(2, 1, 'tool', { parts: parts(['tool_result']) }),
+    ]));
+    const requested = reduce(state, { type: 'bodies-request', node: nodeA, ids: [2] });
+    const invalidated = streamed(
+      requested,
+      fact(nodeA, 8, 108, {
+        kind: 'message_updated',
+        session: session('s-1', '/work/a', 200),
+        message: message(2, 1, 'tool', { parts: parts(['tool_result']) }),
+      }),
+    );
+    const late = reduce(invalidated, {
+      type: 'bodies',
+      node: nodeA,
+      ids: [2],
+      messages: [
+        { id: 2, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'running' }, providerMeta: null }] },
+      ],
+    });
+    const shard = shardOf(late, nodeA);
+
+    expect(bodyOf(shard, 2)).toBeNull();
+    expect(missingBodyIds(shard, 's-1')).toEqual([1, 2]);
+  });
+
+  it('拉取失败的消息可以显式重试', () => {
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+    const failed = reduce(
+      reduce(state, { type: 'bodies-request', node: nodeA, ids: [1] }),
+      { type: 'bodies-failed', node: nodeA, ids: [1] },
+    );
+    expect(missingBodyIds(shardOf(failed, nodeA), 's-1')).toEqual([]);
+
+    const retried = reduce(failed, { type: 'bodies-retry', node: nodeA, ids: [1] });
+    expect(missingBodyIds(shardOf(retried, nodeA), 's-1')).toEqual([1]);
+  });
+
+  it('删除 session 时丢弃它的正文缓存', () => {
+    const state = reduce(
+      reduce(withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')])), {
+        type: 'bodies-request',
+        node: nodeA,
+        ids: [1],
+      }),
+      {
+        type: 'bodies',
+        node: nodeA,
+        ids: [1],
+        messages: [{ id: 1, parts: text('问') }],
+      },
+    );
+    const deleted = streamed(
+      state,
+      fact(nodeA, 8, 108, { kind: 'session_deleted', sessionId: 's-1' }),
+    );
+    const shard = shardOf(deleted, nodeA);
+
+    expect(bodyOf(shard, 1)).toBeNull();
+    expect(shard.bodyRequests).toEqual([]);
+    expect(shard.bodyFailures).toEqual([]);
+  });
+
+  it('工具结局按 call id 汇总，正文未到时没有条目', () => {
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 3, [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant', { parts: parts(['tool_call']) }),
+      message(3, 2, 'tool', { parts: parts(['tool_result']) }),
+    ]));
+    expect(toolResults(shardOf(state, nodeA), 's-1')).toEqual({});
+
+    const withBody = reduce(
+      reduce(state, { type: 'bodies-request', node: nodeA, ids: [3] }),
+      {
+      type: 'bodies',
+      node: nodeA,
+      ids: [3],
+      messages: [
+        { id: 3, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'unknown' }, providerMeta: null }] },
+      ],
+      },
+    );
+    expect(toolResults(shardOf(withBody, nodeA), 's-1')).toEqual({
+      call_1: { status: 'unknown' },
+    });
+  });
+});
+
+describe('流式增量与占位节点', () => {
+  const asked = (): ClientState =>
+    withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+
+  it('未定型的增量建本地占位，并合并同类块', () => {
+    let state = streamed(asked(), delta(nodeA, 's-1', 9, '你'));
+    state = streamed(state, delta(nodeA, 's-1', 9, '好'));
+    state = streamed(state, delta(nodeA, 's-1', 9, '想', 'reasoning'));
+
+    expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toEqual([
+      {
+        id: 9,
+        parts: [
+          { kind: 'text', text: '你好', providerMeta: null },
+          { kind: 'reasoning', text: '想', providerMeta: null },
+        ],
+      },
+    ]);
+    expect(transcriptNodes(shardOf(state, nodeA), 's-1').map((entry) => entry.id)).toEqual([1]);
+  });
+
+  it('message_appended 用同一 id 的骨架接管占位', () => {
+    const streaming = streamed(asked(), delta(nodeA, 's-1', 9, '部分'));
+    const appended = streamed(
+      streamed(
+        streaming,
+        fact(nodeA, 9, 109, {
+          kind: 'message_appended',
+          session: session('s-1', '/work/a', 200, { busy: true }),
+          message: message(9, 1, 'assistant', { runId: 1, parts: parts(['text']) }),
+        }),
+      ),
+      fact(nodeA, 10, 110, {
+        kind: 'active_leaf_changed',
+        session: session('s-1', '/work/a', 210, { busy: true }),
+        activeLeaf: 9,
+      }),
+    );
+
+    expect(placeholdersOf(shardOf(appended, nodeA), 's-1')).toEqual([]);
+    expect(missingBodyIds(shardOf(appended, nodeA), 's-1')).toEqual([1, 9]);
+  });
+
+  it('run 结束时丢弃未定型的占位', () => {
+    const running: RunRecord = {
+      id: 1,
+      sessionId: 's-1',
+      status: 'running',
+      failure: null,
+      createdAt: 100,
+      updatedAt: 100,
+    };
+    let state = streamed(
+      asked(),
+      fact(nodeA, 8, 108, {
+        kind: 'run_started',
+        session: session('s-1', '/work/a', 200, { busy: true }),
+        run: running,
+      }),
+    );
+    state = streamed(state, delta(nodeA, 's-1', 9, '被打断的回答。'));
+    expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toHaveLength(1);
+
     state = streamed(
       state,
       fact(nodeA, 9, 109, {
-        kind: 'tool_call_recorded',
-        session: session('s-1', '/work/a', 200, { busy: true }),
-        message: 2,
-        toolCall: record,
+        kind: 'run_finished',
+        session: session('s-1', '/work/a', 300),
+        run: { ...running, status: 'cancelled', updatedAt: 300 },
       }),
     );
-    expect(shardOf(state, nodeA).trees['s-1']?.nodes[1]?.toolCalls).toEqual([record]);
+    expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toEqual([]);
   });
 
-  it('run 结束事件以完整文本覆盖增量', () => {
-    let state = streamed(withAssistant(), delta(nodeA, 's-1', 2, '部分'));
-    state = streamed(
-      state,
-      fact(nodeA, 8, 108, {
-        kind: 'message_updated',
-        session: session('s-1', '/work/a', 300),
-        message: message(2, 1, 'assistant', { text: '完整文本', runId: 1 }),
-      }),
+  it('快照重载丢弃占位', () => {
+    const streaming = streamed(asked(), delta(nodeA, 's-1', 9, '部分'));
+    const reloaded = withTree(streaming, nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
+
+    expect(placeholdersOf(shardOf(reloaded, nodeA), 's-1')).toEqual([]);
+  });
+
+  it('已入树的同一 id 不再累积增量', () => {
+    const state = streamed(
+      withTree(loaded(), nodeA, tree('s-1', 7, 2, [
+        message(1, null, 'user'),
+        message(2, 1, 'assistant', { runId: 1 }),
+      ])),
+      delta(nodeA, 's-1', 2, '迟到增量'),
     );
-    expect(shardOf(state, nodeA).trees['s-1']?.nodes[1]?.text).toBe('完整文本');
+    expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toEqual([]);
+  });
+
+  it('delta 不推进广播游标', () => {
+    const state = streamed(asked(), delta(nodeA, 's-1', 9, '你'));
+    expect(state.hub.cursor).toBe(7);
   });
 
   it('由 run 状态推导 assistant 的展示状态与失败说明', () => {
@@ -502,17 +754,17 @@ describe('流式增量与 run 状态', () => {
       updatedAt: 100,
     };
     let state = streamed(
-      withAssistant(),
+      withTree(loaded(), nodeA, tree('s-1', 7, 2, [
+        message(1, null, 'user'),
+        message(2, 1, 'assistant', { runId: 1 }),
+      ])),
       fact(nodeA, 8, 108, {
         kind: 'run_started',
         session: session('s-1', '/work/a', 200, { busy: true }),
         run,
       }),
     );
-    const assistant = shardOf(state, nodeA).trees['s-1']?.nodes[1];
-    if (assistant === undefined) {
-      throw new Error('缺少 assistant 节点');
-    }
+    const assistant = at(shardOf(state, nodeA).trees['s-1']?.nodes ?? [], 1);
     expect(messageView(shardOf(state, nodeA), 's-1', assistant)).toEqual({
       state: 'streaming',
       note: null,
@@ -546,7 +798,7 @@ describe('分片隔离', () => {
   });
 
   it('重复到达的事实只应用一次', () => {
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user', { text: '一' })]));
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
     const event = fact(nodeA, 8, 108, {
       kind: 'session_renamed',
       session: session('s-1', '/work/a', 200, { title: '改名' }),
@@ -577,21 +829,23 @@ describe('分片隔离', () => {
     expect(shardOf(older, nodeA).sessions[0]?.title).toBe('新');
   });
 
-  it('两节点同名 session 的增量互不串写', () => {
+  it('两节点同名 session 的占位互不串写', () => {
     let state = withTree(
       withTree(loaded(), nodeA, tree('s-1', 7, 2, [
-        message(1, null, 'user', { text: 'A 问' }),
+        message(1, null, 'user'),
         message(2, 1, 'assistant', { runId: 1 }),
       ])),
       nodeB,
       tree('s-1', 7, 5, [message(5, null, 'assistant', { runId: 1 })]),
     );
 
-    state = streamed(state, delta(nodeB, 's-1', 5, 'B 输出'));
+    state = streamed(state, delta(nodeB, 's-1', 6, 'B 输出'));
     state = streamed(state, delta(nodeA, 's-1', 2, 'A 输出'));
 
-    expect(shardOf(state, nodeB).trees['s-1']?.nodes[0]?.text).toBe('B 输出');
-    expect(shardOf(state, nodeA).trees['s-1']?.nodes[1]?.text).toBe('A 输出');
+    expect(placeholdersOf(shardOf(state, nodeB), 's-1')).toEqual([
+      { id: 6, parts: [{ kind: 'text', text: 'B 输出', providerMeta: null }] },
+    ]);
+    expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toEqual([]);
   });
 
   it('两节点事件交错到达时各自分片互不影响', () => {
@@ -759,8 +1013,8 @@ describe('节点表变更', () => {
 });
 
 describe('快照水位与回放恢复', () => {
-  const question = message(1, null, 'user', { text: '问' });
-  const answer = message(2, 1, 'assistant', { text: '答', runId: 1 });
+  const question = message(1, null, 'user');
+  const answer = message(2, 1, 'assistant', { runId: 1 });
 
   it('tree 快照落后于已应用的事实时补齐尾部', () => {
     const appended = streamed(
@@ -875,43 +1129,6 @@ describe('快照水位与回放恢复', () => {
   });
 });
 
-describe('工具调用', () => {
-  it('工具调用与结果随 assistant 消息进入 transcript', () => {
-    const record: ToolCallRecord = {
-      id: 'call_1',
-      name: 'bash',
-      arguments: '{"command":"cargo test"}',
-      outcome: { status: 'succeeded', content: '测试通过' },
-    };
-    let state = streamed(
-      loaded(),
-      fact(nodeA, 8, 108, {
-        kind: 'message_appended',
-        session: session('s-1', '/work/a', 108),
-        message: message(1, null, 'user', { text: '执行' }),
-      }),
-    );
-    state = streamed(
-      state,
-      fact(nodeA, 9, 109, {
-        kind: 'message_updated',
-        session: session('s-1', '/work/a', 109),
-        message: message(2, 1, 'assistant', { text: '完成', runId: 1, toolCalls: [record] }),
-      }),
-    );
-    state = streamed(
-      state,
-      fact(nodeA, 10, 110, {
-        kind: 'active_leaf_changed',
-        session: session('s-1', '/work/a', 110),
-        activeLeaf: 2,
-      }),
-    );
-
-    expect(transcriptNodes(shardOf(state, nodeA), 's-1')[1]?.toolCalls).toEqual([record]);
-  });
-});
-
 describe('连接状态与错误', () => {
   it('记录连接状态与错误横幅', () => {
     const connected = reduce(initialClientState, { type: 'connection', connection: 'connected' });
@@ -932,6 +1149,12 @@ describe('分片辅助', () => {
     const shard = loadSessionTree(shardOf(loaded(), nodeA), tree('s-2', 9, null, []));
     expect(shard.trees['s-2']?.activeLeaf).toBeNull();
     expect(shard.lastEventId).toBe(7);
+  });
+
+  it('正文请求只作用于已有分片', () => {
+    const state = loaded();
+    const untouched = reduce(state, { type: 'bodies-request', node: 'ghost', ids: [1] });
+    expect(untouched).toBe(state);
   });
 });
 
@@ -963,14 +1186,10 @@ describe('供应商限流重试', () => {
   }
 
   function withRunning(): ClientState {
-    const state = withTree(
-      loaded(),
-      nodeA,
-      tree('s-1', 7, 2, [
-        message(1, null, 'user', { text: '问' }),
-        message(2, 1, 'assistant', { runId: 1 }),
-      ]),
-    );
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, 2, [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant', { runId: 1 }),
+    ]));
     return streamed(
       state,
       fact(nodeA, 8, 108, {
@@ -981,7 +1200,7 @@ describe('供应商限流重试', () => {
     );
   }
 
-  function assistantOf(state: ClientState): MessageNode {
+  function assistantOf(state: ClientState): MessageSkeleton {
     return at(shardOf(state, nodeA).trees['s-1']?.nodes ?? [], 1);
   }
 
@@ -1049,7 +1268,7 @@ describe('供应商限流重试', () => {
       retrying,
       nodeA,
       tree('s-1', 9, 2, [
-        message(1, null, 'user', { text: '问' }),
+        message(1, null, 'user'),
         message(2, 1, 'assistant', { runId: 1 }),
       ]),
     );

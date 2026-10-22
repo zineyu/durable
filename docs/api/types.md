@@ -8,10 +8,37 @@
 export type BootstrapResponse = { model: string, maxEventId: number, workspaces: Array<WorkspaceMetadata>, sessions: Array<SessionMetadata>, };
 ```
 
+## ContentKind
+
+```ts
+/**
+ * 内容块的类型标签，与 [`ContentPart`] 的变体一一对应。
+ */
+export type ContentKind = "text" | "reasoning" | "tool_call" | "tool_result" | "image";
+```
+
+## ContentPart
+
+```ts
+/**
+ * 一条消息正文中的一个类型化片段。块序即产生顺序。
+ */
+export type ContentPart = { "kind": "text", text: string, providerMeta: ProviderMeta | null, } | { "kind": "reasoning", text: string, providerMeta: ProviderMeta | null, } | { "kind": "tool_call", callId: string, name: string, arguments: string, providerMeta: ProviderMeta | null, } | { "kind": "tool_result", callId: string, state: ToolResultState, providerMeta: ProviderMeta | null, } | { "kind": "image", mediaType: string, data: string, providerMeta: ProviderMeta | null, };
+```
+
 ## CreateSessionRequest
 
 ```ts
 export type CreateSessionRequest = { workspace: string, title: string | null, };
+```
+
+## DeltaKind
+
+```ts
+/**
+ * 进行中的增量属于哪种块。
+ */
+export type DeltaKind = "text" | "reasoning";
 ```
 
 ## EditMessageRequest
@@ -38,7 +65,7 @@ export type ErrorResponse = { code: ErrorCode, message: string, };
 /**
  * 持久化到 SQLite 的领域事实事件。
  */
-export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", session: SessionMetadata, } | { "kind": "session_renamed", session: SessionMetadata, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", session: SessionMetadata, message: MessageNode, } | { "kind": "message_updated", session: SessionMetadata, message: MessageNode, } | { "kind": "tool_call_recorded", session: SessionMetadata, message: number, toolCall: ToolCallRecord, } | { "kind": "active_leaf_changed", session: SessionMetadata, activeLeaf: number | null, } | { "kind": "message_queued", session: SessionMetadata, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "run_started", session: SessionMetadata, run: RunRecord, } | { "kind": "run_finished", session: SessionMetadata, run: RunRecord, };
+export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", session: SessionMetadata, } | { "kind": "session_renamed", session: SessionMetadata, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "message_updated", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "active_leaf_changed", session: SessionMetadata, activeLeaf: number | null, } | { "kind": "message_queued", session: SessionMetadata, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "run_started", session: SessionMetadata, run: RunRecord, } | { "kind": "run_finished", session: SessionMetadata, run: RunRecord, };
 ```
 
 ## HealthResponse
@@ -96,7 +123,7 @@ export type HubStatus = "ok";
 /**
  * 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
  */
-export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
+export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
 /**
  * 即将进行的重试序号，从 1 开始。
  */
@@ -111,28 +138,43 @@ maxAttempts: number,
 delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };
 ```
 
-## MessageContent
+## MessageBodiesRequest
 
 ```ts
-/**
- * 消息节点正文。用户消息经 [`MessageText`] 校验；assistant 消息可以为空（只请求工具时）。
- */
-export type MessageContent = string;
+export type MessageBodiesRequest = { messageIds: number[], };
 ```
 
-## MessageNode
+## MessageBodiesResponse
+
+```ts
+export type MessageBodiesResponse = { messages: Array<MessageBody>, };
+```
+
+## MessageBody
 
 ```ts
 /**
- * 消息树节点，同时是协议中的消息形状。
+ * 按消息 id 批量拉取的块正文。
  */
-export type MessageNode = { id: number, parentId: number | null, role: MessageRole, text: MessageContent, runId: number | null, toolCalls: Array<ToolCallRecord>, createdAt: number, };
+export type MessageBody = { id: number, parts: Array<ContentPart>, };
 ```
 
 ## MessageRole
 
 ```ts
-export type MessageRole = "user" | "assistant";
+/**
+ * 消息在树中的角色。树里没有 `system`：系统提示由请求装配层提供。
+ */
+export type MessageRole = "user" | "assistant" | "tool" | "compaction";
+```
+
+## MessageSkeleton
+
+```ts
+/**
+ * 消息骨架：事件与快照携带的结构描述，不含块正文。
+ */
+export type MessageSkeleton = { id: number, parentId: number | null, role: MessageRole, runId: number | null, createdAt: number, parts: Array<PartSkeleton>, };
 ```
 
 ## MessageText
@@ -178,6 +220,35 @@ export type NodeSnapshot = { name: NodeName, url: string, status: NodeStatus, de
  * 节点状态。只有 `ok` 的节点接受命令。
  */
 export type NodeStatus = "ok" | "unreachable" | "incompatible";
+```
+
+## PartSkeleton
+
+```ts
+/**
+ * 块骨架：序号、类型、字节数与状态。
+ */
+export type PartSkeleton = { seq: number, kind: ContentKind, size: number, state: PartState, };
+```
+
+## PartState
+
+```ts
+/**
+ * 块在骨架中的状态。只有工具结果块会出现非 `complete` 的取值。
+ */
+export type PartState = "complete" | "running" | "unknown";
+```
+
+## ProviderMeta
+
+```ts
+/**
+ * provider 私有的不透明元数据：签名、thought signature、图像令牌等。
+ *
+ * 领域不解释它的内容，也不允许单独写入；它随所属块一起存取。
+ */
+export type ProviderMeta = unknown;
 ```
 
 ## QueueItem
@@ -304,7 +375,7 @@ export type SessionTree = { session: SessionMetadata,
 /**
  * 快照读取时刻的全局最大事实事件 id；快照包含该 id 及之前的全部事实。
  */
-maxEventId: number, activeLeaf: number | null, nodes: Array<MessageNode>, queue: Array<QueueItem>, runs: Array<RunRecord>, };
+maxEventId: number, activeLeaf: number | null, nodes: Array<MessageSkeleton>, queue: Array<QueueItem>, runs: Array<RunRecord>, };
 ```
 
 ## StreamEvent
@@ -313,7 +384,11 @@ maxEventId: number, activeLeaf: number | null, nodes: Array<MessageNode>, queue:
 /**
  * 事件流的统一载荷：已持久化的事实事件与仅实时传输的 token 增量。
  */
-export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, messageId: number, text: string, timestamp: number, } | { "type": "retry", sessionId: SessionId, 
+export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, 
+/**
+ * 该步定型后使用的消息 id；客户端据此建本地占位节点。
+ */
+messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", sessionId: SessionId, 
 /**
  * 即将进行的重试序号，从 1 开始。
  */
@@ -340,15 +415,6 @@ export type SubmitMessageRequest = { text: string, };
 export type SwitchActiveLeafRequest = { messageId: number, };
 ```
 
-## ToolCallRecord
-
-```ts
-/**
- * assistant 消息发起的单个工具调用及其结果。
- */
-export type ToolCallRecord = { id: string, name: string, arguments: string, outcome: ToolOutcome, };
-```
-
 ## ToolErrorCode
 
 ```ts
@@ -362,9 +428,21 @@ export type ToolErrorCode = "unknown_tool" | "invalid_arguments" | "path_escape"
 
 ```ts
 /**
- * 工具调用的结局。
+ * 工具执行返回的结局。
  */
 export type ToolOutcome = { "status": "succeeded", content: string, } | { "status": "failed", code: ToolErrorCode, message: string, };
+```
+
+## ToolResultState
+
+```ts
+/**
+ * tool 节点里工具结果块的状态。
+ *
+ * 工具在执行前入树，此时为 [`ToolResultState::Running`]；执行完毕写入结局；
+ * 非幂等工具在执行中崩溃后写 [`ToolResultState::Unknown`]，表示丢失了观测。
+ */
+export type ToolResultState = { "status": "running" } | { "status": "finished", outcome: ToolOutcome, } | { "status": "unknown" };
 ```
 
 ## WorkspaceMetadata

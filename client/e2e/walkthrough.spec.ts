@@ -69,5 +69,14 @@ test('工具调用渲染为可折叠卡片并展示结果', async ({ page, app }
   await expect(card.locator('pre').last()).toContainText('hello e2e');
 
   await expect(page.getByText('README 说明这是端到端测试的 workspace。')).toBeVisible();
-  await expect(assistantMessages(page)).toHaveAttribute('data-state', 'complete');
+  await expect(assistantMessages(page).last()).toHaveAttribute('data-state', 'complete');
+
+  await page.reload();
+
+  const reloaded = page.locator('details').filter({ hasText: 'read_file' });
+  await expect(reloaded.getByText('成功')).toBeVisible();
+  await reloaded.locator('summary').click();
+  await expect(reloaded.locator('pre').last()).toContainText('hello e2e');
+  await expect(page.getByRole('paragraph').filter({ hasText: '读 README.md' })).toBeVisible();
+  await expect(page.getByText('README 说明这是端到端测试的 workspace。')).toBeVisible();
 });

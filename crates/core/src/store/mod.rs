@@ -2,6 +2,7 @@
 //! 写入命令按对象拆在同级子模块；存储后端在 `crate::storage`。
 
 mod branch;
+mod compaction;
 mod node;
 mod queue;
 mod run;
@@ -16,20 +17,18 @@ use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::CommittedEvent;
 use crate::id::{MessageId, WorkspacePath};
-use crate::message::{Message, MessageNode};
+use crate::message::{MessageRole, MessageSkeleton};
 use crate::run::RunRecord;
 use crate::session::SessionTree;
 use crate::storage::sqlite::SqliteStorage;
 use crate::storage::{SessionSnapshot, Snapshot};
 use crate::stream::{EventBus, StreamEvent};
 
-/// 一次 run 开始时建立的节点与记录。
+/// 一次 run 开始时可用的上下文。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStart {
     pub run: RunRecord,
     pub workspace: WorkspacePath,
-    pub user: MessageNode,
-    pub assistant: MessageNode,
 }
 
 /// 领域内核：唯一写入线 + 持久化边界。
@@ -108,49 +107,37 @@ fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTree {
             .metadata(snapshot.queue_length, snapshot.busy),
         max_event_id: snapshot.max_event_id,
         active_leaf: snapshot.session.active_leaf,
-        nodes: snapshot
-            .messages
-            .into_iter()
-            .map(|message| message.node)
-            .collect(),
+        nodes: snapshot.messages,
         queue: snapshot.queue,
         runs: snapshot.runs,
     }
-}
-
-/// 从全部节点中取出 root 到 `leaf` 的路径，顺序为 root 在前。
-fn path_to_leaf(nodes: &[MessageNode], leaf: Option<MessageId>) -> Vec<MessageNode> {
-    let Some(leaf) = leaf else {
-        return Vec::new();
-    };
-    let mut path = Vec::new();
-    let mut current = Some(leaf);
-    while let Some(id) = current {
-        let Some(node) = nodes.iter().find(|node| node.id == id) else {
-            break;
-        };
-        path.push(node.clone());
-        current = node.parent_id;
-    }
-    path.reverse();
-    path
 }
 
 fn now_millis() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
 
-fn find_node(messages: &[Message], id: MessageId) -> Option<MessageNode> {
-    messages
-        .iter()
-        .find(|message| message.node.id == id)
-        .map(|message| message.node.clone())
+fn find_node(messages: &[MessageSkeleton], id: MessageId) -> Option<MessageSkeleton> {
+    messages.iter().find(|node| node.id == id).cloned()
+}
+
+/// 从给定节点沿父链向上找到最近一条用户消息。
+fn user_ancestor(nodes: &[MessageSkeleton], start: MessageId) -> Option<MessageId> {
+    let mut current = Some(start);
+    while let Some(id) = current {
+        let node = nodes.iter().find(|node| node.id == id)?;
+        if node.role == MessageRole::User {
+            return Some(node.id);
+        }
+        current = node.parent_id;
+    }
+    None
 }
 
 /// 目标子树中最近创建的叶子（id 最大）。
 ///
 /// 消息 id 全局单调递增，因此 id 最大即创建最晚。目标本身是叶子时返回目标。
-fn branch_leaf(nodes: &[MessageNode], target: MessageId) -> Option<MessageId> {
+fn branch_leaf(nodes: &[MessageSkeleton], target: MessageId) -> Option<MessageId> {
     nodes
         .iter()
         .filter(|node| is_descendant(nodes, node.id, target))
@@ -159,7 +146,7 @@ fn branch_leaf(nodes: &[MessageNode], target: MessageId) -> Option<MessageId> {
         .max()
 }
 
-fn is_descendant(nodes: &[MessageNode], id: MessageId, ancestor: MessageId) -> bool {
+fn is_descendant(nodes: &[MessageSkeleton], id: MessageId, ancestor: MessageId) -> bool {
     let mut current = Some(id);
     while let Some(node_id) = current {
         if node_id == ancestor {

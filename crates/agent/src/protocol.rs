@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use durable::{MessageId, SessionMetadata, WorkspaceMetadata};
+use durable::{MessageBody, MessageId, SessionMetadata, WorkspaceMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -13,7 +13,7 @@ pub enum HealthStatus {
 }
 
 /// 协议版本。任何不兼容的协议改动都递增它。
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -95,4 +95,17 @@ pub struct EditMessageRequest {
 pub struct SwitchActiveLeafRequest {
     #[ts(type = "number")]
     pub message_id: MessageId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageBodiesRequest {
+    #[ts(type = "number[]")]
+    pub message_ids: Vec<MessageId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageBodiesResponse {
+    pub messages: Vec<MessageBody>,
 }

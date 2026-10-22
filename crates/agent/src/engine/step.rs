@@ -1,18 +1,16 @@
-//! 一次模型调用：发起、流式累积、限流退避与部分输出落库。
-//! 循环控制与 run 收尾在父模块。
+//! 一次模型调用：发起、流式累积、限流退避与实时增量。定型前不落库。
+//! 循环控制与定型写入在父模块。
 
 use std::time::Duration;
 
 use durable::{
-    MessageContent, MessageId, RunFailure, RunFailureCode, SessionId, StreamEvent, ToolCallRecord,
+    ContentPart, MessageId, MessageNode, RunFailure, RunFailureCode, SessionId, StreamEvent,
 };
+use futures_util::StreamExt;
 
 use crate::cancel::Cancellation;
 use crate::engine::{RunEngine, StepEnd, StreamOpen, ToolCallBuilder};
 use crate::provider::{ChatChunk, ChatMessage, ProviderError};
-
-/// 部分输出的落库节流间隔。
-const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
 
 /// 限流退避的上限。供应商不给建议时单次等待不超过它。
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
@@ -21,19 +19,29 @@ const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);
 const MAX_RETRY_EXPONENT: usize = 5;
 
 impl RunEngine {
-    /// 读取一轮模型流：文本累积到 `text`，工具调用片段累积到返回值。
+    /// 发起并读取一轮模型流：文本与推理累积在内存，工具调用片段累积到返回值。
     ///
-    /// 取消或上游失败时先落库已生成的部分输出，再报告结束原因。
+    /// 取消或上游失败时不写入任何东西：未定型的内容只经实时增量传输。
     pub(super) async fn stream_step(
         &self,
         session: &SessionId,
-        messages: &[ChatMessage],
+        transcript: &[MessageNode],
         cancellation: &Cancellation,
-        assistant_id: MessageId,
-        text: &mut String,
-        records: &[ToolCallRecord],
     ) -> StepEnd {
-        let mut stream = match self.open_stream(session, messages, cancellation).await {
+        let id = match self.store.mint_message_id().await {
+            Ok(id) => id,
+            Err(error) => {
+                return StepEnd::Failure(RunFailure {
+                    code: RunFailureCode::ModelUpstream,
+                    message: error.to_string(),
+                });
+            }
+        };
+        let messages = match self.assemble(transcript) {
+            Ok(messages) => messages,
+            Err(failure) => return StepEnd::Failure(failure),
+        };
+        let mut stream = match self.open_stream(session, &messages, cancellation).await {
             StreamOpen::Opened(stream) => stream,
             StreamOpen::Cancelled => return StepEnd::Cancelled,
             StreamOpen::Failed(error) => {
@@ -43,26 +51,18 @@ impl RunEngine {
                 });
             }
         };
+        let mut reasoning = String::new();
+        let mut text = String::new();
         let mut builders: Vec<ToolCallBuilder> = Vec::new();
-        let mut flush_tick =
-            tokio::time::interval_at(tokio::time::Instant::now() + FLUSH_INTERVAL, FLUSH_INTERVAL);
         loop {
             let next = tokio::select! {
                 biased;
-                () = cancellation.cancelled() => {
-                    self.flush(assistant_id, text, records).await;
-                    return StepEnd::Cancelled;
-                }
-                _ = flush_tick.tick() => {
-                    self.flush(assistant_id, text, records).await;
-                    continue;
-                }
-                item = futures_util::StreamExt::next(&mut stream) => item,
+                () = cancellation.cancelled() => return StepEnd::Cancelled,
+                item = StreamExt::next(&mut stream) => item,
             };
             match next {
                 None => break,
                 Some(Err(error)) => {
-                    self.flush(assistant_id, text, records).await;
                     return StepEnd::Failure(RunFailure {
                         code: RunFailureCode::ModelUpstream,
                         message: error.to_string(),
@@ -71,12 +71,13 @@ impl RunEngine {
                 Some(Ok(ChatChunk::Text(delta))) => {
                     if !delta.is_empty() {
                         text.push_str(&delta);
-                        self.bus.publish(StreamEvent::Delta {
-                            session_id: session.clone(),
-                            message_id: assistant_id,
-                            text: delta,
-                            timestamp: now_millis(),
-                        });
+                        self.publish_delta(session, id, DeltaKind::Text, delta);
+                    }
+                }
+                Some(Ok(ChatChunk::Reasoning(delta))) => {
+                    if !delta.is_empty() {
+                        reasoning.push_str(&delta);
+                        self.publish_delta(session, id, DeltaKind::Reasoning, delta);
                     }
                 }
                 Some(Ok(ChatChunk::ToolCall {
@@ -101,14 +102,16 @@ impl RunEngine {
                 }
             }
         }
-        self.flush(assistant_id, text, records).await;
-        StepEnd::Completed(builders)
+        StepEnd::Completed {
+            id,
+            parts: assemble_parts(reasoning, text, builders),
+        }
     }
 
     /// 发起一次模型调用；供应商限流时按退避重试。
     ///
     /// 重试在本方法内部完成，不改变 run 的生命周期，也不写事实事件。
-    async fn open_stream(
+    pub(super) async fn open_stream(
         &self,
         session: &SessionId,
         messages: &[ChatMessage],
@@ -172,20 +175,39 @@ impl RunEngine {
             .min(MAX_RETRY_BACKOFF)
     }
 
-    pub(super) async fn flush(
-        &self,
-        assistant_id: MessageId,
-        text: &str,
-        records: &[ToolCallRecord],
-    ) {
-        if let Err(error) = self
-            .store
-            .flush_message(assistant_id, MessageContent::new(text), records.to_vec())
-            .await
-        {
-            tracing::error!(message = assistant_id.get(), error = %error, "写入部分输出失败");
-        }
+    fn publish_delta(&self, session: &SessionId, id: MessageId, kind: DeltaKind, text: String) {
+        self.bus.publish(StreamEvent::Delta {
+            session_id: session.clone(),
+            message_id: id,
+            kind,
+            text,
+            timestamp: now_millis(),
+        });
     }
+}
+
+/// 把本步累积的内容与工具调用变成有序块：推理、正文、调用。
+fn assemble_parts(
+    reasoning: String,
+    text: String,
+    builders: Vec<ToolCallBuilder>,
+) -> Vec<ContentPart> {
+    let mut parts = Vec::new();
+    if !reasoning.is_empty() {
+        parts.push(ContentPart::reasoning(reasoning));
+    }
+    if !text.is_empty() {
+        parts.push(ContentPart::text(text));
+    }
+    for (index, builder) in builders.into_iter().enumerate() {
+        let call_id = builder.id.unwrap_or_else(|| format!("call_{}", index + 1));
+        parts.push(ContentPart::tool_call(
+            call_id,
+            builder.name.unwrap_or_default(),
+            builder.arguments,
+        ));
+    }
+    parts
 }
 
 /// 限流用稳定类别；其余上游失败仍是 `ModelUpstream`。
@@ -208,3 +230,5 @@ fn to_u64(value: u128) -> u64 {
 fn now_millis() -> i64 {
     jiff::Timestamp::now().as_millisecond()
 }
+
+use durable::DeltaKind;

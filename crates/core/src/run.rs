@@ -63,6 +63,7 @@ pub enum RunFailureCode {
     ModelRateLimited,
     ContextLimitExceeded,
     StepLimitExceeded,
+    /// 进程中断。ADR 0037 之后不再产生，保留它是为了读出历史记录里的旧值。
     Interrupted,
 }
 

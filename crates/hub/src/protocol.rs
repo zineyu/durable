@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// hub 对浏览器的协议版本。任何不兼容的协议改动都递增它。
-pub const HUB_PROTOCOL_VERSION: u32 = 2;
+pub const HUB_PROTOCOL_VERSION: u32 = 3;
 
 /// hub 期望的 agent 协议版本。与 `agent::PROTOCOL_VERSION` 由测试保持一致。
-pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 2;
+pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -117,6 +117,7 @@ pub enum HubStreamEvent {
         session_id: SessionId,
         #[ts(type = "number")]
         message_id: MessageId,
+        kind: durable::DeltaKind,
         text: String,
         #[ts(type = "number")]
         timestamp: i64,

@@ -5,11 +5,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::id::{MessageId, QueueItemId, SessionId, WorkspacePath};
-use crate::message::MessageNode;
+use crate::message::MessageSkeleton;
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::session::SessionMetadata;
-use crate::tool::ToolCallRecord;
 use crate::workspace::WorkspaceMetadata;
 
 /// 持久化到 SQLite 的领域事实事件。
@@ -37,17 +36,11 @@ pub enum FactEvent {
     },
     MessageAppended {
         session: SessionMetadata,
-        message: MessageNode,
+        message: MessageSkeleton,
     },
     MessageUpdated {
         session: SessionMetadata,
-        message: MessageNode,
-    },
-    ToolCallRecorded {
-        session: SessionMetadata,
-        #[ts(type = "number")]
-        message: MessageId,
-        tool_call: ToolCallRecord,
+        message: MessageSkeleton,
     },
     ActiveLeafChanged {
         session: SessionMetadata,
@@ -83,7 +76,6 @@ impl FactEvent {
             | Self::SessionRenamed { session }
             | Self::MessageAppended { session, .. }
             | Self::MessageUpdated { session, .. }
-            | Self::ToolCallRecorded { session, .. }
             | Self::ActiveLeafChanged { session, .. }
             | Self::MessageQueued { session, .. }
             | Self::RunStarted { session, .. }

@@ -15,6 +15,7 @@ pub(crate) struct Arguments {
 
 pub(crate) fn definition() -> ToolDefinition {
     ToolDefinition {
+        idempotent: true,
         name: "write_file",
         description: "用给定内容覆盖写入 workspace 根内的文件。父目录必须已存在，不隐式创建目录。",
         parameters: json!({

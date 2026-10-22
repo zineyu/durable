@@ -21,6 +21,7 @@ pub(crate) struct Arguments {
 
 pub(crate) fn definition() -> ToolDefinition {
     ToolDefinition {
+        idempotent: true,
         name: "read_file",
         description: "读取 workspace 根内的 UTF-8 文本文件。可选起止行（1 起，含两端）。输出每行带行号。",
         parameters: json!({

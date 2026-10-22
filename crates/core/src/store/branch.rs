@@ -1,12 +1,12 @@
 //! 分支命令：编辑用户消息、重试 assistant、切换 active leaf。
 //! 三者都要求 session 空闲，判定在 `session`；消息树结构在 `crate::message`。
 
-use super::{Store, branch_leaf, find_node, now_millis};
+use super::{Store, branch_leaf, find_node, now_millis, user_ancestor};
 use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{MessageId, SessionId};
-use crate::message::{Message, MessageContent, MessageNode, MessageRole, MessageText};
+use crate::message::{ContentPart, Message, MessageNode, MessageRole, MessageText};
 use crate::queue::QueueItem;
 
 impl Store {
@@ -46,9 +46,8 @@ impl Store {
             id: self.storage.mint_message_id().await?,
             parent_id: target_node.parent_id,
             role: MessageRole::User,
-            text: MessageContent::new(text.as_str()),
+            parts: vec![ContentPart::text(text.as_str())],
             run_id: None,
-            tool_calls: Vec::new(),
             created_at,
         };
         let item = QueueItem {
@@ -75,7 +74,7 @@ impl Store {
         changes.append_event(
             FactEvent::MessageAppended {
                 session: metadata.clone(),
-                message: node.clone(),
+                message: node.skeleton(),
             },
             created_at,
         );
@@ -106,10 +105,10 @@ impl Store {
     /// - `StoreError::SessionNotFound`：session 不存在。
     /// - `StoreError::MessageNotFound`：目标或目标的父节点不是该 session 的消息。
     /// - `StoreError::MessageRoleMismatch`：目标不是 assistant 消息。
-    /// - `StoreError::Invariant`：目标 assistant 消息缺少父节点。
+    /// - `StoreError::Invariant`：目标 assistant 消息缺少父节点，或父链上没有用户消息。
     /// - `StoreError::QueueNotEmpty`：session 队列非空。
     /// - `StoreError::RunInProgress`：session 有 run 进行中。
-    /// - `StoreError::CorruptedData`：父消息正文不符合领域约束。
+    /// - `StoreError::CorruptedData`：用户消息正文不符合领域约束。
     /// - `StoreError::Database`：数据库读取或写入失败。
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
@@ -131,10 +130,16 @@ impl Store {
         let parent_id = target_node.parent_id.ok_or_else(|| {
             StoreError::Invariant(format!("assistant 消息 {} 缺少父节点", target.get()))
         })?;
-        let parent = find_node(&snapshot.messages, parent_id)
-            .ok_or_else(|| StoreError::MessageNotFound(id.clone(), parent_id))?;
-        let text = MessageText::parse(parent.text.as_str())
-            .map_err(|error| StoreError::CorruptedData(format!("message.text: {error}")))?;
+        let user_id = user_ancestor(&snapshot.messages, parent_id).ok_or_else(|| {
+            StoreError::Invariant(format!("assistant 消息 {} 之前没有用户消息", target.get()))
+        })?;
+        let stored = self
+            .storage
+            .message(id, user_id)
+            .await?
+            .ok_or_else(|| StoreError::MessageNotFound(id.clone(), user_id))?;
+        let text = MessageText::parse(&stored.node.text())
+            .map_err(|error| StoreError::CorruptedData(format!("message.parts: {error}")))?;
         let created_at = now_millis();
         let item = QueueItem {
             id: self.storage.mint_queue_item_id().await?,
@@ -189,11 +194,7 @@ impl Store {
         let mut session = self.find_session(id).await?;
         self.ensure_idle(id).await?;
         let snapshot = self.session_snapshot(id).await?;
-        let nodes: Vec<MessageNode> = snapshot
-            .messages
-            .iter()
-            .map(|message| message.node.clone())
-            .collect();
+        let nodes = snapshot.messages.clone();
         if !nodes.iter().any(|node| node.id == target) {
             return Err(StoreError::MessageNotFound(id.clone(), target));
         }

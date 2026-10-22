@@ -59,7 +59,31 @@ impl ToolRun {
         self.workspace.join(name).exists()
     }
 
-    async fn calls(&self) -> Vec<agent::ToolCallRecord> {
+    /// 提交一条消息，等 run 结束，按入树顺序读取全部工具结局。
+    ///
+    /// 工具结果是独立的 tool 节点，结局在其正文的 `tool_results()` 里；
+    /// 调用的 `call_id` 在发起调用的 assistant 正文的 `tool_calls()` 里。
+    async fn outcomes(&self) -> Vec<agent::ToolOutcome> {
+        let states = self.results().await;
+        let mut outcomes = Vec::new();
+        for state in &states {
+            if let agent::ToolResultState::Finished { outcome } = state {
+                outcomes.push(outcome.clone());
+            }
+        }
+        assert_eq!(outcomes.len(), states.len(), "工具结局已定");
+        outcomes
+    }
+
+    /// 一次消息里单个工具调用的结局。
+    async fn outcome(&self) -> agent::ToolOutcome {
+        let mut outcomes = self.outcomes().await;
+        assert_eq!(outcomes.len(), 1, "一次消息只产生一条工具结局");
+        outcomes.remove(0)
+    }
+
+    /// 全部工具结果状态，按入树顺序，并校验结局与调用一一对应。
+    async fn results(&self) -> Vec<agent::ToolResultState> {
         let response = self.harness.submit_message(&self.session.id, "执行").await;
         assert_eq!(response.status(), StatusCode::CREATED, "提交消息返回 201");
         let tree = self.harness.wait_idle(&self.session.id).await;
@@ -69,17 +93,22 @@ impl ToolRun {
             agent::RunStatus::Succeeded,
             "工具结果不终止 run"
         );
-        tree.nodes
-            .get(1)
-            .expect("消息树含 assistant 节点")
-            .tool_calls
-            .clone()
-    }
-
-    async fn outcome(&self) -> agent::ToolOutcome {
-        let calls = self.calls().await;
-        assert_eq!(calls.len(), 1, "一次消息只产生一条工具调用记录");
-        calls.first().expect("有一条工具调用记录").outcome.clone()
+        let ids: Vec<agent::MessageId> = tree.nodes.iter().map(|node| node.id).collect();
+        let bodies = self.harness.bodies(&self.session.id, &ids).await;
+        let mut call_ids: Vec<&str> = Vec::new();
+        let mut result_ids: Vec<&str> = Vec::new();
+        let mut states: Vec<agent::ToolResultState> = Vec::new();
+        for body in &bodies {
+            for (call_id, _, _) in body.tool_calls() {
+                call_ids.push(call_id);
+            }
+            for (call_id, state) in body.tool_results() {
+                result_ids.push(call_id);
+                states.push(state.clone());
+            }
+        }
+        assert_eq!(call_ids, result_ids, "每个工具调用都有顺序对应的结局");
+        states
     }
 }
 
@@ -129,9 +158,9 @@ async fn reads_selected_line_range() {
     .await;
     run.write("notes.txt", "alpha\nbeta\ngamma\n");
 
-    let calls = run.calls().await;
-    assert_eq!(calls[0].outcome, succeeded("2\tbeta\n"));
-    assert_eq!(calls[1].outcome, succeeded("2\tbeta\n3\tgamma\n"));
+    let outcomes = run.outcomes().await;
+    assert_eq!(outcomes[0], succeeded("2\tbeta\n"));
+    assert_eq!(outcomes[1], succeeded("2\tbeta\n3\tgamma\n"));
 }
 
 /// 规格 user story A-26：区间非法是显式错误。
@@ -273,16 +302,16 @@ async fn rejects_symlink_escape() {
     .await;
     std::os::unix::fs::symlink(outside.path(), run.workspace.join("link")).expect("创建符号链接");
 
-    let calls = run.calls().await;
+    let outcomes = run.outcomes().await;
     assert!(matches!(
-        calls[0].outcome,
+        outcomes[0],
         agent::ToolOutcome::Failed {
             code: agent::ToolErrorCode::PathEscape,
             ..
         }
     ));
     assert!(matches!(
-        calls[1].outcome,
+        outcomes[1],
         agent::ToolOutcome::Failed {
             code: agent::ToolErrorCode::PathEscape,
             ..
@@ -343,27 +372,27 @@ async fn reports_edit_mismatch_and_missing_file() {
     run.write("notes.txt", "alpha\nbeta\n");
     run.write("duplicate.txt", "beta\nbeta\n");
 
-    let calls = run.calls().await;
+    let outcomes = run.outcomes().await;
     assert_eq!(
-        calls[0].outcome,
+        outcomes[0],
         failed(
             agent::ToolErrorCode::EditNotFound,
             "old_string 未匹配: notes.txt"
         )
     );
     assert_eq!(
-        calls[1].outcome,
+        outcomes[1],
         failed(
             agent::ToolErrorCode::EditNotUnique,
             "old_string 匹配 2 处，必须唯一: duplicate.txt"
         )
     );
     assert_eq!(
-        calls[2].outcome,
+        outcomes[2],
         failed(agent::ToolErrorCode::FileNotFound, "文件不存在: absent.txt")
     );
     assert!(matches!(
-        calls[3].outcome,
+        outcomes[3],
         agent::ToolOutcome::Failed {
             code: agent::ToolErrorCode::InvalidArguments,
             ..
@@ -384,14 +413,14 @@ async fn reports_bash_output_and_exit_code() {
     ])
     .await;
 
-    let calls = run.calls().await;
-    let agent::ToolOutcome::Succeeded { content } = &calls[0].outcome else {
-        panic!("命令成功执行: {:?}", calls[0].outcome);
+    let outcomes = run.outcomes().await;
+    let agent::ToolOutcome::Succeeded { content } = &outcomes[0] else {
+        panic!("命令成功执行: {:?}", outcomes[0]);
     };
     assert!(content.starts_with("退出码: 0\n耗时: "), "{content}");
     assert!(content.ends_with("输出:\nout\nerr\n"), "{content}");
-    let agent::ToolOutcome::Succeeded { content } = &calls[1].outcome else {
-        panic!("非零退出不是工具错误: {:?}", calls[1].outcome);
+    let agent::ToolOutcome::Succeeded { content } = &outcomes[1] else {
+        panic!("非零退出不是工具错误: {:?}", outcomes[1]);
     };
     assert!(content.starts_with("退出码: 3\n"), "{content}");
 }
@@ -555,13 +584,13 @@ async fn reports_unknown_tool_and_invalid_arguments() {
     ])
     .await;
 
-    let calls = run.calls().await;
+    let outcomes = run.outcomes().await;
     assert_eq!(
-        calls[0].outcome,
+        outcomes[0],
         failed(agent::ToolErrorCode::UnknownTool, "未知工具: list_dir")
     );
     assert!(matches!(
-        calls[1].outcome,
+        outcomes[1],
         agent::ToolOutcome::Failed {
             code: agent::ToolErrorCode::InvalidArguments,
             ..
