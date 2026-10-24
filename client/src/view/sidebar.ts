@@ -1,5 +1,6 @@
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
+import { sessionMark } from './activity';
 import { toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
 import type { SessionSummary, WorkspaceSummary } from './types';
 import type { NodeState } from './node-state';
@@ -12,7 +13,7 @@ export function sidebarWorkspaces(state: NodeState): WorkspaceSummary[] {
     sessions: state.sessions
       .filter((session) => session.workspace === workspace.path)
       .sort(compareSessions)
-      .map(toSessionSummary),
+      .map((session) => toSessionSummary(state, session)),
   }));
 }
 
@@ -24,13 +25,21 @@ function compareSessions(left: SessionMetadata, right: SessionMetadata): number 
   return right.updatedAt - left.updatedAt;
 }
 
-function toSessionSummary(session: SessionMetadata): SessionSummary {
-  const state = session.busy ? 'running' : session.queueLength > 0 ? 'queued' : 'idle';
+function toSessionSummary(state: NodeState, session: SessionMetadata): SessionSummary {
+  const mark = sessionMark(state, session.id);
+  const status = session.busy ? 'running' : session.queueLength > 0 ? 'queued' : 'idle';
   return {
     id: toSessionId(session.id),
     title: session.title,
-    state,
+    state: status,
     queuedCount: session.queueLength,
     updatedAt: session.updatedAt,
+    unread: mark.unread,
+    outcome: mark.outcome,
   };
+}
+
+/// 侧栏展示顺序下的全部 session，供快捷键在同一顺序里切换。
+export function orderedSessions(state: NodeState): SessionSummary[] {
+  return sidebarWorkspaces(state).flatMap((workspace) => workspace.sessions);
 }

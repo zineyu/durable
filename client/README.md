@@ -19,6 +19,25 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 | `npm run build-storybook` | 构建静态 Storybook 到 `client/storybook-static` |
 | `npm run screenshots` | 从 `storybook-static` 生成截图 |
 
+## 多节点可用性
+
+| 能力 | 入口 |
+| --- | --- |
+| 命令面板 | `Ctrl/⌘+K`。分组为 session（跨节点）、动作与节点；`↑`/`↓`/`Enter`/`Esc` 操作。 |
+| 快捷键清单 | `?`。输入框聚焦时让位给文本输入，`Esc` 与命令面板除外。 |
+| 切换 session | `Alt+↑` / `Alt+↓`，按侧栏顺序。 |
+| 切换节点 | `Alt+1…9`，按节点切换器顺序。 |
+| 取消当前 run | `Esc`。浮层打开时先关闭浮层。 |
+| 草稿 | 按 (node, session) 存 `localStorage`；选中节点时恢复该节点上次打开的 session。 |
+| 正在运行 | 侧栏节点切换器下方的面板，列出全部节点在跑的 run 并可逐个停止。 |
+| 未读标记 | 侧栏 session 右侧显示「完成」「失败」或未读点；只在当前页面会话期间有效。 |
+| session 内搜索 | 页头放大镜按钮。`Enter` 下一个，`Shift+Enter` 上一个。 |
+| 导出 Markdown | 页头下载按钮。工具调用折叠为引用块。 |
+| 输入历史 | 输入框内 `↑` 回溯当前 session 已发送的消息，`↓` 回到草稿。 |
+| 长粘贴折叠 | 超过 400 字符或 12 行时折叠为占位符，发送前还原。 |
+
+这些能力全部在客户端完成，不新增协议。决策见 `../docs/adr/0040-client-multi-node-usability.md`。
+
 ## 构建顺序
 
 `hub` 二进制在编译期内嵌 `client/dist`。先构建 client，再构建 Rust：
@@ -36,6 +55,7 @@ devenv shell -- bash -c 'cd client && npm run test:e2e'
 ```
 
 - `e2e/` 下的用例独享一套栈：脚本化 OpenAI 兼容 SSE 服务、真实 `agent`、真实 `hub`、临时 SQLite 与临时 workspace。
+- `palette.spec.ts` 覆盖命令面板跨节点跳转与快捷键；`draft.spec.ts` 覆盖草稿隔离与上次 session 恢复。
 - 断言只用用户可见文本与可访问名称；前置数据经 `hub` 的 HTTP API 准备。
 - 模型回答由 `e2e/support/model-server.ts` 的脚本队列决定。`hold` 脚本先流式返回文本再挂起，用于观察运行中的 run，测试调用 `release()` 收尾。
 - 每个测试使用随机端口与临时目录，可并行执行。

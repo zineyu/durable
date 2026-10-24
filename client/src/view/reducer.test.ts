@@ -237,6 +237,8 @@ describe('侧栏状态', () => {
             state: 'idle',
             queuedCount: 0,
             updatedAt: 300,
+            unread: false,
+            outcome: null,
           },
           {
             id: toSessionId('s-mid'),
@@ -244,6 +246,8 @@ describe('侧栏状态', () => {
             state: 'idle',
             queuedCount: 0,
             updatedAt: 200,
+            unread: false,
+            outcome: null,
           },
           {
             id: toSessionId('s-old'),
@@ -251,6 +255,8 @@ describe('侧栏状态', () => {
             state: 'idle',
             queuedCount: 0,
             updatedAt: 100,
+            unread: false,
+            outcome: null,
           },
         ],
       },
@@ -264,6 +270,8 @@ describe('侧栏状态', () => {
             state: 'idle',
             queuedCount: 0,
             updatedAt: 50,
+            unread: false,
+            outcome: null,
           },
         ],
       },
@@ -297,6 +305,8 @@ describe('侧栏状态', () => {
         state: 'queued',
         queuedCount: 2,
         updatedAt: 200,
+        unread: false,
+        outcome: null,
       },
       {
         id: toSessionId('s-running'),
@@ -304,6 +314,8 @@ describe('侧栏状态', () => {
         state: 'running',
         queuedCount: 0,
         updatedAt: 100,
+        unread: false,
+        outcome: null,
       },
     ]);
   });
@@ -351,6 +363,8 @@ describe('侧栏状态', () => {
       state: 'idle',
       queuedCount: 0,
       updatedAt: 300,
+      unread: true,
+      outcome: null,
     });
 
     const deleted = streamed(

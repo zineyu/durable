@@ -265,7 +265,7 @@ async function assertNodeStates(page, story) {
   if (expected === undefined) {
     return;
   }
-  const heading = page.locator('h2').first();
+  const heading = page.locator('main h2').first();
   if ((await heading.count()) === 0) {
     throw new Error(`节点状态页缺少标题: ${story.id}`);
   }

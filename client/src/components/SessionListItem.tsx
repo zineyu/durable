@@ -5,7 +5,7 @@ import { StatusDot } from './StatusDot';
 import styles from './SessionListItem.module.css';
 import { sessionStateTone } from '../view/labels';
 import { formatUpdatedAt } from '../view/time';
-import type { SessionSummary } from '../view/types';
+import type { SessionOutcome, SessionSummary } from '../view/types';
 import type { SessionId } from '../view/ids';
 
 export type SessionItemView = 'default' | 'renaming' | 'deleting';
@@ -98,12 +98,24 @@ export function SessionListItem({
           <span className={styles.title}>
             <span className={styles.titleText}>{session.title}</span>
           </span>
-          <time className={styles.time} dateTime={new Date(session.updatedAt).toISOString()}>
-            {formatUpdatedAt(session.updatedAt)}
-          </time>
-          {session.queuedCount > 0 ? (
-            <span className={styles.badge}>{session.queuedCount}</span>
-          ) : null}
+          <span className={styles.meta}>
+            {session.unread ? (
+              <span
+                className={styles.mark}
+                data-outcome={session.outcome ?? 'updated'}
+                role="img"
+                aria-label={markLabel(session)}
+              >
+                {markText(session.outcome)}
+              </span>
+            ) : null}
+            <time className={styles.time} dateTime={new Date(session.updatedAt).toISOString()}>
+              {formatUpdatedAt(session.updatedAt)}
+            </time>
+            {session.queuedCount > 0 ? (
+              <span className={styles.badge}>{session.queuedCount}</span>
+            ) : null}
+          </span>
         </button>
       )}
       <div
@@ -161,4 +173,24 @@ export function SessionListItem({
       </div>
     </div>
   );
+}
+
+function markText(outcome: SessionOutcome | null): string {
+  if (outcome === 'succeeded') {
+    return '完成';
+  }
+  if (outcome === 'failed') {
+    return '失败';
+  }
+  return '';
+}
+
+function markLabel(session: SessionSummary): string {
+  if (session.outcome === 'succeeded') {
+    return '未读，最近的 run 已完成';
+  }
+  if (session.outcome === 'failed') {
+    return '未读，最近的 run 已失败';
+  }
+  return '未读';
 }

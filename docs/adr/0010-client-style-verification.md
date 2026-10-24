@@ -14,7 +14,7 @@
 - `design-tokens.test.ts`：组件 `*.module.css` 不含颜色字面量，不含硬编码长度值（`@` 条件行除外）；`tokens.css` 提供颜色、字体、间距三类 token；`global.css` 定义 `:focus-visible`。
 - `contrast.test.ts`：解析 `tokens.css` 的浅色与深色语义别名并解析 `var()` 引用，正文文本对每个背景 token 的对比度不低于 4.5:1。
 - `interaction-states.test.ts`：出现 `:hover` 的组件样式同时定义 `:active`。
-- `screenshot.mjs`：逐张截图时断言无横向溢出、截图为非空文件、页头标题与输入卡片左边缘对齐、消息列相对输入区内缩 16px、分支翻页组件贴右且在消息底部、session 操作菜单 hover 后展开且不少于两项；`Pages/Console` 额外断言输入区与队列在 viewport 内。
+- `screenshot.mjs`：逐张截图时断言无横向溢出、截图为非空文件、页头标题与输入卡片左边缘对齐、消息列相对输入区内缩 16px、分支翻页组件贴右且在消息底部、session 操作菜单 hover 后展开且不少于两项；`Pages/Console` 额外断言输入区与队列在 viewport 内。节点状态页的标题断言取 `main h2`，避免侧栏新增分组标题干扰。
 
 截图脚本先清空输出目录再写入，失败即非零退出。
 

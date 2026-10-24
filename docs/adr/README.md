@@ -43,3 +43,4 @@
 | [0037](0037-crash-recovery.md) | 崩溃恢复的续跑点从树推导 | 已接受。取代 ADR 0014 的节流落库部分输出 | assistant 消息只在定型时入树，tool 节点先入树再执行，续跑点由树尾推导，非幂等工具崩后结局记为未知。 |
 | [0038](0038-skeleton-events.md) | 事件与快照只带骨架，正文按需拉取 | 已接受。取代 ADR 0019 的 `tool_call_recorded` | 事实事件与快照只带节点骨架，正文按消息 id 批量拉取并缓存，进行中的内容挂在未来定型的消息 id 上。 |
 | [0039](0039-steer-at-step-boundary.md) | 插话在步骤边界接入当前 run | 已接受 | `mode=steer` 的插话在提交时入树，在模型请求与收尾前的步骤边界接入同一个 run；工具不打断；run 结束未消费则降级为排队。 |
+| [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已接受 | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |

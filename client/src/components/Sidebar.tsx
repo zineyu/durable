@@ -1,4 +1,5 @@
 import type { ReactElement } from 'react';
+import { ActivityPanel } from './ActivityPanel';
 import { Button } from './Button';
 import { NodeSwitcher } from './NodeSwitcher';
 import { SessionListItem } from './SessionListItem';
@@ -8,6 +9,7 @@ import type { SessionItemView } from './SessionListItem';
 import type { NodeName } from '../api/generated/NodeName';
 import type { SessionId, WorkspacePath } from '../view/ids';
 import type { NodeRecord, WorkspaceSummary } from '../view/types';
+import type { RunningEntry } from '../view/activity';
 
 export type SessionEditing = {
   sessionId: SessionId;
@@ -24,6 +26,9 @@ export type SidebarProps = {
   /// 节点不可用或未知时的说明，替换空列表提示。
   notice?: string | null;
   commandsDisabled?: boolean;
+  running?: RunningEntry[];
+  onSelectRunning?: (node: NodeName, sessionId: SessionId) => void;
+  onCancelRunning?: (node: NodeName, sessionId: SessionId) => void;
   modelName: string;
   workspaces: WorkspaceSummary[];
   selectedSessionId: SessionId | null;
@@ -48,6 +53,9 @@ export function Sidebar({
   onRemoveNode,
   notice = null,
   commandsDisabled = false,
+  running = [],
+  onSelectRunning,
+  onCancelRunning,
   modelName,
   workspaces,
   selectedSessionId,
@@ -75,6 +83,11 @@ export function Sidebar({
         {...(onRegisterNode ? { onRegister: onRegisterNode } : {})}
         {...(onRenameNode ? { onRename: onRenameNode } : {})}
         {...(onRemoveNode ? { onRemove: onRemoveNode } : {})}
+      />
+      <ActivityPanel
+        entries={running}
+        {...(onSelectRunning ? { onSelect: onSelectRunning } : {})}
+        {...(onCancelRunning ? { onCancel: onCancelRunning } : {})}
       />
       <div className={styles.list}>
         {notice !== null ? (

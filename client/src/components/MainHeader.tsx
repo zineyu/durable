@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react';
 import styles from './MainHeader.module.css';
 import { ConnectionChip } from './ConnectionChip';
+import { IconButton } from './IconButton';
 import { NodeStatusBadge } from './NodeStatusBadge';
 import type { NodeName } from '../api/generated/NodeName';
 import type { NodeStatus } from '../api/generated/NodeStatus';
@@ -16,6 +17,9 @@ export type MainHeaderProps = {
   workspacePath: WorkspacePath;
   state: SessionState;
   connection: ConnectionState;
+  onSearch?: () => void;
+  onExport?: () => void;
+  searchOpen?: boolean;
 };
 
 export function MainHeader({
@@ -26,7 +30,11 @@ export function MainHeader({
   workspacePath,
   state,
   connection,
+  onSearch,
+  onExport,
+  searchOpen = false,
 }: MainHeaderProps): ReactElement {
+  const hasActions = onSearch !== undefined || onExport !== undefined;
   return (
     <header className={styles.header}>
       <div className={styles.inner}>
@@ -43,6 +51,21 @@ export function MainHeader({
           </p>
         </div>
         <div className={styles.status}>
+          {hasActions ? (
+            <span className={styles.actions}>
+              {onSearch !== undefined ? (
+                <IconButton
+                  icon="search"
+                  label="搜索消息"
+                  aria-pressed={searchOpen}
+                  onClick={onSearch}
+                />
+              ) : null}
+              {onExport !== undefined ? (
+                <IconButton icon="download" label="导出 Markdown" onClick={onExport} />
+              ) : null}
+            </span>
+          ) : null}
           <NodeStatusBadge status={nodeStatus} detail={nodeDetail} />
           <span className={styles.state} data-state={state}>
             {sessionStateLabel[state]}

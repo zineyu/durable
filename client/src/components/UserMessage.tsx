@@ -9,11 +9,24 @@ export type UserMessageProps = {
   onEdit?: () => void;
   editDisabled?: boolean;
   branch?: BranchControl;
+  messageId?: number;
+  highlighted?: boolean;
 };
 
-export function UserMessage({ text, onEdit, editDisabled = false, branch }: UserMessageProps): ReactElement {
+export function UserMessage({
+  text,
+  onEdit,
+  editDisabled = false,
+  branch,
+  messageId,
+  highlighted = false,
+}: UserMessageProps): ReactElement {
   return (
-    <article className={styles.message}>
+    <article
+      className={styles.message}
+      data-search-hit={highlighted}
+      {...(messageId === undefined ? {} : { 'data-message-id': messageId })}
+    >
       <p className={styles.bubble}>{text}</p>
       <div className={styles.actions}>
         <IconButton icon="pencil" label="编辑消息" onClick={onEdit} disabled={editDisabled} />

@@ -115,6 +115,12 @@ export class Harness {
     return sessionId === undefined ? base : `${base}/s/${sessionId}`;
   }
 
+  /// 注册一个指向同一 agent 的额外节点，用于跨节点场景。
+  async addNode(name: string): Promise<void> {
+    await this.request('POST', '/api/nodes', { name, url: this.agent.url });
+    await this.waitForNode(name);
+  }
+
   /// 在指定 workspace 下创建 session，返回 session id。
   async createSession(workspace: string): Promise<string> {
     const session = await this.request<SessionMetadata>('POST', `/api/n/${this.nodeName}/sessions`, {
@@ -141,7 +147,7 @@ export class Harness {
     await this.hub.stop();
     this.hub = await this.relaunchHub(listen);
     this.hubUrl = this.hub.url;
-    await this.waitForNode();
+    await this.waitForNode(this.nodeName);
   }
 
   /// 结束整套栈并删除临时目录。任一步失败都不阻断其余步骤。
@@ -179,24 +185,24 @@ export class Harness {
 
   private async registerNode(): Promise<void> {
     await this.request('POST', '/api/nodes', { name: this.nodeName, url: this.agent.url });
-    await this.waitForNode();
+    await this.waitForNode(this.nodeName);
   }
 
-  private async waitForNode(): Promise<void> {
+  private async waitForNode(name: string): Promise<void> {
     for (let attempt = 0; attempt < READY_POLL_ATTEMPTS; attempt += 1) {
-      if (await this.nodeReady()) {
+      if (await this.nodeReady(name)) {
         return;
       }
       await delay(READY_POLL_INTERVAL_MS);
     }
-    throw new Error(`节点 ${this.nodeName} 未就绪`);
+    throw new Error(`节点 ${name} 未就绪`);
   }
 
   /// hub 重启期间端口尚未监听，fetch 以连接错误拒绝；此期间按未就绪处理。
-  private async nodeReady(): Promise<boolean> {
+  private async nodeReady(name: string): Promise<boolean> {
     try {
       const bootstrap = await this.bootstrap();
-      const node = bootstrap.nodes.find((entry) => entry.name === this.nodeName);
+      const node = bootstrap.nodes.find((entry) => entry.name === name);
       return node?.status === 'ok' && node.bootstrap !== null;
     } catch {
       return false;

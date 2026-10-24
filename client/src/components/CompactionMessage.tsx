@@ -9,12 +9,24 @@ import { bodyText } from '../view/content';
 export type CompactionMessageProps = {
   parts: ContentPart[] | null;
   skeleton: PartSkeleton[];
+  messageId?: number;
+  highlighted?: boolean;
 };
 
 /// 链上的压缩消息：内容是此前对话的摘要，不是模型对用户说的话。
-export function CompactionMessage({ parts, skeleton }: CompactionMessageProps): ReactElement {
+export function CompactionMessage({
+  parts,
+  skeleton,
+  messageId,
+  highlighted = false,
+}: CompactionMessageProps): ReactElement {
   return (
-    <section className={styles.message} aria-label="上下文摘要">
+    <section
+      className={styles.message}
+      aria-label="上下文摘要"
+      data-search-hit={highlighted}
+      {...(messageId === undefined ? {} : { 'data-message-id': messageId })}
+    >
       <header className={styles.header}>
         <span className={styles.title}>上下文摘要</span>
         <span className={styles.hint}>此前对话已压缩，下方是摘要</span>

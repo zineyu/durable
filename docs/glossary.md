@@ -72,6 +72,10 @@
 | 取消信号 | 中止在途模型请求与工具执行的显式信号。取消后 run 以 `cancelled` 结束，未定型的内容丢弃。 |
 | bootstrap | 客户端启动时获取的元数据快照与事件游标。 |
 | 客户端状态 | 浏览器内由纯 reducer 从 bootstrap、事实事件、token 增量与 session 树快照推导的视图模型。 |
+| 命令面板 | `Ctrl/⌘+K` 打开的单一面板。分 session（跨节点）、动作与节点三组，条目可模糊过滤并用键盘执行。 |
+| 草稿 | 按 (node, session) 存在浏览器 `localStorage` 的未发送输入。含折叠的长粘贴块。 |
+| 未读标记 | 客户端分片内按 `lastSeenAt` 推导的 session 状态：未读、最近完成或最近失败。只在本地，不入库。 |
+| 正在运行面板 | 侧栏中汇总全部节点运行中 run 的面板。代码标识符 `ActivityPanel`。 |
 | 连接状态 | 客户端对 SSE 连接的可见状态：已连接、重连中、已断开。 |
 | scripted provider | 测试用本地 OpenAI 兼容 SSE 服务。按脚本返回响应，不替换被测代码。 |
 | 可编程节点 | 测试用假 node：`/api/bootstrap` 由闸门控制响应时机，`/api/events` 按脚本推送事实并记录收到的 `after`。用于把上游时序变成事件驱动。 |

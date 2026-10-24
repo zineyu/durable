@@ -11,6 +11,8 @@ const idle: SessionSummary = {
   state: 'idle',
   queuedCount: 0,
   updatedAt,
+  unread: false,
+  outcome: null,
 };
 
 const meta = {
@@ -47,6 +49,8 @@ export const Running: Story = {
       state: 'running',
       queuedCount: 0,
       updatedAt,
+      unread: false,
+      outcome: null,
     },
     selected: false,
   },
@@ -60,6 +64,8 @@ export const QueuedWithBacklog: Story = {
       state: 'queued',
       queuedCount: 3,
       updatedAt,
+      unread: false,
+      outcome: null,
     },
     selected: false,
   },
@@ -73,7 +79,23 @@ export const LongTitle: Story = {
       state: 'idle',
       queuedCount: 0,
       updatedAt,
+      unread: false,
+      outcome: null,
     },
+    selected: false,
+  },
+};
+
+export const UnreadCompleted: Story = {
+  args: {
+    session: { ...idle, unread: true, outcome: 'succeeded' },
+    selected: false,
+  },
+};
+
+export const UnreadFailed: Story = {
+  args: {
+    session: { ...idle, id: toSessionId('s-failed'), title: '实现迁移并在重启后恢复队列', unread: true, outcome: 'failed' },
     selected: false,
   },
 };

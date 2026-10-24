@@ -19,6 +19,7 @@ import {
   emptyNodeState,
   loadNodeBootstrap,
   loadSessionTree,
+  markSeen,
   snapshotCursor,
   storeSession,
 } from './node-state';
@@ -56,6 +57,7 @@ export type ClientAction =
   | { type: 'bodies-retry'; node: NodeName; ids: number[] }
   | { type: 'bodies'; node: NodeName; ids: number[]; messages: MessageBody[] }
   | { type: 'select-node'; node: NodeName | null }
+  | { type: 'seen'; node: NodeName; sessionId: string; at: number }
   | { type: 'connection'; connection: ConnectionState }
   | { type: 'error'; error: ClientError }
   | { type: 'dismiss-error' };
@@ -103,6 +105,8 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
       );
     case 'select-node':
       return { ...state, hub: { ...state.hub, selected: action.node } };
+    case 'seen':
+      return mapShard(state, action.node, (shard) => markSeen(shard, action.sessionId, action.at));
     case 'connection':
       return { ...state, connection: action.connection };
     case 'error':

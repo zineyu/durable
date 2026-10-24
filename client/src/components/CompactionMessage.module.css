@@ -35,3 +35,9 @@
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
 }
+
+.message[data-search-hit='true'] {
+  border-color: var(--color-accent);
+  outline: var(--border-width) solid var(--color-accent);
+  outline-offset: var(--space-1);
+}

@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { api } from './api/client';
-import type { ApiFailure, ApiResult } from './api/client';
-import { openEventStream } from './api/events';
-import type { EventStream } from './api/events';
-import type { HubBootstrap } from './api/generated/HubBootstrap';
-import type { MessageSkeleton } from './api/generated/MessageSkeleton';
+import type { ApiResult } from './api/client';
 import type { NodeName } from './api/generated/NodeName';
 import type { SubmitMode } from './api/generated/SubmitMode';
 import { AppShell } from './components/AppShell';
-import { AssistantContent } from './components/AssistantContent';
-import { AssistantMessage } from './components/AssistantMessage';
-import { Composer } from './components/Composer';
-import { CompactionMessage } from './components/CompactionMessage';
+import { CommandPalette } from './components/CommandPalette';
 import { Dialog } from './components/Dialog';
 import {
   dialogConfirmDisabled,
@@ -24,267 +17,133 @@ import {
 import type { DialogState } from './components/dialog-body';
 import { EmptyState } from './components/EmptyState';
 import { ErrorBanner } from './components/ErrorBanner';
-import { MainHeader } from './components/MainHeader';
-import { MessagePending } from './components/MessagePending';
-import { QueueStrip } from './components/QueueStrip';
+import { SessionPane } from './components/SessionPane';
+import { ShortcutHelp } from './components/ShortcutHelp';
 import { Sidebar } from './components/Sidebar';
 import type { SessionEditing } from './components/Sidebar';
-import { Transcript } from './components/Transcript';
-import { UserMessage } from './components/UserMessage';
-import { toQueueItemId, toSessionId, toWorkspacePath } from './view/ids';
+import { buildPalette, filterPalette, stepPaletteIndex } from './view/command-palette';
+import type { PaletteEntry } from './view/command-palette';
+import { emptyDraft, readDraft, readLastSession, writeDraft, writeLastSession } from './view/drafts';
+import type { Draft } from './view/drafts';
+import { runningEntries } from './view/activity';
+import { toSessionId } from './view/ids';
 import type { SessionId, WorkspacePath } from './view/ids';
-import { bodyOf, placeholdersOf, toolResults } from './view/bodies';
-import { bodyText } from './view/content';
-import { branchPosition, messageView, sessionQueue, transcriptNodes } from './view/messages';
-import { sessionById, snapshotCursor } from './view/node-state';
-import { sidebarWorkspaces } from './view/sidebar';
-import { useMessageBodies } from './view/use-message-bodies';
-import { initialClientState, reduce } from './view/reducer';
-import type { ClientState } from './view/reducer';
-import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
 import { nodeStatusLabel, unavailableNotice } from './view/labels';
-import type { BranchControl, SessionState } from './view/types';
+import { sessionById } from './view/node-state';
+import { orderedSessions, sidebarWorkspaces } from './view/sidebar';
+import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
+import { isEditableTarget, resolveShortcut } from './view/shortcuts';
+import type { Selection } from './view/use-client-state';
+import { useDocumentTitle } from './view/use-document-title';
+import { useClientState } from './view/use-client-state';
 
-const RECONNECT_DELAY_MS = 1000;
+const storage = window.localStorage;
 
-function sessionStateOf(busy: boolean, queueLength: number): SessionState {
-  if (busy) {
-    return 'running';
-  }
-  return queueLength > 0 ? 'queued' : 'idle';
+function initialSelection(): Selection {
+  const location = readLocationFromHash(window.location.hash);
+  return { node: location?.node ?? null, sessionId: location?.sessionId ?? null };
 }
 
-function initialStateFromHash(): ClientState {
+function initialDraft(): Draft {
   const location = readLocationFromHash(window.location.hash);
-  return reduce(initialClientState, { type: 'select-node', node: location?.node ?? null });
+  return readDraft(storage, location?.node ?? null, location?.sessionId ?? null);
 }
 
 export function App(): ReactElement {
-  const [state, dispatch] = useReducer(reduce, undefined, initialStateFromHash);
-  const [selectedSessionId, setSelectedSessionId] = useState<SessionId | null>(
-    () => readLocationFromHash(window.location.hash)?.sessionId ?? null,
-  );
+  const [selection, setSelection] = useState<Selection>(initialSelection);
+  const { state, dispatch, report, runCommand } = useClientState(selection);
   const [editing, setEditing] = useState<SessionEditing | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState<Draft>(initialDraft);
   const [sendMode, setSendMode] = useState<SubmitMode>('queue');
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
+  const [paletteIndex, setPaletteIndex] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(false);
 
-  const selectedNode = state.hub.selected;
+  const selectedNode = selection.node;
   const record =
     selectedNode === null
       ? undefined
       : state.hub.nodes.find((entry) => entry.name === selectedNode);
   const shard = selectedNode === null ? undefined : state.nodes[selectedNode];
   const session =
-    shard === undefined || selectedSessionId === null
+    shard === undefined || selection.sessionId === null
       ? undefined
-      : sessionById(shard, selectedSessionId);
+      : sessionById(shard, selection.sessionId);
+  const selectedSessionId = session?.id ?? null;
+  const selectedUpdatedAt = session?.updatedAt ?? 0;
   const nodeReady = record?.status === 'ok';
 
-  const report = useCallback((failure: ApiFailure) => {
-    dispatch({ type: 'error', error: { code: failure.code, message: failure.message } });
+  const navigate = useCallback((node: NodeName, sessionId: SessionId | null) => {
+    window.location.hash = writeLocationToHash(node, sessionId);
   }, []);
 
-  const runCommand = useCallback(
-    (result: Promise<ApiResult<unknown>>) => {
-      void (async () => {
-        const outcome = await result;
-        if (!outcome.ok) {
-          report(outcome.error);
-        }
-      })();
-    },
-    [report],
+  const selectNode = useCallback(
+    (node: NodeName) => { navigate(node, null); },
+    [navigate],
   );
 
-  const streamRef = useRef<EventStream | null>(null);
-  const cursorRef = useRef<number | null>(null);
-  const selectionRef = useRef<{ node: NodeName | null; sessionId: SessionId | null }>({
-    node: selectedNode,
-    sessionId: selectedSessionId,
-  });
-
-  useEffect(() => {
-    cursorRef.current = state.hub.cursor;
-  }, [state.hub.cursor]);
-
-  useEffect(() => {
-    selectionRef.current = { node: selectedNode, sessionId: selectedSessionId };
-  }, [selectedNode, selectedSessionId]);
+  const selectSession = useCallback(
+    (id: SessionId) => {
+      if (selectedNode !== null) {
+        navigate(selectedNode, id);
+      }
+    },
+    [navigate, selectedNode],
+  );
 
   useEffect(() => {
     const apply = () => {
       const next = readLocationFromHash(window.location.hash);
-      dispatch({ type: 'select-node', node: next?.node ?? null });
-      setSelectedSessionId(next?.sessionId ?? null);
+      setSelection({ node: next?.node ?? null, sessionId: next?.sessionId ?? null });
+      setDraft(readDraft(storage, next?.node ?? null, next?.sessionId ?? null));
       setDialog(null);
       setEditing(null);
+      setPaletteOpen(false);
     };
     window.addEventListener('hashchange', apply);
     return () => { window.removeEventListener('hashchange', apply); };
   }, []);
 
-  const missingKey = state.hub.nodes
-    .filter((entry) => entry.status === 'ok' && state.nodes[entry.name] === undefined)
-    .map((entry) => entry.name)
-    .join(',');
-
   useEffect(() => {
-    if (missingKey === '') {
+    if (selectedNode === null || selection.sessionId !== null) {
       return;
     }
-    const missing = missingKey.split(',');
-    const liveness = new AbortController();
-    void (async () => {
-      for (const name of missing) {
-        const outcome = await api.nodeBootstrap(name);
-        if (liveness.signal.aborted) {
-          return;
-        }
-        if (!outcome.ok) {
-          report(outcome.error);
-          continue;
-        }
-        dispatch({ type: 'node-bootstrap', node: name, bootstrap: outcome.value });
-      }
-    })();
-    return () => {
-      liveness.abort();
-    };
-  }, [missingKey, report]);
-
-  useEffect(() => {
-    const liveness = new AbortController();
-    let retry: ReturnType<typeof setTimeout> | null = null;
-
-    const delay = (milliseconds: number) =>
-      new Promise<void>((resolve) => {
-        retry = setTimeout(resolve, milliseconds);
-      });
-
-    const refresh = async (): Promise<number | null> => {
-      const outcome = await api.bootstrap();
-      if (liveness.signal.aborted) {
-        return null;
-      }
-      if (!outcome.ok) {
-        report(outcome.error);
-        return null;
-      }
-      const cursor = snapshotCursor(cursorRef.current, outcome.value.maxHubSeq);
-      dispatch({ type: 'bootstrap', bootstrap: outcome.value });
-      const selection = selectionRef.current;
-      if (selection.node !== null && selection.sessionId !== null) {
-        const tree = await api.sessionTree(selection.node, selection.sessionId);
-        if (liveness.signal.aborted) {
-          return null;
-        }
-        if (!tree.ok) {
-          report(tree.error);
-          return null;
-        }
-        dispatch({ type: 'tree', node: selection.node, tree: tree.value });
-      }
-      return cursor;
-    };
-
-    const reconnect = async () => {
-      for (;;) {
-        const cursor = await refresh();
-        if (liveness.signal.aborted) {
-          return;
-        }
-        if (cursor !== null) {
-          streamRef.current?.resume(cursor);
-          return;
-        }
-        await delay(RECONNECT_DELAY_MS);
-        if (liveness.signal.aborted) {
-          return;
-        }
-      }
-    };
-
-    const connect = (bootstrap: HubBootstrap) => {
-      const cursor = snapshotCursor(cursorRef.current, bootstrap.maxHubSeq);
-      dispatch({ type: 'bootstrap', bootstrap });
-      streamRef.current = openEventStream(cursor, {
-        onEvent: (event) => { dispatch({ type: 'stream', event }); },
-        onState: (connection) => { dispatch({ type: 'connection', connection }); },
-        onDisconnect: () => {
-          void reconnect();
-        },
-      });
-    };
-
-    void (async () => {
-      const outcome = await api.bootstrap();
-      if (liveness.signal.aborted) {
-        return;
-      }
-      if (!outcome.ok) {
-        report(outcome.error);
-        dispatch({ type: 'connection', connection: 'disconnected' });
-        return;
-      }
-      connect(outcome.value);
-    })();
-
-    return () => {
-      liveness.abort();
-      if (retry !== null) {
-        clearTimeout(retry);
-      }
-      streamRef.current?.close();
-      streamRef.current = null;
-    };
-  }, [report]);
-
-  const sessionExists = session !== undefined;
-  useEffect(() => {
-    if (selectedNode === null || selectedSessionId === null || !sessionExists) {
+    const current = state.hub.nodes.find((entry) => entry.name === selectedNode);
+    const currentShard = state.nodes[selectedNode];
+    if (current?.status !== 'ok' || currentShard === undefined) {
       return;
     }
-    const node = selectedNode;
-    const id = selectedSessionId;
-    const liveness = new AbortController();
-    void (async () => {
-      const outcome = await api.sessionTree(node, id);
-      if (liveness.signal.aborted) {
-        return;
-      }
-      if (!outcome.ok) {
-        report(outcome.error);
-        return;
-      }
-      dispatch({ type: 'tree', node, tree: outcome.value });
-    })();
-    return () => {
-      liveness.abort();
-    };
-  }, [selectedNode, selectedSessionId, sessionExists, report]);
+    const last = readLastSession(storage, selectedNode);
+    if (last === null || !currentShard.sessions.some((entry) => entry.id === last)) {
+      return;
+    }
+    window.location.hash = writeLocationToHash(selectedNode, last);
+  }, [selectedNode, selection.sessionId, state.hub.nodes, state.nodes]);
 
-  useMessageBodies({
-    node: selectedNode,
-    sessionId: selectedSessionId,
-    shard,
-    dispatch,
-    onFailure: report,
-  });
+  useEffect(() => {
+    if (selectedNode !== null && selection.sessionId !== null) {
+      writeLastSession(storage, selectedNode, selection.sessionId);
+    }
+  }, [selectedNode, selection.sessionId]);
 
+  useEffect(() => {
+    if (selectedNode === null || selectedSessionId === null) {
+      return;
+    }
+    dispatch({ type: 'seen', node: selectedNode, sessionId: selectedSessionId, at: selectedUpdatedAt });
+  }, [dispatch, selectedNode, selectedSessionId, selectedUpdatedAt]);
 
-  const selectNode = useCallback((node: NodeName) => {
-    window.location.hash = writeLocationToHash(node, null);
-  }, []);
+  useDocumentTitle(selectedNode, session, shard);
 
-  const selectSession = useCallback(
-    (id: SessionId) => {
-      if (selectedNode === null) {
-        return;
-      }
-      window.location.hash = writeLocationToHash(selectedNode, id);
+  const changeDraft = useCallback(
+    (text: string, pastes: Record<string, string>) => {
+      const next: Draft = { text, pastes };
+      setDraft(next);
+      writeDraft(storage, selectedNode, selection.sessionId, next);
     },
-    [selectedNode],
+    [selectedNode, selection.sessionId],
   );
 
   const handleCreateSession = useCallback(
@@ -300,10 +159,10 @@ export function App(): ReactElement {
           return;
         }
         dispatch({ type: 'session', node, session: outcome.value });
-        window.location.hash = writeLocationToHash(node, toSessionId(outcome.value.id));
+        navigate(node, toSessionId(outcome.value.id));
       })();
     },
-    [selectedNode, report],
+    [dispatch, navigate, report, selectedNode],
   );
 
   const handleRenameSubmit = useCallback(
@@ -321,7 +180,7 @@ export function App(): ReactElement {
         setEditing(null);
       })();
     },
-    [selectedNode, report],
+    [report, selectedNode],
   );
 
   const handleDeleteConfirm = useCallback(
@@ -337,41 +196,182 @@ export function App(): ReactElement {
           return;
         }
         setEditing(null);
-        if (id === selectedSessionId) {
-          window.location.hash = writeLocationToHash(node, null);
+        if (id === selection.sessionId) {
+          navigate(node, null);
         }
       })();
     },
-    [selectedNode, selectedSessionId, report],
+    [navigate, report, selectedNode, selection.sessionId],
   );
 
-  const handleSend = useCallback(() => {
-    if (selectedNode === null || session === undefined) {
-      return;
-    }
-    const text = draft.trim();
-    if (text.length === 0) {
-      return;
-    }
-    const node = selectedNode;
-    const id = session.id;
-    const mode = session.busy ? sendMode : 'queue';
-    void (async () => {
-      const outcome = await api.submitMessage(node, id, text, mode);
-      if (!outcome.ok) {
-        report(outcome.error);
+  const handleSend = useCallback(
+    (text: string) => {
+      if (selectedNode === null || session === undefined) {
         return;
       }
-      setDraft('');
-    })();
-  }, [draft, session, selectedNode, sendMode, report]);
+      const trimmed = text.trim();
+      if (trimmed.length === 0) {
+        return;
+      }
+      const node = selectedNode;
+      const id = session.id;
+      const mode = session.busy ? sendMode : 'queue';
+      void (async () => {
+        const outcome = await api.submitMessage(node, id, trimmed, mode);
+        if (!outcome.ok) {
+          report(outcome.error);
+          return;
+        }
+        setDraft(emptyDraft);
+        writeDraft(storage, node, toSessionId(id), emptyDraft);
+      })();
+    },
+    [report, selectedNode, sendMode, session],
+  );
 
   const handleCancelRun = useCallback(() => {
-    if (selectedNode === null || session === undefined) {
+    if (selectedNode === null || session?.busy !== true) {
       return;
     }
     runCommand(api.cancelRun(selectedNode, session.id));
-  }, [session, selectedNode, runCommand]);
+  }, [runCommand, selectedNode, session]);
+
+  const paletteEntries = useMemo(
+    () =>
+      filterPalette(
+        buildPalette({
+          nodes: state.hub.nodes,
+          shards: state.nodes,
+          selectedNode,
+          selectedSessionId: selection.sessionId,
+        }),
+        paletteQuery,
+      ),
+    [paletteQuery, selectedNode, selection.sessionId, state.hub.nodes, state.nodes],
+  );
+  const paletteCursor =
+    paletteEntries.length === 0 ? 0 : Math.min(paletteIndex, paletteEntries.length - 1);
+
+  const runPaletteEntry = useCallback(
+    (entry: PaletteEntry) => {
+      setPaletteOpen(false);
+      switch (entry.action.kind) {
+        case 'session':
+          navigate(entry.action.node, entry.action.sessionId);
+          return;
+        case 'node':
+          navigate(entry.action.node, null);
+          return;
+        case 'register-node':
+          setDialog({ kind: 'register-node', name: '', url: '' });
+          return;
+        case 'register-workspace':
+          setDialog({ kind: 'register-workspace', path: '' });
+          return;
+        case 'cancel-run':
+          runCommand(api.cancelRun(entry.action.node, entry.action.sessionId));
+          return;
+        default: {
+          const unhandled: never = entry.action;
+          throw new Error(`未处理的命令面板动作: ${JSON.stringify(unhandled)}`);
+        }
+      }
+    },
+    [navigate, runCommand],
+  );
+
+  const cycleSession = useCallback(
+    (delta: number) => {
+      if (selectedNode === null || shard === undefined) {
+        return;
+      }
+      const ordered = orderedSessions(shard);
+      if (ordered.length === 0) {
+        return;
+      }
+      const current = ordered.findIndex((entry) => entry.id === selection.sessionId);
+      const next =
+        current === -1
+          ? delta > 0
+            ? 0
+            : ordered.length - 1
+          : (current + delta + ordered.length) % ordered.length;
+      const target = ordered[next];
+      if (target !== undefined) {
+        navigate(selectedNode, target.id);
+      }
+    },
+    [navigate, selectedNode, selection.sessionId, shard],
+  );
+
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      const command = resolveShortcut(event, { editable: isEditableTarget(event.target) });
+      if (command === null) {
+        return;
+      }
+      if (command.type === 'open-palette') {
+        event.preventDefault();
+        if (paletteOpen) {
+          setPaletteOpen(false);
+        } else {
+          setPaletteQuery('');
+          setPaletteIndex(0);
+          setPaletteOpen(true);
+        }
+        return;
+      }
+      if (command.type === 'escape') {
+        if (paletteOpen) {
+          setPaletteOpen(false);
+          return;
+        }
+        if (helpOpen) {
+          setHelpOpen(false);
+          return;
+        }
+        if (dialog !== null) {
+          setDialog(null);
+          return;
+        }
+        handleCancelRun();
+        return;
+      }
+      if (paletteOpen || helpOpen) {
+        return;
+      }
+      switch (command.type) {
+        case 'toggle-help':
+          event.preventDefault();
+          setHelpOpen(true);
+          return;
+        case 'cycle-session':
+          event.preventDefault();
+          cycleSession(command.delta);
+          return;
+        case 'select-node': {
+          const target = state.hub.nodes[command.index];
+          if (target !== undefined) {
+            event.preventDefault();
+            navigate(target.name, null);
+          }
+          return;
+        }
+        default:
+          return;
+      }
+    };
+    window.addEventListener('keydown', handle);
+    return () => { window.removeEventListener('keydown', handle); };
+  }, [
+    cycleSession,
+    dialog,
+    handleCancelRun,
+    helpOpen,
+    navigate,
+    paletteOpen,
+    state.hub.nodes,
+  ]);
 
   const handleDialogConfirm = useCallback(() => {
     if (dialog === null) {
@@ -390,7 +390,7 @@ export function App(): ReactElement {
               return;
             }
             close();
-            window.location.hash = writeLocationToHash(outcome.value.name, null);
+            navigate(outcome.value.name, null);
             return;
           }
           case 'rename-node': {
@@ -401,7 +401,7 @@ export function App(): ReactElement {
             }
             close();
             if (selectedNode === current.name) {
-              window.location.hash = writeLocationToHash(outcome.value.name, selectedSessionId);
+              navigate(outcome.value.name, selection.sessionId);
             }
             return;
           }
@@ -456,15 +456,12 @@ export function App(): ReactElement {
       }
       close();
     })();
-  }, [dialog, selectedNode, selectedSessionId, report]);
+  }, [dialog, navigate, report, selectedNode, selection.sessionId]);
 
   const renderMain = (): ReactNode => {
     if (selectedNode === null) {
       return (
-        <EmptyState
-          title="选择一个节点"
-          description="在左侧节点切换器中选择一台机器。"
-        />
+        <EmptyState title="选择一个节点" description="在左侧节点切换器中选择一台机器。" />
       );
     }
     if (record === undefined) {
@@ -477,10 +474,7 @@ export function App(): ReactElement {
     }
     if (record.status !== 'ok') {
       return (
-        <EmptyState
-          title="节点不可用"
-          description={record.detail ?? nodeStatusLabel[record.status]}
-        />
+        <EmptyState title="节点不可用" description={record.detail ?? nodeStatusLabel[record.status]} />
       );
     }
     if (shard === undefined || session === undefined) {
@@ -493,129 +487,35 @@ export function App(): ReactElement {
         />
       );
     }
-
-    const current = session;
-    const idle = !current.busy && current.queueLength === 0;
-    const nodeName = record.name;
-
-    const controls = (message: MessageSkeleton): { branch?: BranchControl } => {
-      const position = branchPosition(shard, current.id, message);
-      if (position === null) {
-        return {};
-      }
-      const control: BranchControl = { index: position.index, total: position.total };
-      if (!idle) {
-        return { branch: control };
-      }
-      const previousId = position.previousId;
-      const nextId = position.nextId;
-      if (previousId !== null) {
-        control.onPrev = () => { runCommand(api.switchActiveLeaf(nodeName, current.id, previousId)); };
-      }
-      if (nextId !== null) {
-        control.onNext = () => { runCommand(api.switchActiveLeaf(nodeName, current.id, nextId)); };
-      }
-      return { branch: control };
-    };
-
-    const results = toolResults(shard, current.id);
-
-    const renderEntry = (message: MessageSkeleton): ReactElement => {
-      const parts = bodyOf(shard, message.id);
-      if (message.role === 'user') {
-        if (parts === null) {
-          return <MessagePending key={message.id} parts={message.parts} />;
-        }
-        const text = bodyText(parts);
-        return (
-          <UserMessage
-            key={message.id}
-            text={text}
-            onEdit={() => { setDialog({
-                kind: 'edit',
-                sessionId: current.id,
-                messageId: message.id,
-                text,
-              }); }
-            }
-            editDisabled={!idle}
-            {...controls(message)}
-          />
-        );
-      }
-      if (message.role === 'compaction') {
-        return <CompactionMessage key={message.id} parts={parts} skeleton={message.parts} />;
-      }
-      const view = messageView(shard, current.id, message);
-      return (
-        <AssistantMessage
-          key={message.id}
-          state={view.state}
-          {...(view.note === null ? {} : { note: view.note })}
-          onRetry={() => { setDialog({ kind: 'retry', sessionId: current.id, messageId: message.id }); }
-          }
-          retryDisabled={!idle}
-          {...controls(message)}
-        >
-          <AssistantContent parts={parts} skeleton={message.parts} toolResults={results} />
-        </AssistantMessage>
-      );
-    };
-
-    const entries = transcriptNodes(shard, current.id)
-      .filter((message) => message.role !== 'tool')
-      .map(renderEntry);
-
-    const pending = placeholdersOf(shard, current.id).map((placeholder) => (
-      <AssistantMessage key={`pending-${String(placeholder.id)}`} state="streaming">
-        <AssistantContent parts={placeholder.parts} skeleton={[]} toolResults={results} />
-      </AssistantMessage>
-    ));
-
-    const queue = sessionQueue(shard, current.id).map((item) => ({
-      id: toQueueItemId(String(item.id)),
-      text: item.text,
-      pendingSteer: item.pendingSteer,
-    }));
-
     return (
-      <>
-        <MainHeader
-          node={nodeName}
-          nodeStatus={record.status}
-          nodeDetail={record.detail}
-          title={current.title}
-          workspacePath={toWorkspacePath(current.workspace)}
-          state={sessionStateOf(current.busy, current.queueLength)}
-          connection={state.connection}
-        />
-        <Transcript>
-          {entries.length === 0 && pending.length === 0 ? (
-            <EmptyState title="还没有消息" description="在下方输入框提交第一条消息。" />
-          ) : (
-            [...entries, ...pending]
-          )}
-        </Transcript>
-        <QueueStrip
-          items={queue}
-          onRemove={(viewId) => { runCommand(api.removeQueueItem(nodeName, current.id, Number(viewId))); }
-          }
-        />
-        <Composer
-          value={draft}
-          onChange={setDraft}
-          onSend={handleSend}
-          busy={current.busy}
-          mode={current.busy ? sendMode : 'queue'}
-          onModeChange={setSendMode}
-          {...(current.busy ? { onCancel: handleCancelRun } : {})}
-        />
-      </>
+      <SessionPane
+        key={session.id}
+        node={record.name}
+        record={record}
+        shard={shard}
+        session={session}
+        connection={state.connection}
+        draft={draft.text}
+        pastes={draft.pastes}
+        onDraftChange={changeDraft}
+        onSend={handleSend}
+        onCancelRun={handleCancelRun}
+        sendMode={sendMode}
+        onModeChange={setSendMode}
+        runCommand={runCommand}
+        onEditMessage={(messageId, text) => {
+          setDialog({ kind: 'edit', sessionId: session.id, messageId, text });
+        }}
+        onRetryMessage={(messageId) => {
+          setDialog({ kind: 'retry', sessionId: session.id, messageId });
+        }}
+      />
     );
   };
 
   const workspaces = shard === undefined ? [] : sidebarWorkspaces(shard);
   const notice = unavailableNotice(selectedNode, record);
+  const running = runningEntries(state.hub.nodes, state.nodes);
 
   return (
     <>
@@ -630,9 +530,12 @@ export function App(): ReactElement {
             onRemoveNode={(name) => { setDialog({ kind: 'remove-node', name }); }}
             notice={notice}
             commandsDisabled={!nodeReady}
+            running={running}
+            onSelectRunning={(node, id) => { navigate(node, id); }}
+            onCancelRunning={(node, id) => { runCommand(api.cancelRun(node, id)); }}
             modelName={shard?.modelName ?? ''}
             workspaces={workspaces}
-            selectedSessionId={selectedSessionId}
+            selectedSessionId={selection.sessionId}
             editing={editing}
             onSelectSession={selectSession}
             onRenameRequest={(id) => { setEditing({ sessionId: id, view: 'renaming' }); }}
@@ -667,6 +570,24 @@ export function App(): ReactElement {
           {renderDialogBody(dialog, setDialog)}
         </Dialog>
       ) : null}
+      {paletteOpen ? (
+        <CommandPalette
+          entries={paletteEntries}
+          selectedIndex={paletteCursor}
+          query={paletteQuery}
+          onQueryChange={(next) => {
+            setPaletteQuery(next);
+            setPaletteIndex(0);
+          }}
+          onMove={(delta) => {
+            setPaletteIndex(stepPaletteIndex(paletteCursor, delta, paletteEntries.length));
+          }}
+          onHover={setPaletteIndex}
+          onSelect={runPaletteEntry}
+          onClose={() => { setPaletteOpen(false); }}
+        />
+      ) : null}
+      {helpOpen ? <ShortcutHelp onClose={() => { setHelpOpen(false); }} /> : null}
     </>
   );
 }

@@ -1,7 +1,15 @@
 import type { NodeName } from '../api/generated/NodeName';
 import type { NodeStatus } from '../api/generated/NodeStatus';
 import type { RunFailureCode } from '../api/generated/RunFailureCode';
-import type { ConnectionState, MessageState, NodeRecord, RetryState, SessionState, StatusTone, ToolState } from './types';
+import type {
+  ConnectionState,
+  MessageState,
+  NodeRecord,
+  RetryState,
+  SessionState,
+  StatusTone,
+  ToolState,
+} from './types';
 
 export const nodeStatusLabel: Record<NodeStatus, string> = {
   ok: '可用',
@@ -14,6 +22,13 @@ export const nodeStatusTone: Record<NodeStatus, StatusTone> = {
   unreachable: 'danger',
   incompatible: 'warn',
 };
+
+export function sessionStateOf(busy: boolean, queueLength: number): SessionState {
+  if (busy) {
+    return 'running';
+  }
+  return queueLength > 0 ? 'queued' : 'idle';
+}
 
 export const sessionStateLabel: Record<SessionState, string> = {
   idle: '空闲',

@@ -4,6 +4,9 @@ import type { QueueItemId, SessionId, WorkspaceId, WorkspacePath } from './ids';
 
 export type SessionState = 'idle' | 'queued' | 'running';
 
+/// 最近一次 run 的结局。取消与进行中不给出结局。
+export type SessionOutcome = 'succeeded' | 'failed';
+
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
 export type StatusTone = 'idle' | 'running' | 'queued' | 'success' | 'warn' | 'danger';
@@ -29,6 +32,10 @@ export type SessionSummary = {
   state: SessionState;
   queuedCount: number;
   updatedAt: number;
+  /// 上次查看之后 session 又更新过。
+  unread: boolean;
+  /// 最近一次 run 的结局。取消与进行中不给出结局。
+  outcome: SessionOutcome | null;
 };
 
 export type WorkspaceSummary = {

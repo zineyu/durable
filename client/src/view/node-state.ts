@@ -43,6 +43,8 @@ export type NodeState = {
   bodyFailures: number[];
   /// 按 session 记录的未定型占位，渲染在 transcript 末尾。
   placeholders: Record<string, MessagePlaceholder[]>;
+  /// 按 session 记录的最近查看时间。首次见到 session 时取当时的更新时间。
+  lastSeenAt: Record<string, number>;
   /// 已应用的最大事实事件 id；`null` 表示尚未装配快照基线。
   lastEventId: number | null;
   applied: AppliedFact[];
@@ -58,6 +60,7 @@ export const emptyNodeState: NodeState = {
   bodyRequests: [],
   bodyFailures: [],
   placeholders: {},
+  lastSeenAt: {},
   lastEventId: null,
   applied: [],
 };
@@ -74,6 +77,7 @@ export function loadNodeBootstrap(state: NodeState, bootstrap: BootstrapResponse
     modelName: bootstrap.model,
     workspaces: bootstrap.workspaces,
     sessions: bootstrap.sessions,
+    lastSeenAt: bootstrap.sessions.reduce(seedSeenAt, state.lastSeenAt),
     lastEventId: snapshotCursor(state.lastEventId, bootstrap.maxEventId),
   });
 }
@@ -99,7 +103,7 @@ export function applyFactEvent(state: NodeState, event: FactEvent): NodeState {
       return removeWorkspace(state, event.path);
     case 'session_created':
     case 'session_renamed':
-      return { ...state, sessions: upsertSession(state.sessions, event.session) };
+      return storeSession(state, event.session);
     case 'message_appended':
       return dropPlaceholder(
         withSession(state, event.session, (tree) => ({
@@ -131,7 +135,7 @@ export function applyFactEvent(state: NodeState, event: FactEvent): NodeState {
         queue: appendQueue(tree.queue, event.item),
       }));
     case 'steer_applied':
-      return { ...state, sessions: upsertSession(state.sessions, event.session) };
+      return storeSession(state, event.session);
     case 'steer_downgraded':
       return withSession(state, event.session, (tree) => ({
         ...tree,
@@ -177,6 +181,7 @@ export function loadSessionTree(state: NodeState, tree: SessionTree): NodeState 
     ...state,
     lastEventId: snapshotCursor(state.lastEventId, tree.maxEventId),
     sessions: upsertSession(state.sessions, tree.session),
+    lastSeenAt: seedSeenAt(state.lastSeenAt, tree.session),
     trees: {
       ...state.trees,
       [tree.session.id]: {
@@ -194,7 +199,31 @@ export function loadSessionTree(state: NodeState, tree: SessionTree): NodeState 
 }
 
 export function storeSession(state: NodeState, session: SessionMetadata): NodeState {
-  return { ...state, sessions: upsertSession(state.sessions, session) };
+  return {
+    ...state,
+    sessions: upsertSession(state.sessions, session),
+    lastSeenAt: seedSeenAt(state.lastSeenAt, session),
+  };
+}
+
+/// 记录某个 session 已被查看。时间只前进，不回退。
+export function markSeen(state: NodeState, sessionId: string, at: number): NodeState {
+  const seen = state.lastSeenAt[sessionId];
+  if (seen !== undefined && seen >= at) {
+    return state;
+  }
+  return { ...state, lastSeenAt: { ...state.lastSeenAt, [sessionId]: at } };
+}
+
+/// 首次见到一个 session 时把它的更新时间记为已查看，避免首屏把全部 session 标成未读。
+function seedSeenAt(
+  lastSeenAt: Record<string, number>,
+  session: SessionMetadata,
+): Record<string, number> {
+  if (lastSeenAt[session.id] !== undefined) {
+    return lastSeenAt;
+  }
+  return { ...lastSeenAt, [session.id]: session.updatedAt };
 }
 
 export function sessionById(state: NodeState, id: string): SessionMetadata | undefined {
@@ -215,7 +244,12 @@ function withSession(
 ): NodeState {
   const sessions = upsertSession(state.sessions, session);
   const tree = state.trees[session.id] ?? emptyTree();
-  return { ...state, sessions, trees: { ...state.trees, [session.id]: update(tree) } };
+  return {
+    ...state,
+    sessions,
+    lastSeenAt: seedSeenAt(state.lastSeenAt, session),
+    trees: { ...state.trees, [session.id]: update(tree) },
+  };
 }
 
 function emptyTree(): SessionTreeState {
@@ -258,6 +292,7 @@ function removeSession(state: NodeState, sessionId: string): NodeState {
     trees: withoutKey(removed.trees, sessionId),
     retries: withoutRetryKey(removed.retries, sessionId),
     placeholders: withoutKey(removed.placeholders, sessionId),
+    lastSeenAt: withoutKey(removed.lastSeenAt, sessionId),
   };
 }
 

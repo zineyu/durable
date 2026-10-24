@@ -24,3 +24,9 @@
   gap: var(--space-1);
   height: var(--control-height-2xs);
 }
+
+.message[data-search-hit='true'] {
+  border-radius: var(--radius-md);
+  outline: var(--border-width) solid var(--color-accent);
+  outline-offset: var(--space-1);
+}

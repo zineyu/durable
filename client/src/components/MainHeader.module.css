@@ -72,6 +72,18 @@
   color: var(--color-text-secondary);
 }
 
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  margin-right: var(--space-1);
+}
+
+.actions [aria-pressed='true'] {
+  background: var(--color-surface-active);
+  color: var(--color-text);
+}
+
 .state[data-state='running'] {
   color: var(--color-accent-text);
   font-weight: var(--weight-medium);

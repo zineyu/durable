@@ -7,6 +7,7 @@ import { EmptyState } from '../components/EmptyState';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { MainHeader } from '../components/MainHeader';
 import { QueueStrip } from '../components/QueueStrip';
+import { SearchBar } from '../components/SearchBar';
 import { Sidebar } from '../components/Sidebar';
 import { ToolCard } from '../components/ToolCard';
 import { Transcript } from '../components/Transcript';
@@ -99,6 +100,39 @@ export const Idle: Story = {
         <AssistantMessage state="complete">
           <p>生成文件已提交，CI 会在重新生成后比较差异。</p>
           <CodeBlock code="cargo run -p agent --bin export-types" language="bash" />
+        </AssistantMessage>
+      </Transcript>
+      <Composer value="" onChange={() => undefined} />
+    </AppShell>
+  ),
+};
+
+export const SearchOpen: Story = {
+  render: () => (
+    <AppShell sidebar={sidebar}>
+      <MainHeader
+        node="macbook-air-01"
+        nodeStatus="ok"
+        title="SQLite 迁移与恢复"
+        workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
+        state="idle"
+        connection="connected"
+        searchOpen
+        onSearch={() => undefined}
+        onExport={() => undefined}
+      />
+      <SearchBar
+        query="迁移"
+        current={1}
+        total={3}
+        onQueryChange={() => undefined}
+        onStep={() => undefined}
+        onClose={() => undefined}
+      />
+      <Transcript>
+        <UserMessage text="实现迁移并在重启后恢复队列。" />
+        <AssistantMessage state="complete">
+          <p>迁移已经完成，接下来需要补恢复路径的测试。</p>
         </AssistantMessage>
       </Transcript>
       <Composer value="" onChange={() => undefined} />

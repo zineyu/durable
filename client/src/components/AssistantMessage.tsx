@@ -12,6 +12,8 @@ export type AssistantMessageProps = {
   branch?: BranchControl;
   onRetry?: () => void;
   retryDisabled?: boolean;
+  messageId?: number;
+  highlighted?: boolean;
 };
 
 export function AssistantMessage({
@@ -21,11 +23,18 @@ export function AssistantMessage({
   branch,
   onRetry,
   retryDisabled = false,
+  messageId,
+  highlighted = false,
 }: AssistantMessageProps): ReactElement {
   const showStatus = state !== 'complete' || note !== undefined;
   const showFooter = branch !== undefined || onRetry !== undefined;
   return (
-    <article className={styles.message} data-state={state}>
+    <article
+      className={styles.message}
+      data-state={state}
+      data-search-hit={highlighted}
+      {...(messageId === undefined ? {} : { 'data-message-id': messageId })}
+    >
       <div className={styles.body}>
         {children}
         {state === 'streaming' ? <span className={styles.caret} aria-hidden="true" /> : null}
