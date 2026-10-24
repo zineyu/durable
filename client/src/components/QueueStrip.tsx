@@ -18,6 +18,7 @@ export function QueueStrip({ items, onRemove }: QueueStripProps): ReactElement {
         <ul className={styles.list}>
           {items.map((item) => (
             <li key={item.id} className={styles.item}>
+              {item.pendingSteer ? <span className={styles.badge}>插话</span> : null}
               <span className={styles.text} title={item.text}>
                 {item.text}
               </span>

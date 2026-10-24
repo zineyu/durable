@@ -44,6 +44,17 @@
   color: var(--color-text-secondary);
 }
 
+.badge {
+  flex: none;
+  padding: 0 var(--space-1-5);
+  border-radius: var(--radius-full);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-text);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  font-weight: var(--weight-medium);
+}
+
 .empty {
   margin: 0;
   height: var(--control-height-xs);

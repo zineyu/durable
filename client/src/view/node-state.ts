@@ -130,6 +130,13 @@ export function applyFactEvent(state: NodeState, event: FactEvent): NodeState {
         ...tree,
         queue: appendQueue(tree.queue, event.item),
       }));
+    case 'steer_applied':
+      return { ...state, sessions: upsertSession(state.sessions, event.session) };
+    case 'steer_downgraded':
+      return withSession(state, event.session, (tree) => ({
+        ...tree,
+        queue: tree.queue.map((item) => (item.id === event.item.id ? event.item : item)),
+      }));
     case 'run_started':
       return clearRetry(
         withSession(state, event.session, (tree) => ({

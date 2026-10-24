@@ -65,7 +65,7 @@ export type ErrorResponse = { code: ErrorCode, message: string, };
 /**
  * 持久化到 SQLite 的领域事实事件。
  */
-export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", session: SessionMetadata, } | { "kind": "session_renamed", session: SessionMetadata, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "message_updated", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "active_leaf_changed", session: SessionMetadata, activeLeaf: number | null, } | { "kind": "message_queued", session: SessionMetadata, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "run_started", session: SessionMetadata, run: RunRecord, } | { "kind": "run_finished", session: SessionMetadata, run: RunRecord, };
+export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", session: SessionMetadata, } | { "kind": "session_renamed", session: SessionMetadata, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "message_updated", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "active_leaf_changed", session: SessionMetadata, activeLeaf: number | null, } | { "kind": "message_queued", session: SessionMetadata, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", session: SessionMetadata, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", session: SessionMetadata, item: QueueItem, } | { "kind": "run_started", session: SessionMetadata, run: RunRecord, } | { "kind": "run_finished", session: SessionMetadata, run: RunRecord, };
 ```
 
 ## HealthResponse
@@ -258,9 +258,12 @@ export type ProviderMeta = unknown;
  * 等待执行的用户消息。session 级 FIFO，按 id 升序执行。
  *
  * `anchor` 是本次执行接续的用户节点。`None` 表示 run 开始时在当前 active leaf 下新建用户节点；
- * `Some` 表示接续已存在的用户节点（编辑产生的新节点或重试 assistant 的父节点）。
+ * `Some` 表示接续已存在的用户节点（编辑产生的新节点、重试 assistant 的父节点或待插入的插话）。
+ *
+ * `pending_steer` 表示该项是等待插入当前 run 的插话。插话在提交时已经是一条用户节点；
+ * run 结束前未被消费时降级为普通排队，节点由下一次 run 接续。
  */
-export type QueueItem = { id: number, text: MessageText, anchor: number | null, createdAt: number, };
+export type QueueItem = { id: number, text: MessageText, anchor: number | null, createdAt: number, pendingSteer: boolean, };
 ```
 
 ## RegisterNodeRequest
@@ -406,7 +409,22 @@ delayMs: number, } | { "type": "resync", reason: ResyncReason, };
 ## SubmitMessageRequest
 
 ```ts
-export type SubmitMessageRequest = { text: string, };
+export type SubmitMessageRequest = { text: string, 
+/**
+ * 必填。省略时请求被拒绝。
+ */
+mode: SubmitMode, };
+```
+
+## SubmitMode
+
+```ts
+/**
+ * 提交用户消息的语义。
+ *
+ * 没有缺省值：提交请求必须写明是排队还是插话。
+ */
+export type SubmitMode = "queue" | "steer";
 ```
 
 ## SwitchActiveLeafRequest

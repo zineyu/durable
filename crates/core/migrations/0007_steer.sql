@@ -1,0 +1,1 @@
+ALTER TABLE queue_item ADD COLUMN pending_steer INTEGER NOT NULL DEFAULT 0;

@@ -55,6 +55,42 @@
   gap: var(--space-2);
 }
 
+.modes {
+  display: flex;
+  align-items: center;
+  gap: var(--space-0-5);
+  margin-left: auto;
+  padding: var(--space-0-5);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-2);
+}
+
+.mode {
+  padding: var(--space-1) var(--space-2-5);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  cursor: pointer;
+}
+
+.mode:hover {
+  color: var(--color-text);
+}
+
+.mode:active {
+  background: var(--color-surface-active);
+}
+
+.mode[aria-pressed='true'] {
+  background: var(--color-surface-1);
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
 .hint {
   font-size: var(--text-2xs);
   line-height: var(--leading-2xs);

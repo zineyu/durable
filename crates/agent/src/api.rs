@@ -303,7 +303,10 @@ async fn submit_message(
     JsonBody(request): JsonBody<SubmitMessageRequest>,
 ) -> Result<(StatusCode, Json<QueueItem>), ApiError> {
     let text = MessageText::parse(&request.text)?;
-    let item = state.store().enqueue_message(&id, text).await?;
+    let item = state
+        .store()
+        .enqueue_message(&id, text, request.mode)
+        .await?;
     state.engine().notify_session(id).await;
     Ok((StatusCode::CREATED, Json(item)))
 }

@@ -45,7 +45,7 @@ impl SqliteStorage {
         let busy = parse_busy(&row);
         let messages = session_messages(&mut transaction, id).await?;
         let queue = sqlx::query(
-            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC",
+            "SELECT id, text, anchor, created_at, pending_steer FROM queue_item WHERE session_id = ?1 ORDER BY id ASC",
         )
         .bind(id.as_str())
         .fetch_all(&mut *transaction)

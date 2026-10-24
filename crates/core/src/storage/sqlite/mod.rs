@@ -160,7 +160,7 @@ impl SqliteStorage {
         id: &SessionId,
     ) -> Result<Option<QueueItem>, StoreError> {
         sqlx::query(
-            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 ORDER BY id ASC LIMIT 1",
+            "SELECT id, text, anchor, created_at, pending_steer FROM queue_item WHERE session_id = ?1 ORDER BY id ASC LIMIT 1",
         )
         .bind(id.as_str())
         .fetch_optional(&self.pool)
@@ -177,7 +177,7 @@ impl SqliteStorage {
         id: QueueItemId,
     ) -> Result<Option<QueueItem>, StoreError> {
         sqlx::query(
-            "SELECT id, text, anchor, created_at FROM queue_item WHERE session_id = ?1 AND id = ?2",
+            "SELECT id, text, anchor, created_at, pending_steer FROM queue_item WHERE session_id = ?1 AND id = ?2",
         )
         .bind(session.as_str())
         .bind(id.get())
@@ -186,6 +186,21 @@ impl SqliteStorage {
         .as_ref()
         .map(parse_queue_item)
         .transpose()
+    }
+
+    /// session 的待插入插话，按 id 升序。
+    pub(crate) async fn pending_steer_items(
+        &self,
+        id: &SessionId,
+    ) -> Result<Vec<QueueItem>, StoreError> {
+        let rows = sqlx::query(
+            "SELECT id, text, anchor, created_at, pending_steer FROM queue_item
+             WHERE session_id = ?1 AND pending_steer = 1 ORDER BY id ASC",
+        )
+        .bind(id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(parse_queue_item).collect()
     }
 
     /// 全部仍为 running 的 run，按 id 升序。

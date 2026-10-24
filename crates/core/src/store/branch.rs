@@ -55,6 +55,7 @@ impl Store {
             text,
             anchor: Some(node.id),
             created_at,
+            pending_steer: false,
         };
         session.updated_at = created_at;
         let metadata = session.metadata(1, false);
@@ -146,6 +147,7 @@ impl Store {
             text,
             anchor: Some(parent_id),
             created_at,
+            pending_steer: false,
         };
         session.updated_at = created_at;
         let metadata = session.metadata(1, false);

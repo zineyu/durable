@@ -147,6 +147,11 @@ impl Store {
         if message.node.run_id.is_some() {
             return Ok(message.node);
         }
+        // 插话降级后可能已随链进入过后续请求：再接续它会把 active leaf 拽回，
+        // 丢掉后来的消息。这类锚点从链尾接续。
+        if let Some(tail) = self.chain_tail(session, anchor).await? {
+            return Ok(tail);
+        }
         let bound = MessageNode {
             run_id: Some(run.id),
             ..message.node
@@ -160,6 +165,24 @@ impl Store {
             run.created_at,
         );
         Ok(bound)
+    }
+
+    /// 锚定的用户节点已在链上但不是链尾时返回链尾节点。
+    ///
+    /// 它的正文已经随链发给过模型，因此下一次 run 从链尾接续，不把 active leaf 拽回。
+    async fn chain_tail(
+        &self,
+        id: &SessionId,
+        anchor: MessageId,
+    ) -> Result<Option<MessageNode>, StoreError> {
+        let chain = self.storage.transcript(id).await?;
+        let Some(position) = chain.iter().position(|node| node.id == anchor) else {
+            return Ok(None);
+        };
+        if chain.get(position + 1).is_none() {
+            return Ok(None);
+        }
+        Ok(chain.last().cloned())
     }
 
     /// 把一步模型回复定型入树：挂在当前 active leaf 下，块一次写齐。

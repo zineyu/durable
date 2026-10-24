@@ -85,9 +85,15 @@ export const workspaceWithoutSessions: WorkspaceSummary[] = [
 ];
 
 export const queueItems: QueueItem[] = [
-  { id: toQueueItemId('q-1'), text: '把 ui 的静态资源改为内嵌，并确认 SSE 不被缓冲' },
-  { id: toQueueItemId('q-2'), text: '补一个 health 端点的回环地址测试' },
+  { id: toQueueItemId('q-1'), text: '把 ui 的静态资源改为内嵌，并确认 SSE 不被缓冲', pendingSteer: false },
+  { id: toQueueItemId('q-2'), text: '补一个 health 端点的回环地址测试', pendingSteer: false },
 ];
+
+export const steerQueueItem: QueueItem = {
+  id: toQueueItemId('q-steer'),
+  text: '先不要改迁移，只把领域类型补上',
+  pendingSteer: true,
+};
 
 export const longQueueItem =
   '检查 ts-rs 在枚举与可选字段上的输出是否与手写类型一致，并在 CI 中重新生成后比较差异，确保生成的协议类型始终与 Rust 定义同步';

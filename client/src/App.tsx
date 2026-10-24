@@ -7,6 +7,7 @@ import type { EventStream } from './api/events';
 import type { HubBootstrap } from './api/generated/HubBootstrap';
 import type { MessageSkeleton } from './api/generated/MessageSkeleton';
 import type { NodeName } from './api/generated/NodeName';
+import type { SubmitMode } from './api/generated/SubmitMode';
 import { AppShell } from './components/AppShell';
 import { AssistantContent } from './components/AssistantContent';
 import { AssistantMessage } from './components/AssistantMessage';
@@ -41,8 +42,8 @@ import { useMessageBodies } from './view/use-message-bodies';
 import { initialClientState, reduce } from './view/reducer';
 import type { ClientState } from './view/reducer';
 import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
-import { nodeStatusLabel } from './view/labels';
-import type { BranchControl, NodeRecord, SessionState } from './view/types';
+import { nodeStatusLabel, unavailableNotice } from './view/labels';
+import type { BranchControl, SessionState } from './view/types';
 
 const RECONNECT_DELAY_MS = 1000;
 
@@ -58,23 +59,6 @@ function initialStateFromHash(): ClientState {
   return reduce(initialClientState, { type: 'select-node', node: location?.node ?? null });
 }
 
-/// 侧栏顶部切换器下方的说明。节点可用时没有说明。
-function unavailableNotice(
-  selected: NodeName | null,
-  record: NodeRecord | undefined,
-): string | null {
-  if (selected === null) {
-    return null;
-  }
-  if (record === undefined) {
-    return '未知节点，节点表里没有这个名字';
-  }
-  if (record.status === 'ok') {
-    return null;
-  }
-  return record.detail ?? nodeStatusLabel[record.status];
-}
-
 export function App(): ReactElement {
   const [state, dispatch] = useReducer(reduce, undefined, initialStateFromHash);
   const [selectedSessionId, setSelectedSessionId] = useState<SessionId | null>(
@@ -83,6 +67,7 @@ export function App(): ReactElement {
   const [editing, setEditing] = useState<SessionEditing | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [draft, setDraft] = useState('');
+  const [sendMode, setSendMode] = useState<SubmitMode>('queue');
 
   const selectedNode = state.hub.selected;
   const record =
@@ -370,15 +355,16 @@ export function App(): ReactElement {
     }
     const node = selectedNode;
     const id = session.id;
+    const mode = session.busy ? sendMode : 'queue';
     void (async () => {
-      const outcome = await api.submitMessage(node, id, text);
+      const outcome = await api.submitMessage(node, id, text, mode);
       if (!outcome.ok) {
         report(outcome.error);
         return;
       }
       setDraft('');
     })();
-  }, [draft, session, selectedNode, report]);
+  }, [draft, session, selectedNode, sendMode, report]);
 
   const handleCancelRun = useCallback(() => {
     if (selectedNode === null || session === undefined) {
@@ -589,6 +575,7 @@ export function App(): ReactElement {
     const queue = sessionQueue(shard, current.id).map((item) => ({
       id: toQueueItemId(String(item.id)),
       text: item.text,
+      pendingSteer: item.pendingSteer,
     }));
 
     return (
@@ -618,6 +605,9 @@ export function App(): ReactElement {
           value={draft}
           onChange={setDraft}
           onSend={handleSend}
+          busy={current.busy}
+          mode={current.busy ? sendMode : 'queue'}
+          onModeChange={setSendMode}
           {...(current.busy ? { onCancel: handleCancelRun } : {})}
         />
       </>
