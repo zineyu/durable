@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::id::{MessageId, QueueItemId, SessionId, WorkspacePath};
+use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
 use crate::message::MessageSkeleton;
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
@@ -56,6 +56,19 @@ pub enum FactEvent {
         #[ts(type = "number")]
         item_id: QueueItemId,
     },
+    SteerApplied {
+        session: SessionMetadata,
+        #[ts(type = "number")]
+        run_id: RunId,
+        #[ts(type = "number")]
+        item_id: QueueItemId,
+        #[ts(type = "number")]
+        message_id: MessageId,
+    },
+    SteerDowngraded {
+        session: SessionMetadata,
+        item: QueueItem,
+    },
     RunStarted {
         session: SessionMetadata,
         run: RunRecord,
@@ -78,6 +91,8 @@ impl FactEvent {
             | Self::MessageUpdated { session, .. }
             | Self::ActiveLeafChanged { session, .. }
             | Self::MessageQueued { session, .. }
+            | Self::SteerApplied { session, .. }
+            | Self::SteerDowngraded { session, .. }
             | Self::RunStarted { session, .. }
             | Self::RunFinished { session, .. } => Some(&session.id),
             Self::SessionDeleted { session_id } | Self::QueueItemRemoved { session_id, .. } => {

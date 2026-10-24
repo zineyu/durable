@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use durable::{MessageBody, MessageId, SessionMetadata, WorkspaceMetadata};
+use durable::{MessageBody, MessageId, SessionMetadata, SubmitMode, WorkspaceMetadata};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -13,7 +13,9 @@ pub enum HealthStatus {
 }
 
 /// 协议版本。任何不兼容的协议改动都递增它。
-pub const PROTOCOL_VERSION: u32 = 3;
+///
+/// 4：提交消息必须写明 `mode`。不带 `mode` 的旧客户端被拒绝；旧节点忽略该字段，会把插话静默排队。
+pub const PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +85,8 @@ pub struct RenameSessionRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SubmitMessageRequest {
     pub text: String,
+    /// 必填。省略时请求被拒绝。
+    pub mode: SubmitMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

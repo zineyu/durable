@@ -40,6 +40,8 @@ export type WorkspaceSummary = {
 export type QueueItem = {
   id: QueueItemId;
   text: string;
+  /// 该项是等待插入当前 run 的插话。
+  pendingSteer: boolean;
 };
 
 export type BranchControl = {

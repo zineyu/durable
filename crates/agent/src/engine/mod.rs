@@ -12,8 +12,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use durable::{
-    EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunStart, RunStatus, SessionId,
-    Store, StoreError, ToolResultState,
+    EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunId, RunStart, RunStatus,
+    SessionId, Store, StoreError, ToolResultState,
 };
 use tokio::sync::{Mutex, Notify};
 
@@ -223,6 +223,9 @@ impl RunEngine {
                 status = outcome.status.as_str(),
                 "结束 run"
             );
+            if let Err(error) = self.store.downgrade_pending_steers(&session).await {
+                tracing::error!(session = %session.as_str(), run, error = %error, "降级待插入插话失败");
+            }
         }
         self.controls.lock().await.remove(&session);
         done.notify_waiters();
@@ -248,15 +251,25 @@ impl RunEngine {
                     })
                     .count()
             });
-            match recover::resume_point(&transcript) {
+            let resume = recover::resume_point(&transcript);
+            // 步数上限先于接入：插话留给下一次 run，不白白消耗在一次必定失败的请求上。
+            if matches!(resume, ResumePoint::Request) && executed >= self.config.max_steps {
+                return failed(
+                    RunFailureCode::StepLimitExceeded,
+                    format!("超过 {} 步上限", self.config.max_steps),
+                );
+            }
+            // 步骤边界：工具执行不打断，因此只在发请求与收尾之前接入待插入插话。
+            if !matches!(resume, ResumePoint::Tools(_)) {
+                match self.insert_pending_steers(session, start.run.id).await {
+                    Ok(true) => continue,
+                    Ok(false) => {}
+                    Err(error) => return failed(RunFailureCode::ModelUpstream, error.to_string()),
+                }
+            }
+            match resume {
                 ResumePoint::Finish => return succeeded(),
                 ResumePoint::Request => {
-                    if executed >= self.config.max_steps {
-                        return failed(
-                            RunFailureCode::StepLimitExceeded,
-                            format!("超过 {} 步上限", self.config.max_steps),
-                        );
-                    }
                     steps = Some(executed + 1);
                     match self.stream_step(session, &transcript, cancellation).await {
                         StepEnd::Completed { id, parts } => {
@@ -304,6 +317,21 @@ impl RunEngine {
                 }
             }
         }
+    }
+
+    /// 步骤边界：把待插入插话接入链尾并绑定当前 run。返回是否插入了消息。
+    ///
+    /// 插入会改写 active leaf，因此调用方必须重新读 transcript 再决定下一步。
+    async fn insert_pending_steers(
+        &self,
+        session: &SessionId,
+        run: RunId,
+    ) -> Result<bool, StoreError> {
+        Ok(!self
+            .store
+            .apply_pending_steers(session, run)
+            .await?
+            .is_empty())
     }
 
     /// 启动恢复时处理执行中的工具节点：非幂等工具的结局写为未知，等待续跑时重跑幂等工具。

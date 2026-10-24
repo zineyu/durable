@@ -366,7 +366,7 @@ describe('侧栏状态', () => {
     const state = withTree(loaded(), nodeA, {
       ...tree('s-1', 7, null, []),
       session: session('s-1', '/work/a', 100, { queueLength: 1 }),
-      queue: [{ id: 5, text: '排队', anchor: null, createdAt: 5 }],
+      queue: [{ id: 5, text: '排队', anchor: null, createdAt: 5, pendingSteer: false }],
     });
 
     const next = streamed(
@@ -375,6 +375,46 @@ describe('侧栏状态', () => {
     );
     expect(shardOf(next, nodeA).sessions[0]?.queueLength).toBe(0);
     expect(sessionQueue(shardOf(next, nodeA), 's-1')).toEqual([]);
+  });
+
+  it('插话入队后标记待插入，降级后清除标记', () => {
+    const steer = { id: 5, text: '插话', anchor: 3, createdAt: 5, pendingSteer: true };
+    const state = withTree(loaded(), nodeA, tree('s-1', 7, null, []));
+
+    const queued = streamed(
+      state,
+      fact(nodeA, 8, 108, {
+        kind: 'message_queued',
+        session: session('s-1', '/work/a', 300, { busy: true, queueLength: 1 }),
+        item: steer,
+      }),
+    );
+    expect(sessionQueue(shardOf(queued, nodeA), 's-1')).toEqual([steer]);
+    expect(shardOf(queued, nodeA).sessions[0]?.queueLength).toBe(1);
+
+    const applied = streamed(
+      queued,
+      fact(nodeA, 9, 109, {
+        kind: 'steer_applied',
+        session: session('s-1', '/work/a', 310, { busy: true, queueLength: 0 }),
+        runId: 1,
+        itemId: 5,
+        messageId: 3,
+      }),
+    );
+    expect(shardOf(applied, nodeA).sessions[0]?.queueLength).toBe(0);
+
+    const downgraded = streamed(
+      queued,
+      fact(nodeA, 9, 109, {
+        kind: 'steer_downgraded',
+        session: session('s-1', '/work/a', 310, { queueLength: 1 }),
+        item: { ...steer, pendingSteer: false },
+      }),
+    );
+    expect(sessionQueue(shardOf(downgraded, nodeA), 's-1')).toEqual([
+      { ...steer, pendingSteer: false },
+    ]);
   });
 });
 

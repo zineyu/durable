@@ -20,6 +20,7 @@ import type { RenameSessionRequest } from './generated/RenameSessionRequest';
 import type { SessionMetadata } from './generated/SessionMetadata';
 import type { SessionTree } from './generated/SessionTree';
 import type { SubmitMessageRequest } from './generated/SubmitMessageRequest';
+import type { SubmitMode } from './generated/SubmitMode';
 import type { SwitchActiveLeafRequest } from './generated/SwitchActiveLeafRequest';
 import type { WorkspaceMetadata } from './generated/WorkspaceMetadata';
 
@@ -122,8 +123,13 @@ export const api = {
   deleteSession(node: NodeName, id: string): Promise<ApiResult<void>> {
     return request('POST', `${sessionPath(node, id)}/delete`);
   },
-  submitMessage(node: NodeName, id: string, text: string): Promise<ApiResult<QueueItem>> {
-    const body: SubmitMessageRequest = { text };
+  submitMessage(
+    node: NodeName,
+    id: string,
+    text: string,
+    mode: SubmitMode,
+  ): Promise<ApiResult<QueueItem>> {
+    const body: SubmitMessageRequest = { text, mode };
     return request('POST', `${sessionPath(node, id)}/messages`, body);
   },
   editUserMessage(

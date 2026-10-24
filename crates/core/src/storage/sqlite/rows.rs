@@ -77,6 +77,11 @@ pub(super) fn parse_busy(row: &SqliteRow) -> bool {
 
 pub(super) fn parse_queue_item(row: &SqliteRow) -> Result<QueueItem, StoreError> {
     let anchor: Option<i64> = row.get("anchor");
+    let pending_steer = match row.get::<i64, _>("pending_steer") {
+        0 => false,
+        1 => true,
+        other => return Err(corrupted("queue_item.pending_steer", other)),
+    };
     Ok(QueueItem {
         id: QueueItemId::parse(row.get::<i64, _>("id"))
             .map_err(|error| corrupted("queue_item.id", error))?,
@@ -87,6 +92,7 @@ pub(super) fn parse_queue_item(row: &SqliteRow) -> Result<QueueItem, StoreError>
             .transpose()
             .map_err(|error| corrupted("queue_item.anchor", error))?,
         created_at: row.get("created_at"),
+        pending_steer,
     })
 }
 

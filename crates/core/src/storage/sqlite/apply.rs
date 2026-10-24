@@ -49,6 +49,12 @@ pub(super) async fn apply_change(
             replace_message_parts(connection, *id, parts).await
         }
         Change::BindMessageRun { id, run_id } => bind_message_run(connection, *id, *run_id).await,
+        Change::RebindMessageParent { id, parent_id } => {
+            rebind_message_parent(connection, *id, *parent_id).await
+        }
+        Change::ClearPendingSteer { session, item } => {
+            clear_pending_steer(connection, session, *item).await
+        }
         Change::InsertQueueItem { session, item } => {
             insert_queue_item(connection, session, item).await
         }
@@ -242,23 +248,51 @@ async fn bind_message_run(
     ensure_written(&result, "绑定消息 run")
 }
 
+async fn rebind_message_parent(
+    connection: &mut SqliteConnection,
+    id: MessageId,
+    parent_id: Option<MessageId>,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("UPDATE message SET parent_id = ?2 WHERE id = ?1")
+        .bind(id.get())
+        .bind(parent_id.map(MessageId::get))
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "改写消息父节点")
+}
+
 async fn insert_queue_item(
     connection: &mut SqliteConnection,
     session: &SessionId,
     item: &QueueItem,
 ) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO queue_item (id, session_id, text, anchor, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO queue_item (id, session_id, text, anchor, created_at, pending_steer)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
     .bind(item.id.get())
     .bind(session.as_str())
     .bind(item.text.as_str())
     .bind(item.anchor.map(MessageId::get))
     .bind(item.created_at)
+    .bind(item.pending_steer)
     .execute(&mut *connection)
     .await?;
     Ok(())
+}
+
+async fn clear_pending_steer(
+    connection: &mut SqliteConnection,
+    session: &SessionId,
+    item: QueueItemId,
+) -> Result<(), StoreError> {
+    let result =
+        sqlx::query("UPDATE queue_item SET pending_steer = 0 WHERE id = ?1 AND session_id = ?2")
+            .bind(item.get())
+            .bind(session.as_str())
+            .execute(&mut *connection)
+            .await?;
+    ensure_written(&result, "清除待插入标记")
 }
 
 async fn delete_queue_item(

@@ -29,8 +29,8 @@ pub use durable::{
     MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, PartSkeleton,
     PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode, RunId, RunRecord,
     RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle, SessionTitleError,
-    SessionTree, Store, StoreError, StreamEvent, ToolErrorCode, ToolOutcome, ToolResultState,
-    WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    SessionTree, Store, StoreError, StreamEvent, SubmitMode, ToolErrorCode, ToolOutcome,
+    ToolResultState, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
@@ -133,6 +133,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     CreateSessionRequest::export_all(&config)?;
     RenameSessionRequest::export_all(&config)?;
     SubmitMessageRequest::export_all(&config)?;
+    SubmitMode::export_all(&config)?;
     EditMessageRequest::export_all(&config)?;
     SwitchActiveLeafRequest::export_all(&config)?;
     Ok(())

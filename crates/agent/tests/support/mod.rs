@@ -311,10 +311,20 @@ impl Harness {
         serde_json::from_str(&text).expect("解析消息树")
     }
 
+    /// 以排队语义提交消息。
     pub(crate) async fn submit_message(&self, id: &agent::SessionId, text: &str) -> Response {
+        self.submit_mode_message(id, text, "queue").await
+    }
+
+    /// 以插话语义提交消息。
+    pub(crate) async fn submit_steer_message(&self, id: &agent::SessionId, text: &str) -> Response {
+        self.submit_mode_message(id, text, "steer").await
+    }
+
+    async fn submit_mode_message(&self, id: &agent::SessionId, text: &str, mode: &str) -> Response {
         self.client
             .post(self.url(&format!("/api/sessions/{}/messages", id.as_str())))
-            .json(&serde_json::json!({ "text": text }))
+            .json(&serde_json::json!({ "text": text, "mode": mode }))
             .send()
             .await
             .expect("提交消息")

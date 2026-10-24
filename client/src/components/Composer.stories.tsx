@@ -26,6 +26,17 @@ export const Busy: Story = {
   },
 };
 
+export const BusySteer: Story = {
+  args: {
+    value: '先别改迁移，只补领域类型',
+    onChange: () => undefined,
+    busy: true,
+    mode: 'steer',
+    onModeChange: () => undefined,
+    onCancel: () => undefined,
+  },
+};
+
 export const Disabled: Story = {
   args: { value: '', onChange: () => undefined, disabled: true },
 };

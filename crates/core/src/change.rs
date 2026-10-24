@@ -86,6 +86,16 @@ impl Changeset {
         self.push(Change::BindMessageRun { id, run_id });
     }
 
+    /// 改写消息的父节点。用于插话接入链尾时从提交时的叶子挪到当前叶子。
+    pub fn rebind_message_parent(&mut self, id: MessageId, parent_id: Option<MessageId>) {
+        self.push(Change::RebindMessageParent { id, parent_id });
+    }
+
+    /// 把待插入项降级为普通排队项。
+    pub fn clear_pending_steer(&mut self, session: SessionId, item: QueueItemId) {
+        self.push(Change::ClearPendingSteer { session, item });
+    }
+
     pub fn insert_run(&mut self, run: RunRecord) {
         self.push(Change::InsertRun(run));
     }
@@ -149,6 +159,14 @@ pub(crate) enum Change {
     BindMessageRun {
         id: MessageId,
         run_id: RunId,
+    },
+    RebindMessageParent {
+        id: MessageId,
+        parent_id: Option<MessageId>,
+    },
+    ClearPendingSteer {
+        session: SessionId,
+        item: QueueItemId,
     },
     InsertRun(RunRecord),
     UpdateRun {

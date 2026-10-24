@@ -10,7 +10,7 @@ use ts_rs::TS;
 pub const HUB_PROTOCOL_VERSION: u32 = 3;
 
 /// hub 期望的 agent 协议版本。与 `agent::PROTOCOL_VERSION` 由测试保持一致。
-pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 3;
+pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]

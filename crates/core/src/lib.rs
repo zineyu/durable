@@ -30,7 +30,7 @@ pub use message::{
     PartStateError, ProviderMeta,
 };
 pub use node::{NodeMetadata, NodeName, NodeNameError};
-pub use queue::QueueItem;
+pub use queue::{QueueItem, SubmitMode};
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTree};
 pub use storage::Snapshot;
