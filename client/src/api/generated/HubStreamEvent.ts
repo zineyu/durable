@@ -6,11 +6,16 @@ import type { NodeName } from "./NodeName";
 import type { NodeStatus } from "./NodeStatus";
 import type { ResyncReason } from "./ResyncReason";
 import type { SessionId } from "./SessionId";
+import type { SessionMetadata } from "./SessionMetadata";
 
 /**
  * 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
  */
-export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
+export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, 
+/**
+ * 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
+ */
+session: SessionMetadata | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
 /**
  * 即将进行的重试序号，从 1 开始。
  */

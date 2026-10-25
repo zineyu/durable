@@ -1,7 +1,9 @@
-//! 领域内核的门面：打开数据库、元数据快照、事件回放与提交入口。
-//! 写入命令按对象拆在同级子模块；存储后端在 `crate::storage`。
+//! 领域内核的门面：打开数据库、元数据快照、事件回放、提交与读方法转发，
+//! 以及各写命令共用的节点入树辅助。
+//! 写命令入口在 `command`；按对象的写命令在同级各子模块；存储后端在 `crate::storage`。
 
 mod branch;
+mod command;
 mod compaction;
 mod node;
 mod queue;
@@ -9,17 +11,19 @@ mod run;
 mod session;
 mod workspace;
 
+pub use self::command::{Command, SessionCommand};
+
 use std::path::Path;
 
 use tokio::sync::Mutex;
 
 use crate::change::Changeset;
 use crate::error::StoreError;
-use crate::event::CommittedEvent;
+use crate::event::{CommittedEvent, FactEvent};
 use crate::id::{MessageId, WorkspacePath};
-use crate::message::{MessageRole, MessageSkeleton};
+use crate::message::{Message, MessageNode, MessageRole, MessageSkeleton};
 use crate::run::RunRecord;
-use crate::session::SessionTree;
+use crate::session::{SessionMetadata, SessionTree};
 use crate::storage::sqlite::SqliteStorage;
 use crate::storage::{SessionSnapshot, Snapshot};
 use crate::stream::{EventBus, StreamEvent};
@@ -33,8 +37,9 @@ pub struct RunStart {
 
 /// 领域内核：唯一写入线 + 持久化边界。
 ///
-/// 所有写入经写入线串行化，读-改-写之间不会被其它写入插入。每次写入以一个
-/// [`Changeset`] 在一次存储事务内生效；事务成功前不发布任何事实事件。
+/// 所有写入经 [`Store::command`]、[`Store::command_idle`] 与 [`Store::command_root`]
+/// 串行化，读-改-写之间不会被其它写入插入。每次写入以一个 [`Changeset`] 在一次存储
+/// 事务内生效；事务成功前不发布任何事实事件。
 pub struct Store {
     storage: SqliteStorage,
     line: Mutex<()>,
@@ -86,12 +91,19 @@ impl Store {
     }
 
     /// 提交一次变更；事务成功后才发布事实事件。
-    async fn commit(&self, changes: &Changeset) -> Result<Vec<CommittedEvent>, StoreError> {
-        let committed = self.storage.apply(changes).await?;
+    ///
+    /// `session` 是本次命令推导出的 session 视图，落在每条事件行的信封上。
+    async fn commit(
+        &self,
+        changes: &Changeset,
+        session: Option<&SessionMetadata>,
+    ) -> Result<Vec<CommittedEvent>, StoreError> {
+        let committed = self.storage.apply(changes, session).await?;
         for event in &committed {
             self.bus.publish(StreamEvent::Fact {
                 id: event.id,
                 session_id: event.event.session_id().cloned(),
+                session: event.session.clone(),
                 timestamp: event.created_at,
                 event: event.event.clone(),
             });
@@ -100,21 +112,45 @@ impl Store {
     }
 }
 
+/// 登记一条消息入树：写节点、移动 active leaf，并写入 `message_appended` 与 `active_leaf_changed`。
+///
+/// 入树的四类消息（assistant、工具、压缩、用户插话）共用它，事件顺序因此一致。
+fn append_node(command: &mut SessionCommand<'_>, node: &MessageNode) {
+    let session = command.session().id.clone();
+    let now = command.now();
+    command.changes().insert_message(Message {
+        session: session.clone(),
+        node: node.clone(),
+    });
+    command.session_mut().active_leaf = Some(node.id);
+    command.changes().append_event(
+        FactEvent::MessageAppended {
+            session_id: session.clone(),
+            message: node.skeleton(),
+        },
+        now,
+    );
+    command.changes().append_event(
+        FactEvent::ActiveLeafChanged {
+            session_id: session,
+            active_leaf: Some(node.id),
+        },
+        now,
+    );
+}
+
 fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTree {
     SessionTree {
         session: snapshot
+            .head
             .session
-            .metadata(snapshot.queue_length, snapshot.busy),
+            .metadata(snapshot.head.queue_length, snapshot.head.busy),
         max_event_id: snapshot.max_event_id,
-        active_leaf: snapshot.session.active_leaf,
+        active_leaf: snapshot.head.session.active_leaf,
         nodes: snapshot.messages,
         queue: snapshot.queue,
         runs: snapshot.runs,
     }
-}
-
-fn now_millis() -> i64 {
-    jiff::Timestamp::now().as_millisecond()
 }
 
 fn find_node(messages: &[MessageSkeleton], id: MessageId) -> Option<MessageSkeleton> {

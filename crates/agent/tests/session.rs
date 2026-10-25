@@ -57,9 +57,11 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
                 workspace: workspace.clone(),
             },
             agent::FactEvent::SessionCreated {
-                session: created.clone(),
+                session_id: created.id.clone(),
             },
-            agent::FactEvent::SessionRenamed { session: renamed },
+            agent::FactEvent::SessionRenamed {
+                session_id: renamed.id.clone(),
+            },
         ]
     );
 
@@ -192,14 +194,14 @@ async fn keeps_event_ids_monotonic_and_deletion_after_restart() {
     let events = recorded_events(&harness.database).await;
     assert!(
         !events.contains(&agent::FactEvent::SessionCreated {
-            session: deleted.clone(),
+            session_id: deleted.id.clone(),
         }),
         "删除只清除该 session 的事件"
     );
     assert!(
         events.iter().any(|event| matches!(
             event,
-            agent::FactEvent::SessionCreated { session } if session.id == kept.id
+            agent::FactEvent::SessionCreated { session_id } if *session_id == kept.id
         )),
         "其他 session 的事件保留"
     );

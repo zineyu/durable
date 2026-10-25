@@ -64,8 +64,11 @@ export type ErrorResponse = { code: ErrorCode, message: string, };
 ```ts
 /**
  * 持久化到 SQLite 的领域事实事件。
+ *
+ * 载荷只带事实身份与事实本体；事实提交后的 session 视图在事件信封上（见
+ * [`CommittedEvent`]），不在载荷里。同一变体因此不因元数据变化而改变。
  */
-export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", session: SessionMetadata, } | { "kind": "session_renamed", session: SessionMetadata, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "message_updated", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "active_leaf_changed", session: SessionMetadata, activeLeaf: number | null, } | { "kind": "message_queued", session: SessionMetadata, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", session: SessionMetadata, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", session: SessionMetadata, item: QueueItem, } | { "kind": "run_started", session: SessionMetadata, run: RunRecord, } | { "kind": "run_finished", session: SessionMetadata, run: RunRecord, };
+export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", sessionId: SessionId, } | { "kind": "session_renamed", sessionId: SessionId, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "message_updated", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "active_leaf_changed", sessionId: SessionId, activeLeaf: number | null, } | { "kind": "message_queued", sessionId: SessionId, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", sessionId: SessionId, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", sessionId: SessionId, item: QueueItem, } | { "kind": "run_started", sessionId: SessionId, run: RunRecord, } | { "kind": "run_finished", sessionId: SessionId, run: RunRecord, };
 ```
 
 ## HealthResponse
@@ -123,7 +126,11 @@ export type HubStatus = "ok";
 /**
  * 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
  */
-export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
+export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, 
+/**
+ * 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
+ */
+session: SessionMetadata | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
 /**
  * 即将进行的重试序号，从 1 开始。
  */
@@ -397,7 +404,11 @@ maxEventId: number, activeLeaf: number | null, nodes: Array<MessageSkeleton>, qu
 /**
  * 事件流的统一载荷：已持久化的事实事件与仅实时传输的 token 增量。
  */
-export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, 
+export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, 
+/**
+ * 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
+ */
+session: SessionMetadata | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, 
 /**
  * 该步定型后使用的消息 id；客户端据此建本地占位节点。
  */

@@ -1,8 +1,7 @@
 //! 节点表：注册、更新、删除与读取。
-//! hub 侧的节点状态与上游订阅在 `crates/hub/src/bus`。
+//! hub 侧的节点状态与上游订阅在 `crates/hub/src/bus`；写命令入口在 `command`。
 
-use super::{Store, now_millis};
-use crate::change::Changeset;
+use super::Store;
 use crate::error::StoreError;
 use crate::node::{NodeMetadata, NodeName, NodeUpdate};
 
@@ -43,22 +42,22 @@ impl Store {
         name: NodeName,
         url: String,
     ) -> Result<NodeMetadata, StoreError> {
-        let _line = self.line.lock().await;
-        if self.storage.node(&name).await?.is_some() {
-            return Err(StoreError::NodeNameTaken(name));
-        }
-        let now = now_millis();
-        let node = NodeMetadata {
-            name,
-            url,
-            enabled: true,
-            created_at: now,
-            updated_at: now,
-        };
-        let mut changes = Changeset::new();
-        changes.insert_node(node.clone());
-        self.commit(&changes).await?;
-        Ok(node)
+        self.command_root(async |command| {
+            if self.storage.node(&name).await?.is_some() {
+                return Err(StoreError::NodeNameTaken(name));
+            }
+            let now = command.now();
+            let node = NodeMetadata {
+                name,
+                url,
+                enabled: true,
+                created_at: now,
+                updated_at: now,
+            };
+            command.changes().insert_node(node.clone());
+            Ok(node)
+        })
+        .await
     }
 
     /// 更新节点。`update` 中只处理给出的字段，其余保留原值。
@@ -78,35 +77,35 @@ impl Store {
         name: &NodeName,
         update: NodeUpdate,
     ) -> Result<NodeMetadata, StoreError> {
-        let _line = self.line.lock().await;
-        let Some(node) = self.storage.node(name).await? else {
-            return Err(StoreError::NodeNotFound(name.clone()));
-        };
-        let next_name = update.name.unwrap_or_else(|| node.name.clone());
-        let url = update.url.unwrap_or_else(|| node.url.clone());
-        let enabled = update.enabled.unwrap_or(node.enabled);
-        if next_name == node.name && url == node.url && enabled == node.enabled {
-            return Ok(node);
-        }
-        if next_name != node.name && self.storage.node(&next_name).await?.is_some() {
-            return Err(StoreError::NodeNameTaken(next_name));
-        }
-        let updated = NodeMetadata {
-            name: next_name,
-            url,
-            enabled,
-            created_at: node.created_at,
-            updated_at: now_millis(),
-        };
-        let mut changes = Changeset::new();
-        if updated.name == node.name {
-            changes.update_node(updated.clone());
-        } else {
-            changes.delete_node(node.name);
-            changes.insert_node(updated.clone());
-        }
-        self.commit(&changes).await?;
-        Ok(updated)
+        self.command_root(async |command| {
+            let Some(node) = self.storage.node(name).await? else {
+                return Err(StoreError::NodeNotFound(name.clone()));
+            };
+            let next_name = update.name.unwrap_or_else(|| node.name.clone());
+            let url = update.url.unwrap_or_else(|| node.url.clone());
+            let enabled = update.enabled.unwrap_or(node.enabled);
+            if next_name == node.name && url == node.url && enabled == node.enabled {
+                return Ok(node);
+            }
+            if next_name != node.name && self.storage.node(&next_name).await?.is_some() {
+                return Err(StoreError::NodeNameTaken(next_name));
+            }
+            let updated = NodeMetadata {
+                name: next_name,
+                url,
+                enabled,
+                created_at: node.created_at,
+                updated_at: command.now(),
+            };
+            if updated.name == node.name {
+                command.changes().update_node(updated.clone());
+            } else {
+                command.changes().delete_node(node.name);
+                command.changes().insert_node(updated.clone());
+            }
+            Ok(updated)
+        })
+        .await
     }
 
     /// 移除节点。
@@ -118,12 +117,13 @@ impl Store {
     ///
     /// 副作用：删除 node 行。
     pub async fn remove_node(&self, name: &NodeName) -> Result<(), StoreError> {
-        let _line = self.line.lock().await;
-        if self.storage.node(name).await?.is_none() {
-            return Err(StoreError::NodeNotFound(name.clone()));
-        }
-        let mut changes = Changeset::new();
-        changes.delete_node(name.clone());
-        self.commit(&changes).await.map(|_| ())
+        self.command_root(async |command| {
+            if self.storage.node(name).await?.is_none() {
+                return Err(StoreError::NodeNotFound(name.clone()));
+            }
+            command.changes().delete_node(name.clone());
+            Ok(())
+        })
+        .await
     }
 }

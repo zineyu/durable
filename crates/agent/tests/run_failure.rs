@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script, recorded_events};
+use support::{Harness, Script, recorded_facts};
 
 /// 规格 A-37：上下文超限时压缩历史并重试本步，摘要入树且不属于任何 run。
 #[tokio::test]
@@ -53,14 +53,14 @@ async fn compacts_history_and_retries_the_step() {
         "两步加一次压缩请求，重试的步不再请求"
     );
 
-    let events = recorded_events(&harness.database).await;
-    let compaction_metadata = events
+    let facts = recorded_facts(&harness.database).await;
+    let compaction_metadata = facts
         .iter()
-        .find_map(|event| match event {
-            agent::FactEvent::MessageAppended { session, message }
+        .find_map(|fact| match &fact.event {
+            agent::FactEvent::MessageAppended { message, .. }
                 if message.role == agent::MessageRole::Compaction =>
             {
-                Some(session)
+                fact.session.as_ref()
             }
             _ => None,
         })
@@ -216,6 +216,7 @@ async fn resumes_running_run_after_restart() {
     let session = harness.session("workspace").await;
     harness.submit_message(&session.id, "长时间运行").await;
     harness.wait_busy(&session.id).await;
+    harness.wait_for_requests(1).await;
     harness.provider.push(Script::Text("恢复".into()));
 
     let harness = harness.restart().await;

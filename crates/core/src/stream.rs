@@ -1,10 +1,11 @@
 //! 进程内事件广播：事实事件、实时增量与 resync 指示。
-//! 事实事件的持久化在 `event`。
+//! 事实事件的持久化与信封形状在 `event`；写命令入口在 `store/command`。
 
 use tokio::sync::broadcast;
 
 use crate::event::FactEvent;
 use crate::id::{MessageId, SessionId};
+use crate::session::SessionMetadata;
 
 /// 事件流的统一载荷：已持久化的事实事件与仅实时传输的 token 增量。
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
@@ -18,6 +19,8 @@ pub enum StreamEvent {
         #[ts(type = "number")]
         id: i64,
         session_id: Option<SessionId>,
+        /// 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
+        session: Option<SessionMetadata>,
         #[ts(type = "number")]
         timestamp: i64,
         event: FactEvent,

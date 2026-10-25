@@ -25,7 +25,8 @@ pub(crate) mod db;
 pub(crate) mod provider;
 
 pub(crate) use db::{
-    connect, recorded_event_ids, recorded_event_kinds, recorded_event_rows, recorded_events,
+    RecordedFact, connect, recorded_event_ids, recorded_event_kinds, recorded_event_rows,
+    recorded_events, recorded_facts,
 };
 
 pub(crate) use provider::{Script, ScriptedProvider};
@@ -449,6 +450,20 @@ impl Harness {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("run 未在预期时间内结束");
+    }
+
+    /// 等待脚本化 provider 收到至少 `count` 次请求。
+    ///
+    /// 脚本按顺序发放。在请求到达之前取消 run 或重启进程，会把脚本留给下一个 run，
+    /// 使后续断言落空。取消挂起的 run 或重启之前用它确认脚本已被取走。
+    pub(crate) async fn wait_for_requests(&self, count: usize) {
+        for _ in 0..500 {
+            if self.provider.requests().len() >= count {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        panic!("provider 未在预期时间内收到 {count} 次请求");
     }
 
     /// 轮询直到该 session 进入忙碌状态。

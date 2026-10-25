@@ -44,6 +44,7 @@ pub(crate) async fn events(
         sse_event(&StreamEvent::Fact {
             id: event.id,
             session_id: event.event.session_id().cloned(),
+            session: event.session,
             timestamp: event.created_at,
             event: event.event,
         })
@@ -102,6 +103,7 @@ mod tests {
         StreamEvent::Fact {
             id,
             session_id: None,
+            session: None,
             timestamp: id,
             event: FactEvent::SessionDeleted {
                 session_id: SessionId::parse("s-1").expect("合法 session id"),

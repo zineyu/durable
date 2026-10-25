@@ -1,5 +1,5 @@
-//! 领域事实事件：可回放、带游标的持久化历史。
-//! 只走实时、不入库的增量在 `stream`。
+//! 领域事实事件与事件信封：可回放、带游标的持久化历史。
+//! 载荷只带事实身份与本体，session 视图在信封上；只走实时、不入库的增量在 `stream`。
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -12,6 +12,9 @@ use crate::session::SessionMetadata;
 use crate::workspace::WorkspaceMetadata;
 
 /// 持久化到 SQLite 的领域事实事件。
+///
+/// 载荷只带事实身份与事实本体；事实提交后的 session 视图在事件信封上（见
+/// [`CommittedEvent`]），不在载荷里。同一变体因此不因元数据变化而改变。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "kind",
@@ -26,29 +29,29 @@ pub enum FactEvent {
         path: WorkspacePath,
     },
     SessionCreated {
-        session: SessionMetadata,
+        session_id: SessionId,
     },
     SessionRenamed {
-        session: SessionMetadata,
+        session_id: SessionId,
     },
     SessionDeleted {
         session_id: SessionId,
     },
     MessageAppended {
-        session: SessionMetadata,
+        session_id: SessionId,
         message: MessageSkeleton,
     },
     MessageUpdated {
-        session: SessionMetadata,
+        session_id: SessionId,
         message: MessageSkeleton,
     },
     ActiveLeafChanged {
-        session: SessionMetadata,
+        session_id: SessionId,
         #[ts(type = "number | null")]
         active_leaf: Option<MessageId>,
     },
     MessageQueued {
-        session: SessionMetadata,
+        session_id: SessionId,
         item: QueueItem,
     },
     QueueItemRemoved {
@@ -57,7 +60,7 @@ pub enum FactEvent {
         item_id: QueueItemId,
     },
     SteerApplied {
-        session: SessionMetadata,
+        session_id: SessionId,
         #[ts(type = "number")]
         run_id: RunId,
         #[ts(type = "number")]
@@ -66,15 +69,15 @@ pub enum FactEvent {
         message_id: MessageId,
     },
     SteerDowngraded {
-        session: SessionMetadata,
+        session_id: SessionId,
         item: QueueItem,
     },
     RunStarted {
-        session: SessionMetadata,
+        session_id: SessionId,
         run: RunRecord,
     },
     RunFinished {
-        session: SessionMetadata,
+        session_id: SessionId,
         run: RunRecord,
     },
 }
@@ -85,27 +88,30 @@ impl FactEvent {
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
             Self::WorkspaceRegistered { .. } | Self::WorkspaceRemoved { .. } => None,
-            Self::SessionCreated { session }
-            | Self::SessionRenamed { session }
-            | Self::MessageAppended { session, .. }
-            | Self::MessageUpdated { session, .. }
-            | Self::ActiveLeafChanged { session, .. }
-            | Self::MessageQueued { session, .. }
-            | Self::SteerApplied { session, .. }
-            | Self::SteerDowngraded { session, .. }
-            | Self::RunStarted { session, .. }
-            | Self::RunFinished { session, .. } => Some(&session.id),
-            Self::SessionDeleted { session_id } | Self::QueueItemRemoved { session_id, .. } => {
-                Some(session_id)
-            }
+            Self::SessionCreated { session_id }
+            | Self::SessionRenamed { session_id }
+            | Self::SessionDeleted { session_id }
+            | Self::MessageAppended { session_id, .. }
+            | Self::MessageUpdated { session_id, .. }
+            | Self::ActiveLeafChanged { session_id, .. }
+            | Self::MessageQueued { session_id, .. }
+            | Self::QueueItemRemoved { session_id, .. }
+            | Self::SteerApplied { session_id, .. }
+            | Self::SteerDowngraded { session_id, .. }
+            | Self::RunStarted { session_id, .. }
+            | Self::RunFinished { session_id, .. } => Some(session_id),
         }
     }
 }
 
-/// 已提交的事实事件，携带存储分配的全局事件 id。
+/// 已提交的事实事件，携带存储分配的全局事件 id 与事实提交后的 session 视图。
+///
+/// `session` 为空只有两种含义：该事实不属于任何 session（workspace 事件），
+/// 或该事实删除了 session（`session_deleted`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedEvent {
     pub id: i64,
     pub event: FactEvent,
+    pub session: Option<SessionMetadata>,
     pub created_at: i64,
 }

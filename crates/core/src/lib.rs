@@ -34,7 +34,7 @@ pub use queue::{QueueItem, SubmitMode};
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTree};
 pub use storage::Snapshot;
-pub use store::{RunStart, Store};
+pub use store::{Command, RunStart, SessionCommand, Store};
 pub use stream::{DeltaKind, EventBus, ResyncReason, StreamEvent};
 pub use tool::{ToolErrorCode, ToolOutcome, ToolResultState};
 pub use workspace::WorkspaceMetadata;

@@ -6,7 +6,7 @@ mod support;
 
 use support::{
     Harness, connect, error_code, error_envelope, recorded_event_kinds, recorded_event_rows,
-    recorded_events,
+    recorded_events, recorded_facts,
 };
 
 fn missing_id() -> agent::SessionId {
@@ -174,9 +174,22 @@ async fn persists_fact_event_envelope_fields() {
     assert_eq!(
         recorded_events(&harness.database).await,
         vec![
-            agent::FactEvent::WorkspaceRegistered { workspace },
-            agent::FactEvent::SessionCreated { session },
+            agent::FactEvent::WorkspaceRegistered {
+                workspace: workspace.clone(),
+            },
+            agent::FactEvent::SessionCreated {
+                session_id: session.id.clone(),
+            },
         ]
+    );
+
+    let facts = recorded_facts(&harness.database).await;
+    let sessions: Vec<Option<agent::SessionMetadata>> =
+        facts.into_iter().map(|fact| fact.session).collect();
+    assert_eq!(
+        sessions,
+        vec![None, Some(session)],
+        "信封的 session 视图只在属于 session 的事实上出现"
     );
 }
 

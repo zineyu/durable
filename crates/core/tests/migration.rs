@@ -79,6 +79,47 @@ const NODE_MIGRATIONS: [(&str, &str); 7] = [
 const NODE_SEED: &str = "INSERT INTO node (name, url, created_at)
      VALUES ('laptop', 'http://127.0.0.1:18081', 1234);";
 
+/// 0009 之前的全部迁移。
+const SESSION_MIGRATIONS: [(&str, &str); 8] = [
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    (
+        "0002_queue.sql",
+        include_str!("../migrations/0002_queue.sql"),
+    ),
+    ("0003_run.sql", include_str!("../migrations/0003_run.sql")),
+    (
+        "0004_branch.sql",
+        include_str!("../migrations/0004_branch.sql"),
+    ),
+    ("0005_node.sql", include_str!("../migrations/0005_node.sql")),
+    (
+        "0006_message_parts.sql",
+        include_str!("../migrations/0006_message_parts.sql"),
+    ),
+    (
+        "0007_steer.sql",
+        include_str!("../migrations/0007_steer.sql"),
+    ),
+    (
+        "0008_node_ops.sql",
+        include_str!("../migrations/0008_node_ops.sql"),
+    ),
+];
+
+/// 旧事件把 session 元数据放在载荷里：一个带视图的 session 事实、一个不带视图的删除事实、
+/// 一个 workspace 事实。
+const SESSION_SEED: &str = r#"
+    INSERT INTO workspace (path, registered_at) VALUES ('/work', 1);
+    INSERT INTO session (id, workspace, title, created_at, updated_at)
+        VALUES ('s-1', '/work', '标题', 1, 1);
+    INSERT INTO event (session_id, created_at, event) VALUES
+        ('s-1', 5,
+         '{"kind":"session_renamed","session":{"id":"s-1","workspace":"/work","title":"标题","busy":true,"queueLength":2,"updatedAt":7}}'),
+        ('s-1', 6, '{"kind":"session_deleted","sessionId":"s-1"}'),
+        ('s-1', 7, '{"kind":"queue_item_removed","sessionId":"s-1","itemId":3}'),
+        (NULL, 8, '{"kind":"workspace_removed","path":"/work"}');
+"#;
+
 /// 用给定迁移建库、写入种子数据，再交给 [`Store::open`] 应用剩余迁移。
 async fn database_with(
     directory: &tempfile::TempDir,
@@ -233,4 +274,67 @@ async fn reads_skeletons_without_bodies() {
         "骨架带块字节数"
     );
     assert_eq!(tree.active_leaf.map(durable::MessageId::get), Some(3));
+}
+
+/// 迁移把旧载荷里的 session 元数据搬到事件信封上，并从载荷中摘除。
+#[tokio::test]
+async fn moves_session_view_from_payload_to_envelope() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let path = database_with(&directory, &SESSION_MIGRATIONS, SESSION_SEED).await;
+    let store = Store::open(&path).await.expect("升级旧库");
+    let session = SessionId::parse("s-1").expect("合法 session id");
+
+    let events = store.events_after(0).await.expect("回放事件");
+    assert_eq!(events.len(), 4);
+
+    let renamed = events.first().expect("改名事件");
+    assert_eq!(
+        renamed.event,
+        durable::FactEvent::SessionRenamed {
+            session_id: session.clone(),
+        },
+        "载荷只留事实身份"
+    );
+    let view = renamed
+        .session
+        .as_ref()
+        .expect("旧事件的信封带 session 视图");
+    assert_eq!(view.id, session);
+    assert_eq!(view.title.as_str(), "标题");
+    assert!(view.busy, "旧载荷的 busy 原样保留");
+    assert_eq!(view.queue_length, 2, "旧载荷的队列长度原样保留");
+    assert_eq!(view.updated_at, 7, "旧载荷的更新时间原样保留");
+
+    assert!(
+        events.iter().skip(1).all(|event| event.session.is_none()),
+        "不带视图的事实升级后仍不带视图"
+    );
+    assert_eq!(
+        events.get(2).map(|event| &event.event),
+        Some(&durable::FactEvent::QueueItemRemoved {
+            session_id: session.clone(),
+            item_id: durable::QueueItemId::parse(3).expect("合法队列项 id"),
+        }),
+        "旧队列项移除事实保留，视图为空"
+    );
+
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(SqliteConnectOptions::new().filename(&path))
+        .await
+        .expect("打开升级后的库");
+    let payloads: Vec<String> = sqlx::query_scalar("SELECT event FROM event ORDER BY id")
+        .fetch_all(&pool)
+        .await
+        .expect("读取事件载荷");
+    let payload: serde_json::Value = serde_json::from_str(&payloads[0]).expect("解析事件载荷");
+    assert!(
+        payload.get("session").is_none(),
+        "旧载荷不再含 session 键: {payload}"
+    );
+    assert_eq!(
+        payload.get("sessionId").and_then(|id| id.as_str()),
+        Some("s-1"),
+        "session 身份留在载荷里"
+    );
 }

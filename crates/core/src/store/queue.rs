@@ -1,14 +1,14 @@
 //! 队列写入：用户消息入队、插话提交、步骤边界接入与 run 结束降级。
-//! 取出队首并建 run 在 `run`；自动标题规则在 `crate::session`。
+//! 取出队首并建 run 在 `run`；自动标题规则在 `crate::session`；写命令入口在 `command`。
 
-use super::{Store, now_millis};
-use crate::change::Changeset;
+use super::{Store, append_node};
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{MessageId, QueueItemId, RunId, SessionId};
-use crate::message::{ContentPart, Message, MessageNode, MessageRole, MessageText};
+use crate::message::{ContentPart, MessageNode, MessageRole, MessageText};
 use crate::queue::{QueueItem, SubmitMode};
-use crate::session::{SessionMetadata, SessionRecord, derive_title};
+use crate::session::derive_title;
+use crate::store::SessionCommand;
 
 impl Store {
     /// 提交一条用户消息。`mode` 决定它是排队还是插话。
@@ -25,7 +25,7 @@ impl Store {
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
-    /// 副作用：写入队列项；插话另写入用户节点、active leaf 与更新时间。
+    /// 副作用：写入队列项；插话另写入用户节点与 active leaf。
     /// 必要时把自动标题改为由首行推导的标题。两者都写入 `message_queued` 事实事件。
     pub async fn enqueue_message(
         &self,
@@ -33,52 +33,40 @@ impl Store {
         text: MessageText,
         mode: SubmitMode,
     ) -> Result<QueueItem, StoreError> {
-        let _line = self.line.lock().await;
-        let mut session = self.find_session(id).await?;
-        let pending = self.storage.queue_length(id).await?;
-        let messages = self.storage.message_count(id).await?;
-        let busy = self.storage.busy(id).await?;
-        let created_at = now_millis();
-        if session.title_auto && pending == 0 && messages == 0 {
-            session.title = derive_title(&text)
-                .map_err(|error| StoreError::Invariant(format!("自动标题推导失败: {error}")))?;
-        }
-        session.updated_at = created_at;
-        let metadata = session.metadata(pending + 1, busy);
-        let mut changes = Changeset::new();
-        let item = match mode {
-            SubmitMode::Steer if busy => {
-                self.submit_steer(id, text, &mut session, metadata, created_at, &mut changes)
-                    .await?
+        self.command(id, async |command| {
+            let now = command.now();
+            if command.session().title_auto
+                && command.queue_length() == 0
+                && self.storage.message_count(id).await? == 0
+            {
+                command.session_mut().title = derive_title(&text)
+                    .map_err(|error| StoreError::Invariant(format!("自动标题推导失败: {error}")))?;
             }
-            _ => {
-                let item = QueueItem {
-                    id: self.storage.mint_queue_item_id().await?,
-                    text,
-                    anchor: None,
-                    created_at,
-                    pending_steer: false,
-                };
-                changes.insert_queue_item(id.clone(), item.clone());
-                changes.append_event(
-                    FactEvent::MessageQueued {
-                        session: metadata,
-                        item: item.clone(),
-                    },
-                    created_at,
-                );
-                item
+            match mode {
+                SubmitMode::Steer if command.busy() => self.submit_steer(id, text, command).await,
+                _ => {
+                    let item = QueueItem {
+                        id: self.storage.mint_queue_item_id().await?,
+                        text,
+                        anchor: None,
+                        created_at: now,
+                        pending_steer: false,
+                    };
+                    command
+                        .changes()
+                        .insert_queue_item(id.clone(), item.clone());
+                    command.changes().append_event(
+                        FactEvent::MessageQueued {
+                            session_id: id.clone(),
+                            item: item.clone(),
+                        },
+                        now,
+                    );
+                    Ok(item)
+                }
             }
-        };
-        changes.update_session(
-            id.clone(),
-            session.title.clone(),
-            session.title_auto,
-            created_at,
-            session.active_leaf,
-        );
-        self.commit(&changes).await?;
-        Ok(item)
+        })
+        .await
     }
 
     /// 把插话写成 active leaf 下的用户节点与待插入队列项。
@@ -86,53 +74,35 @@ impl Store {
         &self,
         id: &SessionId,
         text: MessageText,
-        session: &mut SessionRecord,
-        metadata: SessionMetadata,
-        created_at: i64,
-        changes: &mut Changeset,
+        command: &mut SessionCommand<'_>,
     ) -> Result<QueueItem, StoreError> {
+        let now = command.now();
         let node = MessageNode {
             id: self.storage.mint_message_id().await?,
-            parent_id: session.active_leaf,
+            parent_id: command.session().active_leaf,
             role: MessageRole::User,
             parts: vec![ContentPart::text(text.as_str())],
             run_id: None,
-            created_at,
+            created_at: now,
         };
         let item = QueueItem {
             id: self.storage.mint_queue_item_id().await?,
             text,
             anchor: Some(node.id),
-            created_at,
+            created_at: now,
             pending_steer: true,
         };
-        changes.insert_message(Message {
-            session: id.clone(),
-            node: node.clone(),
-        });
-        changes.insert_queue_item(id.clone(), item.clone());
-        changes.append_event(
-            FactEvent::MessageAppended {
-                session: metadata.clone(),
-                message: node.skeleton(),
-            },
-            created_at,
-        );
-        changes.append_event(
-            FactEvent::ActiveLeafChanged {
-                session: metadata.clone(),
-                active_leaf: Some(node.id),
-            },
-            created_at,
-        );
-        changes.append_event(
+        append_node(command, &node);
+        command
+            .changes()
+            .insert_queue_item(id.clone(), item.clone());
+        command.changes().append_event(
             FactEvent::MessageQueued {
-                session: metadata,
+                session_id: id.clone(),
                 item: item.clone(),
             },
-            created_at,
+            now,
         );
-        session.active_leaf = Some(node.id);
         Ok(item)
     }
 
@@ -156,54 +126,40 @@ impl Store {
         id: &SessionId,
         run_id: RunId,
     ) -> Result<Vec<MessageId>, StoreError> {
-        let _line = self.line.lock().await;
-        let mut session = self.find_session(id).await?;
-        let items = self.storage.pending_steer_items(id).await?;
-        if items.is_empty() {
-            return Ok(Vec::new());
-        }
-        let pending = self.storage.queue_length(id).await?;
-        let consumed = u32::try_from(items.len())
-            .map_err(|_| StoreError::Invariant(format!("待插入项数超出 u32: {}", items.len())))?;
-        let metadata = session.metadata(pending.saturating_sub(consumed), true);
-        let layout = self.layout_pending_steers(id, &items, Some(run_id)).await?;
-        let now = now_millis();
-        let mut changes = Changeset::new();
-        for node in &layout.changed {
-            changes.rebind_message_parent(node.id, node.parent_id);
-            changes.append_event(
-                FactEvent::MessageUpdated {
-                    session: metadata.clone(),
-                    message: node.skeleton(),
-                },
-                now,
-            );
-        }
-        let mut applied = Vec::new();
-        for (item, node) in items.iter().zip(&layout.steers) {
-            changes.bind_message_run(node.id, run_id);
-            changes.delete_queue_item(id.clone(), item.id);
-            changes.append_event(
-                FactEvent::QueueItemRemoved {
-                    session_id: id.clone(),
-                    item_id: item.id,
-                },
-                now,
-            );
-            changes.append_event(
-                FactEvent::SteerApplied {
-                    session: metadata.clone(),
-                    run_id,
-                    item_id: item.id,
-                    message_id: node.id,
-                },
-                now,
-            );
-            applied.push(node.id);
-        }
-        move_leaf_to_last_steer(&mut changes, &mut session, &layout, metadata, now);
-        self.commit(&changes).await?;
-        Ok(applied)
+        self.command(id, async |command| {
+            let items = self.storage.pending_steer_items(id).await?;
+            if items.is_empty() {
+                return Ok(Vec::new());
+            }
+            let layout = self.layout_pending_steers(id, &items, Some(run_id)).await?;
+            let now = command.now();
+            rebind_changed(command, id, &layout, now);
+            let mut applied = Vec::new();
+            for (item, node) in items.iter().zip(&layout.steers) {
+                command.changes().bind_message_run(node.id, run_id);
+                command.changes().delete_queue_item(id.clone(), item.id);
+                command.changes().append_event(
+                    FactEvent::QueueItemRemoved {
+                        session_id: id.clone(),
+                        item_id: item.id,
+                    },
+                    now,
+                );
+                command.changes().append_event(
+                    FactEvent::SteerApplied {
+                        session_id: id.clone(),
+                        run_id,
+                        item_id: item.id,
+                        message_id: node.id,
+                    },
+                    now,
+                );
+                applied.push(node.id);
+            }
+            move_leaf_to_last_steer(command, &layout);
+            Ok(applied)
+        })
+        .await
     }
 
     /// run 结束时仍未消费的插话降级为普通排队项。
@@ -220,47 +176,34 @@ impl Store {
         &self,
         id: &SessionId,
     ) -> Result<Vec<QueueItem>, StoreError> {
-        let _line = self.line.lock().await;
-        let mut session = self.find_session(id).await?;
-        let items = self.storage.pending_steer_items(id).await?;
-        if items.is_empty() {
-            return Ok(Vec::new());
-        }
-        let pending = self.storage.queue_length(id).await?;
-        let busy = self.storage.busy(id).await?;
-        let metadata = session.metadata(pending, busy);
-        let layout = self.layout_pending_steers(id, &items, None).await?;
-        let now = now_millis();
-        let mut changes = Changeset::new();
-        for node in &layout.changed {
-            changes.rebind_message_parent(node.id, node.parent_id);
-            changes.append_event(
-                FactEvent::MessageUpdated {
-                    session: metadata.clone(),
-                    message: node.skeleton(),
-                },
-                now,
-            );
-        }
-        let mut downgraded = Vec::new();
-        for (item, _node) in items.iter().zip(&layout.steers) {
-            changes.clear_pending_steer(id.clone(), item.id);
-            let item = QueueItem {
-                pending_steer: false,
-                ..item.clone()
-            };
-            changes.append_event(
-                FactEvent::SteerDowngraded {
-                    session: metadata.clone(),
-                    item: item.clone(),
-                },
-                now,
-            );
-            downgraded.push(item);
-        }
-        move_leaf_to_last_steer(&mut changes, &mut session, &layout, metadata, now);
-        self.commit(&changes).await?;
-        Ok(downgraded)
+        self.command(id, async |command| {
+            let items = self.storage.pending_steer_items(id).await?;
+            if items.is_empty() {
+                return Ok(Vec::new());
+            }
+            let layout = self.layout_pending_steers(id, &items, None).await?;
+            let now = command.now();
+            rebind_changed(command, id, &layout, now);
+            let mut downgraded = Vec::new();
+            for (item, _node) in items.iter().zip(&layout.steers) {
+                command.changes().clear_pending_steer(id.clone(), item.id);
+                let item = QueueItem {
+                    pending_steer: false,
+                    ..item.clone()
+                };
+                command.changes().append_event(
+                    FactEvent::SteerDowngraded {
+                        session_id: id.clone(),
+                        item: item.clone(),
+                    },
+                    now,
+                );
+                downgraded.push(item);
+            }
+            move_leaf_to_last_steer(command, &layout);
+            Ok(downgraded)
+        })
+        .await
     }
 
     /// 删除尚未开始的队列项。
@@ -281,21 +224,22 @@ impl Store {
         id: &SessionId,
         item_id: QueueItemId,
     ) -> Result<(), StoreError> {
-        let _line = self.line.lock().await;
-        self.find_session(id).await?;
-        if self.storage.queue_item(id, item_id).await?.is_none() {
-            return Err(StoreError::QueueItemNotFound(id.clone(), item_id));
-        }
-        let mut changes = Changeset::new();
-        changes.delete_queue_item(id.clone(), item_id);
-        changes.append_event(
-            FactEvent::QueueItemRemoved {
-                session_id: id.clone(),
-                item_id,
-            },
-            now_millis(),
-        );
-        self.commit(&changes).await.map(|_| ())
+        self.command(id, async |command| {
+            if self.storage.queue_item(id, item_id).await?.is_none() {
+                return Err(StoreError::QueueItemNotFound(id.clone(), item_id));
+            }
+            let now = command.now();
+            command.changes().delete_queue_item(id.clone(), item_id);
+            command.changes().append_event(
+                FactEvent::QueueItemRemoved {
+                    session_id: id.clone(),
+                    item_id,
+                },
+                now,
+            );
+            Ok(())
+        })
+        .await
     }
 
     /// 计算插话在链上的新位置。
@@ -394,31 +338,41 @@ fn ancestor(
     None
 }
 
-/// 把 active leaf 移到最后一个插话。叶子没变时什么都不写。
-fn move_leaf_to_last_steer(
-    changes: &mut Changeset,
-    session: &mut SessionRecord,
+/// 登记插话重排：被拆出的子节点改写父节点，并写 `message_updated`。
+fn rebind_changed(
+    command: &mut SessionCommand<'_>,
+    session: &SessionId,
     layout: &SteerLayout,
-    metadata: SessionMetadata,
     now: i64,
 ) {
+    for node in &layout.changed {
+        command
+            .changes()
+            .rebind_message_parent(node.id, node.parent_id);
+        command.changes().append_event(
+            FactEvent::MessageUpdated {
+                session_id: session.clone(),
+                message: node.skeleton(),
+            },
+            now,
+        );
+    }
+}
+
+/// 把 active leaf 移到最后一个插话。叶子没变时什么都不写。
+fn move_leaf_to_last_steer(command: &mut SessionCommand<'_>, layout: &SteerLayout) {
     let Some(leaf) = layout.steers.last().map(|node| node.id) else {
         return;
     };
-    if Some(leaf) == session.active_leaf {
+    if Some(leaf) == command.session().active_leaf {
         return;
     }
-    session.updated_at = now;
-    changes.update_session(
-        session.id.clone(),
-        session.title.clone(),
-        session.title_auto,
-        now,
-        Some(leaf),
-    );
-    changes.append_event(
+    let session_id = command.session().id.clone();
+    let now = command.now();
+    command.session_mut().active_leaf = Some(leaf);
+    command.changes().append_event(
         FactEvent::ActiveLeafChanged {
-            session: metadata,
+            session_id,
             active_leaf: Some(leaf),
         },
         now,

@@ -1,5 +1,5 @@
-//! 存储层的对外快照结构，以及 SQLite 子模块入口。
-//! 写命令包装在 `store`。
+//! 存储层的快照结构与 SQLite 子模块入口：命令入口用的轻量快照与读取用的完整快照。
+//! 写命令入口在 `store/command`。
 
 pub(crate) mod sqlite;
 
@@ -17,12 +17,20 @@ pub struct Snapshot {
     pub max_event_id: i64,
 }
 
-/// 单个 session 的持久快照：记录、消息树、队列与队列长度。
+/// 单个 session 的轻量快照：记录、队列长度与是否有 running 的 run。
+///
+/// 命令入口只读它：全量快照会加载全部消息，写热路径不能承担。
+#[derive(Debug, Clone)]
+pub(crate) struct SessionHead {
+    pub session: SessionRecord,
+    pub queue_length: u32,
+    pub busy: bool,
+}
+
+/// 单个 session 的完整快照：轻量快照、消息树、队列与 run 列表。
 #[derive(Debug, Clone)]
 pub(crate) struct SessionSnapshot {
-    pub session: SessionRecord,
-    pub busy: bool,
-    pub queue_length: u32,
+    pub head: SessionHead,
     pub messages: Vec<MessageSkeleton>,
     pub queue: Vec<QueueItem>,
     pub runs: Vec<RunRecord>,

@@ -21,6 +21,27 @@ pub(crate) async fn connect(database: &Path) -> sqlx::SqliteConnection {
         .expect("打开 SQLite")
 }
 
+/// 已记录的事实事件与其信封上的 session 视图。
+pub(crate) struct RecordedFact {
+    pub event: agent::FactEvent,
+    pub session: Option<agent::SessionMetadata>,
+}
+
+pub(crate) async fn recorded_facts(database: &Path) -> Vec<RecordedFact> {
+    sqlx::query("SELECT session, event FROM event ORDER BY id")
+        .fetch_all(&mut connect(database).await)
+        .await
+        .expect("查询事件")
+        .iter()
+        .map(|row| RecordedFact {
+            event: serde_json::from_str(&row.get::<String, _>("event")).expect("解析事件"),
+            session: row
+                .get::<Option<String>, _>("session")
+                .map(|session| serde_json::from_str(&session).expect("解析 session 视图")),
+        })
+        .collect()
+}
+
 pub(crate) async fn recorded_event_ids(database: &Path) -> Vec<i64> {
     sqlx::query_scalar("SELECT id FROM event ORDER BY id")
         .fetch_all(&mut connect(database).await)

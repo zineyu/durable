@@ -1,6 +1,6 @@
 # ADR 0013: 队列项与自动标题
 
-- 状态：已接受
+- 状态：已接受。事实事件形状与「客户端递减队列长度」由 ADR 0042 取代
 - 日期：2026-10-24
 
 ## 背景
@@ -17,7 +17,7 @@
 
 **队列长度是派生值**。`SessionMetadata.queue_length` 由 `queue_item` 计数得到，`busy` 在 run 切片前保持 false。删除 session 时 `queue_item` 由外键 `ON DELETE CASCADE` 一并删除。
 
-**新事件**：`message_queued { session, item }` 与 `queue_item_removed { sessionId, itemId }`。前者携带更新后的 session 元数据；后者由客户端 reducer 递减队列长度。
+**新事件**：`message_queued { session, item }` 与 `queue_item_removed { sessionId, itemId }`。前者携带更新后的 session 元数据；后者由客户端 reducer 递减队列长度（ADR 0042 起改为读取事件信封的队列长度）。
 
 ## 后果
 

@@ -8,7 +8,7 @@ use reqwest::StatusCode;
 mod support;
 
 use support::provider::ToolCallSpec;
-use support::{Harness, Script, error_code, recorded_events};
+use support::{Harness, Script, error_code, recorded_facts};
 
 /// 消息树中 root 到 active leaf 的节点 id。
 fn transcript_ids(tree: &agent::SessionTree) -> Vec<agent::MessageId> {
@@ -327,19 +327,19 @@ async fn records_active_leaf_change_and_survives_restart() {
 
     harness.switch_active_leaf(&session.id, original_user).await;
 
-    let events = recorded_events(&harness.database).await;
-    let event = events
+    let facts = recorded_facts(&harness.database).await;
+    let fact = facts
         .iter()
         .rev()
-        .find(|event| matches!(event, agent::FactEvent::ActiveLeafChanged { .. }))
+        .find(|fact| matches!(fact.event, agent::FactEvent::ActiveLeafChanged { .. }))
         .expect("记录了 active leaf 变更");
-    let agent::FactEvent::ActiveLeafChanged {
-        active_leaf,
-        session: recorded,
-    } = event
-    else {
+    let agent::FactEvent::ActiveLeafChanged { active_leaf, .. } = &fact.event else {
         panic!("事件是 active_leaf_changed");
     };
+    let recorded = fact
+        .session
+        .as_ref()
+        .expect("active leaf 变更带 session 视图");
     assert_eq!(*active_leaf, Some(original_assistant));
     assert_eq!(recorded.id, session.id);
 
@@ -375,6 +375,7 @@ async fn rejects_branch_commands_while_running() {
 
     harness.submit_message(&session.id, "运行中").await;
     harness.wait_busy(&session.id).await;
+    harness.wait_for_requests(2).await;
 
     for response in [
         harness.edit_message(&session.id, user, "改写").await,
@@ -412,6 +413,7 @@ async fn rejects_branch_commands_with_pending_queue() {
     harness
         .wait_for_tree(&session.id, |tree| !tree.queue.is_empty())
         .await;
+    harness.wait_for_requests(2).await;
 
     for response in [
         harness.edit_message(&session.id, user, "改写").await,

@@ -118,8 +118,26 @@ function loaded(): ClientState {
   });
 }
 
-function fact(node: string, hubSeq: number, id: number, event: FactEvent): HubStreamEvent {
-  return { type: 'fact', hubSeq, node, id, sessionId: null, timestamp: id, event };
+function fact(
+  node: string,
+  hubSeq: number,
+  id: number,
+  event: FactEvent,
+  session: SessionMetadata | null = null,
+): HubStreamEvent {
+  if (session !== null && 'sessionId' in event && event.sessionId !== session.id) {
+    throw new Error('夹具的 sessionId 必须与信封的 session 一致');
+  }
+  return {
+    type: 'fact',
+    hubSeq,
+    node,
+    id,
+    sessionId: session === null ? null : session.id,
+    session,
+    timestamp: id,
+    event,
+  };
 }
 
 function streamed(state: ClientState, event: HubStreamEvent): ClientState {
@@ -342,10 +360,7 @@ describe('侧栏状态', () => {
 
     const withSession = streamed(
       registered,
-      fact(nodeA, 9, 101, {
-        kind: 'session_created',
-        session: session('s-2', '/work/b', 200),
-      }),
+      fact(nodeA, 9, 101, { sessionId: 's-2', kind: 'session_created' }, session('s-2', '/work/b', 200)),
     );
     const removed = streamed(
       withSession,
@@ -361,10 +376,7 @@ describe('侧栏状态', () => {
 
     const renamed = streamed(
       state,
-      fact(nodeA, 8, 108, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/a', 300, { title: '新标题' }),
-      }),
+      fact(nodeA, 8, 108, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 300, { title: '新标题' })),
     );
     expect(sidebarWorkspaces(shardOf(renamed, nodeA))[0]?.sessions[0]).toEqual({
       id: toSessionId('s-1'),
@@ -394,10 +406,31 @@ describe('侧栏状态', () => {
 
     const next = streamed(
       state,
-      fact(nodeA, 8, 108, { kind: 'queue_item_removed', sessionId: 's-1', itemId: 5 }),
+      fact(
+        nodeA,
+        8,
+        108,
+        { kind: 'queue_item_removed', sessionId: 's-1', itemId: 5 },
+        session('s-1', '/work/a', 108, { queueLength: 0 }),
+      ),
     );
     expect(shardOf(next, nodeA).sessions[0]?.queueLength).toBe(0);
     expect(sessionQueue(shardOf(next, nodeA), 's-1')).toEqual([]);
+  });
+
+  it('迁移前的队列项移除没有 session 视图时只删队列项', () => {
+    const state = withTree(loaded(), nodeA, {
+      ...tree('s-1', 7, null, []),
+      session: session('s-1', '/work/a', 100, { queueLength: 1 }),
+      queue: [{ id: 5, text: '排队', anchor: null, createdAt: 5, pendingSteer: false }],
+    });
+
+    const next = streamed(
+      state,
+      fact(nodeA, 8, 108, { kind: 'queue_item_removed', sessionId: 's-1', itemId: 5 }),
+    );
+    expect(sessionQueue(shardOf(next, nodeA), 's-1')).toEqual([]);
+    expect(shardOf(next, nodeA).sessions[0]?.queueLength).toBe(1);
   });
 
   it('插话入队后标记待插入，降级后清除标记', () => {
@@ -407,10 +440,10 @@ describe('侧栏状态', () => {
     const queued = streamed(
       state,
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'message_queued',
-        session: session('s-1', '/work/a', 300, { busy: true, queueLength: 1 }),
         item: steer,
-      }),
+      }, session('s-1', '/work/a', 300, { busy: true, queueLength: 1 })),
     );
     expect(sessionQueue(shardOf(queued, nodeA), 's-1')).toEqual([steer]);
     expect(shardOf(queued, nodeA).sessions[0]?.queueLength).toBe(1);
@@ -418,22 +451,22 @@ describe('侧栏状态', () => {
     const applied = streamed(
       queued,
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'steer_applied',
-        session: session('s-1', '/work/a', 310, { busy: true, queueLength: 0 }),
         runId: 1,
         itemId: 5,
         messageId: 3,
-      }),
+      }, session('s-1', '/work/a', 310, { busy: true, queueLength: 0 })),
     );
     expect(shardOf(applied, nodeA).sessions[0]?.queueLength).toBe(0);
 
     const downgraded = streamed(
       queued,
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'steer_downgraded',
-        session: session('s-1', '/work/a', 310, { queueLength: 1 }),
         item: { ...steer, pendingSteer: false },
-      }),
+      }, session('s-1', '/work/a', 310, { queueLength: 1 })),
     );
     expect(sessionQueue(shardOf(downgraded, nodeA), 's-1')).toEqual([
       { ...steer, pendingSteer: false },
@@ -474,10 +507,10 @@ describe('transcript 推导', () => {
     const switched = streamed(
       state,
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'active_leaf_changed',
-        session: session('s-1', '/work/a', 200),
         activeLeaf: 2,
-      }),
+      }, session('s-1', '/work/a', 200)),
     );
     expect(transcriptNodes(shardOf(switched, nodeA), 's-1').map((entry) => entry.id)).toEqual([
       1, 2,
@@ -588,10 +621,10 @@ describe('正文缓存', () => {
     const updated = streamed(
       withBodies,
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'message_updated',
-        session: session('s-1', '/work/a', 200),
         message: message(3, 2, 'tool', { parts: parts(['tool_result']) }),
-      }),
+      }, session('s-1', '/work/a', 200)),
     );
     const shard = shardOf(updated, nodeA);
 
@@ -629,10 +662,10 @@ describe('正文缓存', () => {
     const invalidated = streamed(
       requested,
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'message_updated',
-        session: session('s-1', '/work/a', 200),
         message: message(2, 1, 'tool', { parts: parts(['tool_result']) }),
-      }),
+      }, session('s-1', '/work/a', 200)),
     );
     const late = reduce(invalidated, {
       type: 'bodies',
@@ -737,16 +770,16 @@ describe('流式增量与占位节点', () => {
       streamed(
         streaming,
         fact(nodeA, 9, 109, {
+          sessionId: 's-1',
           kind: 'message_appended',
-          session: session('s-1', '/work/a', 200, { busy: true }),
           message: message(9, 1, 'assistant', { runId: 1, parts: parts(['text']) }),
-        }),
+        }, session('s-1', '/work/a', 200, { busy: true })),
       ),
       fact(nodeA, 10, 110, {
+        sessionId: 's-1',
         kind: 'active_leaf_changed',
-        session: session('s-1', '/work/a', 210, { busy: true }),
         activeLeaf: 9,
-      }),
+      }, session('s-1', '/work/a', 210, { busy: true })),
     );
 
     expect(placeholdersOf(shardOf(appended, nodeA), 's-1')).toEqual([]);
@@ -765,10 +798,10 @@ describe('流式增量与占位节点', () => {
     let state = streamed(
       asked(),
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'run_started',
-        session: session('s-1', '/work/a', 200, { busy: true }),
         run: running,
-      }),
+      }, session('s-1', '/work/a', 200, { busy: true })),
     );
     state = streamed(state, delta(nodeA, 's-1', 9, '被打断的回答。'));
     expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toHaveLength(1);
@@ -776,10 +809,10 @@ describe('流式增量与占位节点', () => {
     state = streamed(
       state,
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'run_finished',
-        session: session('s-1', '/work/a', 300),
         run: { ...running, status: 'cancelled', updatedAt: 300 },
-      }),
+      }, session('s-1', '/work/a', 300)),
     );
     expect(placeholdersOf(shardOf(state, nodeA), 's-1')).toEqual([]);
   });
@@ -822,10 +855,10 @@ describe('流式增量与占位节点', () => {
         message(2, 1, 'assistant', { runId: 1 }),
       ])),
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'run_started',
-        session: session('s-1', '/work/a', 200, { busy: true }),
         run,
-      }),
+      }, session('s-1', '/work/a', 200, { busy: true })),
     );
     const assistant = at(shardOf(state, nodeA).trees['s-1']?.nodes ?? [], 1);
     expect(messageView(shardOf(state, nodeA), 's-1', assistant)).toEqual({
@@ -836,15 +869,15 @@ describe('流式增量与占位节点', () => {
     state = streamed(
       state,
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'run_finished',
-        session: session('s-1', '/work/a', 300),
         run: {
           ...run,
           status: 'failed',
           failure: { code: 'model_upstream', message: '上游 502' },
           updatedAt: 300,
         },
-      }),
+      }, session('s-1', '/work/a', 300)),
     );
     expect(messageView(shardOf(state, nodeA), 's-1', assistant)).toEqual({
       state: 'failed',
@@ -862,10 +895,7 @@ describe('分片隔离', () => {
 
   it('重复到达的事实只应用一次', () => {
     const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
-    const event = fact(nodeA, 8, 108, {
-      kind: 'session_renamed',
-      session: session('s-1', '/work/a', 200, { title: '改名' }),
-    });
+    const event = fact(nodeA, 8, 108, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 200, { title: '改名' }));
 
     const once = streamed(state, event);
     const twice = streamed(once, event);
@@ -876,17 +906,11 @@ describe('分片隔离', () => {
   it('乱序到达的旧事实不改变已有状态', () => {
     const newer = streamed(
       loaded(),
-      fact(nodeA, 8, 110, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/a', 300, { title: '新' }),
-      }),
+      fact(nodeA, 8, 110, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 300, { title: '新' })),
     );
     const older = streamed(
       newer,
-      fact(nodeA, 9, 105, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/a', 200, { title: '旧' }),
-      }),
+      fact(nodeA, 9, 105, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 200, { title: '旧' })),
     );
 
     expect(shardOf(older, nodeA).sessions[0]?.title).toBe('新');
@@ -916,15 +940,9 @@ describe('分片隔离', () => {
     const state = streamed(
       streamed(
         before,
-        fact(nodeA, 8, 108, {
-          kind: 'session_created',
-          session: session('s-2', '/work/a', 200),
-        }),
+        fact(nodeA, 8, 108, { sessionId: 's-2', kind: 'session_created' }, session('s-2', '/work/a', 200)),
       ),
-      fact(nodeB, 9, 208, {
-        kind: 'session_created',
-        session: session('s-3', '/work/b', 400),
-      }),
+      fact(nodeB, 9, 208, { sessionId: 's-3', kind: 'session_created' }, session('s-3', '/work/b', 400)),
     );
 
     expect(shardOf(state, nodeA).sessions.map((entry) => entry.id)).toEqual(['s-1', 's-2']);
@@ -945,10 +963,7 @@ describe('分片隔离', () => {
     });
     const advanced = streamed(
       ok,
-      fact(nodeA, 6, 108, {
-        kind: 'session_created',
-        session: session('s-1', '/work/a', 108),
-      }),
+      fact(nodeA, 6, 108, { sessionId: 's-1', kind: 'session_created' }, session('s-1', '/work/a', 108)),
     );
 
     expect(advanced.nodes[nodeA]).toBeUndefined();
@@ -976,17 +991,11 @@ describe('分片隔离', () => {
     const state = loaded();
     const once = streamed(
       state,
-      fact(nodeA, 8, 108, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/a', 200, { title: '新' }),
-      }),
+      fact(nodeA, 8, 108, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 200, { title: '新' })),
     );
     const replayed = streamed(
       once,
-      fact(nodeB, 8, 208, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/b', 400, { title: '串写' }),
-      }),
+      fact(nodeB, 8, 208, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/b', 400, { title: '串写' })),
     );
 
     expect(replayed).toBe(once);
@@ -1123,16 +1132,16 @@ describe('快照水位与回放恢复', () => {
       streamed(
         loaded(),
         fact(nodeA, 8, 108, {
+          sessionId: 's-1',
           kind: 'message_appended',
-          session: session('s-1', '/work/a', 108),
           message: question,
-        }),
+        }, session('s-1', '/work/a', 108)),
       ),
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'message_appended',
-        session: session('s-1', '/work/a', 109),
         message: answer,
-      }),
+      }, session('s-1', '/work/a', 109)),
     );
     expect(shardOf(appended, nodeA).lastEventId).toBe(109);
 
@@ -1148,10 +1157,7 @@ describe('快照水位与回放恢复', () => {
   it('tree 快照水位高于分片水位时不推进水位', () => {
     const state = streamed(
       loaded(),
-      fact(nodeA, 8, 108, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/a', 108, { title: '新' }),
-      }),
+      fact(nodeA, 8, 108, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 108, { title: '新' })),
     );
     const landed = withTree(state, nodeA, tree('s-1', 400, null, []));
 
@@ -1162,10 +1168,7 @@ describe('快照水位与回放恢复', () => {
   it('一个节点的快照不改变另一节点的分片', () => {
     const state = streamed(
       loaded(),
-      fact(nodeB, 8, 308, {
-        kind: 'session_renamed',
-        session: session('s-1', '/work/b', 308, { title: 'B 改名' }),
-      }),
+      fact(nodeB, 8, 308, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/b', 308, { title: 'B 改名' })),
     );
     const landed = withTree(state, nodeA, tree('s-1', 7, null, []));
 
@@ -1178,26 +1181,26 @@ describe('快照水位与回放恢复', () => {
     let replayed = streamed(
       base,
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'message_appended',
-        session: session('s-1', '/work/a', 108),
         message: question,
-      }),
+      }, session('s-1', '/work/a', 108)),
     );
     replayed = streamed(
       replayed,
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'message_appended',
-        session: session('s-1', '/work/a', 109),
         message: answer,
-      }),
+      }, session('s-1', '/work/a', 109)),
     );
     replayed = streamed(
       replayed,
       fact(nodeA, 10, 110, {
+        sessionId: 's-1',
         kind: 'active_leaf_changed',
-        session: session('s-1', '/work/a', 110),
         activeLeaf: 2,
-      }),
+      }, session('s-1', '/work/a', 110)),
     );
 
     const snapshot = withTree(base, nodeA, tree('s-1', 110, 2, [question, answer]));
@@ -1210,15 +1213,15 @@ describe('快照水位与回放恢复', () => {
   it('加载快照后重放新事实等于从零构建', () => {
     const base = loaded();
     const append = fact(nodeA, 8, 108, {
+      sessionId: 's-1',
       kind: 'message_appended',
-      session: session('s-1', '/work/a', 108),
       message: question,
-    });
+    }, session('s-1', '/work/a', 108));
     const leaf = fact(nodeA, 9, 109, {
+      sessionId: 's-1',
       kind: 'active_leaf_changed',
-      session: session('s-1', '/work/a', 109),
       activeLeaf: 1,
-    });
+    }, session('s-1', '/work/a', 109));
 
     const live = streamed(streamed(base, append), leaf);
     const landed = withTree(live, nodeA, tree('s-1', 107, null, []));
@@ -1295,10 +1298,10 @@ describe('供应商限流重试', () => {
     return streamed(
       state,
       fact(nodeA, 8, 108, {
+        sessionId: 's-1',
         kind: 'run_started',
-        session: session('s-1', '/work/a', 200, { busy: true }),
         run: runningRun,
-      }),
+      }, session('s-1', '/work/a', 200, { busy: true })),
     );
   }
 
@@ -1349,15 +1352,15 @@ describe('供应商限流重试', () => {
     const finished = streamed(
       retrying,
       fact(nodeA, 9, 109, {
+        sessionId: 's-1',
         kind: 'run_finished',
-        session: session('s-1', '/work/a', 300),
         run: {
           ...runningRun,
           status: 'failed',
           failure: { code: 'model_rate_limited', message: '模型返回非成功状态 429: 限流' },
           updatedAt: 300,
         },
-      }),
+      }, session('s-1', '/work/a', 300)),
     );
 
     expect(shardOf(finished, nodeA).retries['s-1']).toBeUndefined();

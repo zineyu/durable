@@ -318,11 +318,12 @@ fn dispatch(
         StreamEvent::Fact {
             id,
             session_id,
+            session,
             timestamp,
             event,
         } => {
             *last_id = Some(id);
-            bus.node_fact(name.clone(), id, session_id, timestamp, event)?;
+            bus.node_fact(name.clone(), id, session_id, session, timestamp, event)?;
         }
         StreamEvent::Delta {
             session_id,

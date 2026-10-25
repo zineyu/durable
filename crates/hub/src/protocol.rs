@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// hub 对浏览器的协议版本。任何不兼容的协议改动都递增它。
-pub const HUB_PROTOCOL_VERSION: u32 = 4;
+///
+/// 5：事实事件的信封新增 `session`，载荷不再带 `session`。
+pub const HUB_PROTOCOL_VERSION: u32 = 5;
 
 /// hub 期望的 agent 协议版本。与 `agent::PROTOCOL_VERSION` 由测试保持一致。
-pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 4;
+pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -144,6 +146,8 @@ pub enum HubStreamEvent {
         #[ts(type = "number")]
         id: i64,
         session_id: Option<SessionId>,
+        /// 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
+        session: Option<durable::SessionMetadata>,
         #[ts(type = "number")]
         timestamp: i64,
         event: FactEvent,

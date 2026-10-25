@@ -174,6 +174,35 @@ async fn bootstrap_watermark_precedes_node_requests() {
     );
 }
 
+/// 事实信封的 session 视图随合并流原样到达客户端。
+#[tokio::test]
+async fn forwards_session_view_of_fact_envelope() {
+    let harness = Harness::start().await;
+    let node = ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    let before = harness.bootstrap().await.max_hub_seq;
+    let view = durable::SessionMetadata {
+        id: durable::SessionId::parse("s1").expect("合法 session id"),
+        workspace: durable::WorkspacePath::parse("/work").expect("合法 workspace 路径"),
+        title: durable::SessionTitle::parse("标题").expect("合法标题"),
+        busy: true,
+        queue_length: 2,
+        updated_at: 7,
+    };
+    node.publish_fact_with_view(9, view.clone(), fact());
+    harness.wait_for_seq_after(before).await;
+
+    let mut stream = EventStream::connect(&harness, before).await;
+    let event = stream.next_matching(is_fact).await;
+    let hub::HubStreamEvent::Fact { session, .. } = event else {
+        panic!("不是事实事件");
+    };
+    assert_eq!(session, Some(view), "信封的 session 视图必须原样转发");
+}
+
 fn seq_of(event: &hub::HubStreamEvent) -> u64 {
     match event {
         hub::HubStreamEvent::Fact { hub_seq, .. }

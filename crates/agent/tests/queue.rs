@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script, connect, error_code, recorded_events};
+use support::{Harness, Script, connect, error_code, recorded_facts};
 
 fn queue_texts(tree: &agent::SessionTree) -> Vec<&str> {
     tree.queue.iter().map(|item| item.text.as_str()).collect()
@@ -59,17 +59,6 @@ async fn wait_for_busy_count(
     panic!("同时运行的 run 未达到 {count} 个")
 }
 
-/// 等待脚本化 provider 收到至少 `count` 次请求，用于确定脚本已被取走。
-async fn wait_for_requests(harness: &Harness, count: usize) {
-    for _ in 0..500 {
-        if harness.provider.requests().len() >= count {
-            return;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    panic!("provider 未收到 {count} 次请求")
-}
-
 /// 规格「调度与会话状态」：run 进行中提交的消息留在队列，不打断当前 run。
 #[tokio::test]
 async fn queues_messages_behind_running_run() {
@@ -92,6 +81,7 @@ async fn queues_messages_behind_running_run() {
         .expect("解析队列项");
 
     let running = harness.wait_busy(&session.id).await;
+    harness.wait_for_requests(1).await;
     assert_eq!(running.queue, vec![second.clone(), third.clone()]);
     assert_eq!(running.session.queue_length, 2);
     assert_eq!(queue_texts(&running), vec!["第二条", "第三条"]);
@@ -141,7 +131,7 @@ async fn continues_queue_after_restart() {
     harness.submit_message(&session.id, "重启前 A").await;
     harness.submit_message(&session.id, "重启前 B").await;
     harness.wait_busy(&session.id).await;
-    wait_for_requests(&harness, 1).await;
+    harness.wait_for_requests(1).await;
 
     harness.provider.push(Script::Text("A 完成".into()));
     harness.provider.push(Script::Text("B 完成".into()));
@@ -251,6 +241,7 @@ async fn deletes_running_session_with_its_queue() {
     harness.submit_message(&session.id, "运行中").await;
     harness.submit_message(&session.id, "排队中").await;
     harness.wait_busy(&session.id).await;
+    harness.wait_for_requests(1).await;
 
     let response = harness.delete_session(&session.id).await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
@@ -299,24 +290,22 @@ async fn records_message_queued_event() {
         .await
         .expect("解析队列项");
 
-    let event = recorded_events(&harness.database)
+    let fact = recorded_facts(&harness.database)
         .await
         .into_iter()
-        .find(|event| matches!(event, agent::FactEvent::MessageQueued { .. }))
+        .find(|fact| matches!(fact.event, agent::FactEvent::MessageQueued { .. }))
         .expect("记录了入队事件");
-    let agent::FactEvent::MessageQueued {
-        session: recorded,
-        item: queued,
-    } = event
-    else {
+    let agent::FactEvent::MessageQueued { item: queued, .. } = fact.event else {
         panic!("事件是 message_queued");
     };
+    let recorded = fact.session.expect("入队事件带 session 视图");
     assert_eq!(queued, item);
     assert_eq!(recorded.id, session.id);
     assert_eq!(recorded.title.as_str(), "记录事件");
     assert_eq!(recorded.updated_at, item.created_at);
 
     harness.wait_busy(&session.id).await;
+    harness.wait_for_requests(1).await;
     harness.cancel_run(&session.id).await;
     harness.wait_idle(&session.id).await;
 }

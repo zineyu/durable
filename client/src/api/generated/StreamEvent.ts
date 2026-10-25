@@ -3,11 +3,16 @@ import type { DeltaKind } from "./DeltaKind";
 import type { FactEvent } from "./FactEvent";
 import type { ResyncReason } from "./ResyncReason";
 import type { SessionId } from "./SessionId";
+import type { SessionMetadata } from "./SessionMetadata";
 
 /**
  * 事件流的统一载荷：已持久化的事实事件与仅实时传输的 token 增量。
  */
-export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, 
+export type StreamEvent = { "type": "fact", id: number, sessionId: SessionId | null, 
+/**
+ * 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
+ */
+session: SessionMetadata | null, timestamp: number, event: FactEvent, } | { "type": "delta", sessionId: SessionId, 
 /**
  * 该步定型后使用的消息 id；客户端据此建本地占位节点。
  */

@@ -14,6 +14,7 @@ use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
+use crate::storage::SessionHead;
 use crate::workspace::WorkspaceMetadata;
 
 pub(super) fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
@@ -56,6 +57,14 @@ pub(super) fn parse_session(row: &SqliteRow) -> Result<SessionRecord, StoreError
             .map(MessageId::parse)
             .transpose()
             .map_err(|error| corrupted("session.active_leaf", error))?,
+    })
+}
+
+pub(super) fn parse_session_head(row: &SqliteRow) -> Result<SessionHead, StoreError> {
+    Ok(SessionHead {
+        session: parse_session(row)?,
+        queue_length: parse_queue_length(row)?,
+        busy: parse_busy(row),
     })
 }
 
