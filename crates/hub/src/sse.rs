@@ -72,6 +72,7 @@ fn sse_event(event: &HubStreamEvent) -> Result<Event, ApiError> {
         HubStreamEvent::Fact { hub_seq, .. }
         | HubStreamEvent::NodeRegistered { hub_seq, .. }
         | HubStreamEvent::NodeRemoved { hub_seq, .. }
+        | HubStreamEvent::NodeUpdated { hub_seq, .. }
         | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => {
             Event::default().id(hub_seq.to_string()).data(data)
         }
@@ -147,6 +148,7 @@ mod tests {
             HubStreamEvent::Fact { hub_seq, .. }
             | HubStreamEvent::NodeRegistered { hub_seq, .. }
             | HubStreamEvent::NodeRemoved { hub_seq, .. }
+            | HubStreamEvent::NodeUpdated { hub_seq, .. }
             | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
             HubStreamEvent::Delta { .. }
             | HubStreamEvent::Retry { .. }

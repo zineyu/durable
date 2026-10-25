@@ -6,4 +6,16 @@ import type { NodeStatus } from "./NodeStatus";
 /**
  * 侧栏与 bootstrap 看到的单个节点。`bootstrap` 只有 `ok` 的节点才有。
  */
-export type NodeSnapshot = { name: NodeName, url: string, status: NodeStatus, detail: string | null, bootstrap: BootstrapResponse | null, };
+export type NodeSnapshot = { name: NodeName, url: string, 
+/**
+ * 停用的节点不建上游订阅，命令一律返回不可用。
+ */
+enabled: boolean, status: NodeStatus, detail: string | null, 
+/**
+ * 最后一条事实事件自带的时间戳。进程内计数，不落库。
+ */
+lastEventAt: number | null, 
+/**
+ * 最近一次 health 的往返延迟。进程内计数，不落库。
+ */
+latencyMs: number | null, bootstrap: BootstrapResponse | null, };

@@ -21,7 +21,9 @@ pub(super) fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
         name: NodeName::parse(&row.get::<String, _>("name"))
             .map_err(|error| corrupted("node.name", error))?,
         url: row.get("url"),
+        enabled: row.get("enabled"),
         created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
     })
 }
 

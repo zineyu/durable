@@ -22,4 +22,4 @@ maxAttempts: number,
 /**
  * 本次等待时长。
  */
-delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };
+delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_updated", hubSeq: number, node: NodeMetadata, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };

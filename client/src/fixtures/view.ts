@@ -4,11 +4,12 @@ import type { NodeRecord, QueueItem, WorkspaceSummary } from '../view/types';
 export const modelName = 'gpt-5-codex';
 
 export const nodes: NodeRecord[] = [
-  { name: 'macbook-air-01', url: 'http://127.0.0.1:8081', status: 'ok', detail: null },
-  { name: 'macbook-air-02', url: 'http://127.0.0.1:9081', status: 'ok', detail: null },
+  { name: 'macbook-air-01', url: 'http://127.0.0.1:8081', enabled: true, status: 'ok', detail: null },
+  { name: 'macbook-air-02', url: 'http://127.0.0.1:9081', enabled: true, status: 'ok', detail: null },
   {
     name: 'studio',
     url: 'http://127.0.0.1:10081',
+    enabled: true,
     status: 'unreachable',
     detail: '连接节点失败: 隧道已断开',
   },
@@ -17,6 +18,7 @@ export const nodes: NodeRecord[] = [
 export const unreachableNode: NodeRecord = {
   name: 'studio',
   url: 'http://127.0.0.1:10081',
+  enabled: true,
   status: 'unreachable',
   detail: '连接节点失败: 隧道已断开',
 };
@@ -24,6 +26,7 @@ export const unreachableNode: NodeRecord = {
 export const incompatibleNode: NodeRecord = {
   name: 'legacy-lab',
   url: 'http://127.0.0.1:7081',
+  enabled: true,
   status: 'incompatible',
   detail: 'agent 协议版本 0 与 hub 要求的 1 不一致',
 };

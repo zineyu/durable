@@ -136,6 +136,7 @@ function applyBootstrap(state: ClientState, bootstrap: HubBootstrap): ClientStat
       nodes: bootstrap.nodes.map((snapshot) => ({
         name: snapshot.name,
         url: snapshot.url,
+        enabled: snapshot.enabled,
         status: snapshot.status,
         detail: snapshot.detail,
       })),
@@ -195,6 +196,7 @@ export function applyStreamEvent(state: ClientState, event: HubStreamEvent): Cli
         upsertNodeRecord(advanced.hub.nodes, {
           name: event.node.name,
           url: event.node.url,
+          enabled: event.node.enabled,
           status: 'unreachable',
           detail: null,
         }),
@@ -212,6 +214,20 @@ export function applyStreamEvent(state: ClientState, event: HubStreamEvent): Cli
         ),
         nodes: withoutNode(advanced.nodes, event.name),
       };
+    }
+    case 'node_updated': {
+      const advanced = advanceCursor(state, event.hubSeq);
+      if (advanced === null) {
+        return state;
+      }
+      return withNodeRecords(
+        advanced,
+        advanced.hub.nodes.map((record) =>
+          record.name === event.node.name
+            ? { ...record, url: event.node.url, enabled: event.node.enabled }
+            : record,
+        ),
+      );
     }
     case 'node_status_changed': {
       const advanced = advanceCursor(state, event.hubSeq);

@@ -1,11 +1,12 @@
 #![expect(
     clippy::expect_used,
-    reason = "测试脚手架用 expect 直接报告夹具失败：夹具失败必须立刻暴露。"
+    reason = "测试脚手架用 expect 直接报告夹具与断言失败：夹具失败必须立刻暴露。"
 )]
 
 mod support;
 
 use reqwest::StatusCode;
+use support::fixtures::scripted::{EventsMode, ScriptedNode};
 use support::harness::{AgentHandle, Harness};
 
 async fn error_code(response: reqwest::Response) -> hub::HubErrorCode {
@@ -220,4 +221,233 @@ async fn restores_node_table_after_restart() {
     let bootstrap = restarted.bootstrap().await;
     assert_eq!(bootstrap.nodes.len(), 1);
     assert_eq!(bootstrap.nodes[0].name.as_str(), "laptop");
+}
+
+/// 规格 user story H-53：改 URL 保留注册时间，命令立即转发到新地址，客户端收到通知。
+#[tokio::test]
+async fn updates_node_url_and_forwards_to_new_address() {
+    let harness = Harness::start().await;
+    let first = AgentHandle::start().await;
+    let second = AgentHandle::start().await;
+    let mut stream = support::fixtures::EventStream::connect(&harness, 0).await;
+    harness.register_node("laptop", &first.url).await;
+    let registered = stream
+        .next_matching(|event| matches!(event, hub::HubStreamEvent::NodeRegistered { .. }))
+        .await;
+    let created_at = match registered {
+        hub::HubStreamEvent::NodeRegistered { node, .. } => node.created_at,
+        other => panic!("不是节点登记事件: {other:?}"),
+    };
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+
+    let workspace = second.directory.path().join("ws");
+    std::fs::create_dir(&workspace).expect("创建 workspace");
+    let workspace = workspace
+        .canonicalize()
+        .expect("规范化 workspace 路径")
+        .to_str()
+        .expect("临时路径是 UTF-8")
+        .to_owned();
+    let response = reqwest::Client::new()
+        .post(format!("{}/api/workspaces", second.url))
+        .json(&serde_json::json!({ "path": workspace }))
+        .send()
+        .await
+        .expect("注册 workspace");
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let response = harness
+        .update_node("laptop", serde_json::json!({ "url": second.url }))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let updated: hub::NodeSnapshot = response.json().await.expect("解析节点");
+    assert_eq!(
+        updated.name.as_str(),
+        "laptop",
+        "节点名即身份，不随 URL 变化"
+    );
+    assert_eq!(updated.url, second.url);
+
+    let event = stream
+        .next_matching(|event| matches!(event, hub::HubStreamEvent::NodeUpdated { .. }))
+        .await;
+    match event {
+        hub::HubStreamEvent::NodeUpdated { node, .. } => {
+            assert_eq!(node.url, second.url);
+            assert_eq!(node.created_at, created_at, "改 URL 不改变注册时间");
+        }
+        other => panic!("不是节点更新事件: {other:?}"),
+    }
+
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    let bootstrap: agent::BootstrapResponse = reqwest::get(harness.url("/api/n/laptop/bootstrap"))
+        .await
+        .expect("请求新地址的 bootstrap")
+        .json()
+        .await
+        .expect("解析新地址的 bootstrap");
+    assert_eq!(bootstrap.workspaces.len(), 1, "命令必须落在新地址");
+    assert_eq!(bootstrap.workspaces[0].path.as_str(), workspace);
+}
+
+/// 规格 user story H-54 与 H-60：停用保留节点登记、状态与说明，且立即停止上游尝试。
+#[tokio::test]
+async fn disables_node_and_stops_upstream_attempts() {
+    let harness = Harness::start_with_options(fast_options()).await;
+    let node = ScriptedNode::start().await;
+    node.set_events_mode(EventsMode::End);
+    harness.register_node("laptop", &node.url).await;
+    harness
+        .wait_for_status("laptop", hub::NodeStatus::Unreachable)
+        .await;
+
+    let response = harness.set_node_enabled("laptop", false).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let disabled: hub::NodeSnapshot = response.json().await.expect("解析节点");
+    assert!(!disabled.enabled);
+    assert_eq!(disabled.status, hub::NodeStatus::Unreachable);
+    assert!(
+        disabled
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("已停用")),
+        "状态说明必须写明已停用: {disabled:?}"
+    );
+
+    let listed = harness.snapshot("laptop").await;
+    assert!(!listed.enabled, "停用的节点仍留在节点表里");
+    assert_eq!(listed.status, hub::NodeStatus::Unreachable);
+    assert!(
+        listed
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("已停用"))
+    );
+
+    let command = reqwest::get(harness.url("/api/n/laptop/bootstrap"))
+        .await
+        .expect("请求停用节点的命令");
+    assert_eq!(command.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        error_code(command).await,
+        hub::HubErrorCode::NodeUnavailable
+    );
+
+    let reconnect = harness.reconnect_node("laptop").await;
+    assert_eq!(reconnect.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        error_code(reconnect).await,
+        hub::HubErrorCode::NodeUnavailable
+    );
+
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let attempts = node.after_requests().len();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert_eq!(
+        node.after_requests().len(),
+        attempts,
+        "停用后不得再尝试上游连接"
+    );
+}
+
+/// 规格 user story H-55：启用后立即连接，不等待退避。
+#[tokio::test]
+async fn enables_node_without_waiting_for_backoff() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        backoff_base: std::time::Duration::from_secs(5),
+        ..hub::HubOptions::default()
+    })
+    .await;
+    let node = ScriptedNode::start().await;
+    node.set_events_mode(EventsMode::End);
+    harness.register_node("laptop", &node.url).await;
+    harness
+        .wait_for_status("laptop", hub::NodeStatus::Unreachable)
+        .await;
+    let response = harness.set_node_enabled("laptop", false).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    node.set_events_mode(EventsMode::Scripted);
+    let started = std::time::Instant::now();
+    let response = harness.set_node_enabled("laptop", true).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "启用后必须立即连接，实际 {:?}",
+        started.elapsed()
+    );
+}
+
+/// 规格 user story H-56：手动重连不等待退避。
+#[tokio::test]
+async fn reconnects_on_demand_without_waiting_for_backoff() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        backoff_base: std::time::Duration::from_secs(5),
+        ..hub::HubOptions::default()
+    })
+    .await;
+    let node = ScriptedNode::start().await;
+    node.set_events_mode(EventsMode::End);
+    harness.register_node("laptop", &node.url).await;
+    harness
+        .wait_for_status("laptop", hub::NodeStatus::Unreachable)
+        .await;
+
+    node.set_events_mode(EventsMode::Scripted);
+    let started = std::time::Instant::now();
+    let response = harness.reconnect_node("laptop").await;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(1),
+        "手动重连必须立即生效，实际 {:?}",
+        started.elapsed()
+    );
+}
+
+/// 修改节点同样校验名称与 URL。
+#[tokio::test]
+async fn rejects_invalid_update_fields() {
+    let harness = Harness::start().await;
+    harness
+        .register_node("laptop", "http://127.0.0.1:18081")
+        .await;
+    harness
+        .register_node("desktop", "http://127.0.0.1:18082")
+        .await;
+
+    let taken = harness
+        .update_node("laptop", serde_json::json!({ "name": "desktop" }))
+        .await;
+    assert_eq!(taken.status(), StatusCode::CONFLICT);
+    assert_eq!(error_code(taken).await, hub::HubErrorCode::NodeNameTaken);
+
+    let invalid = harness
+        .update_node("laptop", serde_json::json!({ "name": "bad name" }))
+        .await;
+    assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        error_code(invalid).await,
+        hub::HubErrorCode::NodeNameInvalid
+    );
+
+    let blank = harness
+        .update_node("laptop", serde_json::json!({ "url": "   " }))
+        .await;
+    assert_eq!(blank.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(error_code(blank).await, hub::HubErrorCode::InvalidRequest);
+
+    let unknown = harness
+        .update_node("ghost", serde_json::json!({ "enabled": false }))
+        .await;
+    assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
+    assert_eq!(error_code(unknown).await, hub::HubErrorCode::UnknownNode);
+}
+
+fn fast_options() -> hub::HubOptions {
+    hub::HubOptions {
+        backoff_base: std::time::Duration::from_millis(50),
+        ..hub::HubOptions::default()
+    }
 }

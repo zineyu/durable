@@ -68,6 +68,11 @@ impl Changeset {
         self.push(Change::InsertNode(node));
     }
 
+    /// 写入节点的可变字段：名称、URL、启用标志与更新时间。
+    pub fn update_node(&mut self, node: NodeMetadata) {
+        self.push(Change::UpdateNode(node));
+    }
+
     pub fn delete_node(&mut self, name: NodeName) {
         self.push(Change::DeleteNode(name));
     }
@@ -134,6 +139,7 @@ pub(crate) enum Change {
     DeleteWorkspace(WorkspacePath),
     InsertSession(SessionRecord),
     InsertNode(NodeMetadata),
+    UpdateNode(NodeMetadata),
     DeleteNode(NodeName),
     UpdateSession {
         id: SessionId,

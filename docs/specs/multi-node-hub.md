@@ -40,6 +40,17 @@
 - **H-16** 作为用户，我想让 `hub` 自动重连掉线的节点，以便我恢复隧道后不用刷新页面。
 - **H-17** 作为用户，我想让重连使用退避，以便 `agent` 长时间不在时不会刷爆日志与端口。
 
+### 节点运维
+
+- **H-53** 作为用户，我想直接改节点 URL，以便机器换端口时不用删除再注册。
+- **H-54** 作为用户，我想停用一个节点，以便关机的机器不再被重连。
+- **H-55** 作为用户，我想在启用后立刻尝试连接，以便恢复隧道后不用等退避。
+- **H-56** 作为用户，我想手动触发一次重连，以便我确定隧道已经通了。
+- **H-57** 作为用户，我想看到每个节点最后一次事实事件的时间，以便区分「安静」与「卡住」。
+- **H-58** 作为用户，我想看到节点 health 的往返延迟，以便判断链路质量。
+- **H-59** 作为运维者，我想用启动参数设回放窗口容量，以便按机器数量与事件量调整。
+- **H-60** 作为开发者，我想让停用节点的上游流立即结束，以便资源立刻回收。
+
 ### 视图与导航
 
 - **H-18** 作为用户，我想在侧栏顶部用节点切换器选择节点，以便一次专注一台机器的 workspace 与 session。
@@ -99,13 +110,13 @@
 
 - `hub` 由现 `ui` 二进制重命名而来。它内嵌客户端资源、托管 web UI、持有自己的 SQLite。
 - `hub` 与 `node` 都只绑定 `127.0.0.1`。跨机器访问由用户自建 SSH 隧道或 VPN 提供；协议无鉴权、无 TLS 终止。
-- `hub` 启动参数：监听地址、可选的 `hub` 数据库路径与可选的日志目录。省略时用平台标准目录（ADR 0026）。删除 `--agent-url`，不引入 `--node` 参数。
+- `hub` 启动参数：监听地址、可选的 `hub` 数据库路径与可选的日志目录，以及回放窗口条数与广播通道容量。省略时用平台标准目录与默认容量（ADR 0026）。删除 `--agent-url`，不引入 `--node` 参数。
 - `node` 侧只有一处协议增补：`/api/health` 返回 `protocol_version`。
 
 ### 持久化
 
-- `hub` 的 SQLite 只有 `node` 表：`name` 为主键，另有 `url` 与 `created_at`。
-- 迁移随二进制内嵌，单写入线与存储管线复用内核。
+- `hub` 的 SQLite 只有 `node` 表：`name` 为主键，另有 `url`、`enabled`、`created_at` 与 `updated_at`。
+- 迁移随二进制内嵌，单写入线与存储管线复用内核。旧库升级后 `enabled` 为 true，`updated_at` 取原 `created_at`。
 - `hub` 不存 session、workspace、消息、队列、run 或事件。
 - 节点名即身份。注册时校验非空、唯一、URL 非空；不校验可达性。
 
@@ -115,14 +126,19 @@
 
 - `GET /api/bootstrap`：节点表、每节点 `status` 与 `detail`、可达节点的 bootstrap。
 - `GET /api/events?after=<hub_seq>`：单一合并事件流。
-- `POST /api/nodes`、`PATCH /api/nodes/{name}`（改名）、`DELETE /api/nodes/{name}`：节点表管理。
+- `POST /api/nodes`、`PATCH /api/nodes/{name}`、`DELETE /api/nodes/{name}`：节点表管理。`PATCH` 的请求体为可选字段 `name`、`url`、`enabled`，省略即保留原值。
+- `POST /api/nodes/{name}/reconnect`：丢弃当前上游订阅并按退避起点立即重建。停用的节点返回 `node_unavailable`。
 - `GET /api/health`：`hub` 自身健康与 `protocol_version`。
 
 节点作用域：`/api/n/<node>/<rest>` 转发到该节点 `url` 下的 `/api/<rest>`。方法、查询、请求体与 SSE 全部原样透传，不缓冲、不聚合、不改写。
 
 信封：`hub` 在每条上游事实信封外再包一层，加入 `hub_seq` 与 `node`，保留原信封字段。token 增量与限流重试提示不带 `hub_seq`，不推进游标，也不进回放窗口。
 
-`hub` 自身的事实事件走同一条流：`node_registered`、`node_removed`、`node_status_changed`。它们带 `hub_seq`，不带 `node` 字段。节点表变更因此对所有已打开的客户端立即可见，不需要刷新。
+`hub` 自身的事实事件走同一条流：`node_registered`、`node_removed`、`node_updated`、`node_status_changed`。它们带 `hub_seq`，不带 `node` 字段。节点表变更因此对所有已打开的客户端立即可见，不需要刷新。
+
+节点视图：`NodeSnapshot` 带 `status`、`detail`、`enabled`、`last_event_at` 与 `latency_ms`。`last_event_at` 是该节点最后一条事实事件自带的时间戳；`latency_ms` 是最近一次 health 的往返毫秒数。两者是进程内计数，不落库。改 URL 与启用标志广播 `node_updated`；改名仍按「删除加登记」广播。
+
+停用的节点不建上游订阅，视图为 `unreachable` 且说明「节点已停用」，节点作用域命令返回 `node_unavailable`。启用与改 URL 后视图先写「正在建立上游连接」，由 watcher 的探测结果覆盖（ADR 0041）。
 
 类型命名：`hub` 自有的协议类型加 `Hub` 前缀（`HubBootstrap`、`HubHealth`、`HubErrorCode`、`HubErrorResponse`），避免与 agent 导出的同名类型在生成目录里互相覆盖。节点领域类型（`NodeName`、`NodeSnapshot`）由 `hub` 导出。
 
@@ -133,6 +149,7 @@
 - `hub` 为每个 `ok` 节点维持一条常驻上游流，指数退避重连。
 - 上游 `resync` 只触发重连，不改节点状态，也不重置上游游标（ADR 0030）。
 - 节点注册后立即尝试连接；删除后关闭流。
+- 停用后立即关闭该节点的上游流，启用与手动重连立即重建，不等待退避。
 - `hub` 保一个按 `hub_seq` 索引的内存有界回放窗口，容量可配置。
 - 每个客户端一个有界发送队列，溢出即关闭该客户端的事件流。
 - 事实事件不回填到窗口之外。窗口外游标一律 resync。
@@ -208,6 +225,12 @@ stateDiagram-v2
 - 协议版本不匹配的 `agent` 使节点状态变为 `incompatible`。
 - `hub` 重启后窗口为空，带旧游标的订阅要求 resync。
 - 删除节点后其上游流关闭，且再次请求该节点返回 `unknown_node`。
+- 改 URL 后命令转发到新地址，节点记录与 `created_at` 不变，客户端收到 `node_updated`。
+- 停用后节点表仍在、状态为 `unreachable` 且说明「节点已停用」，命令返回 `node_unavailable`，且不再有上游连接尝试。
+- 启用后无需等待退避即建立上游连接；手动重连在隧道恢复后 1 秒内把状态改回 `ok`。
+- 发出一条事实后 `last_event_at` 前进；节点无事件时该值不变。`latency_ms` 在 health 成功后非空。
+- 回放窗口容量为 1 时，窗口内游标收到回放，窗口外游标收到 resync。
+- 迁移在既有库上升级后节点表内容不变，`enabled` 为 true。
 
 ### 渲染与视觉
 

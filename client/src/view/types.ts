@@ -62,6 +62,7 @@ export type BranchControl = {
 export type NodeRecord = {
   name: NodeName;
   url: string;
+  enabled: boolean;
   status: NodeStatus;
   detail: string | null;
 };

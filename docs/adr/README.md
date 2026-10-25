@@ -31,7 +31,7 @@
 | [0025](0025-browser-e2e.md) | 浏览器端到端测试 | 已接受 | 新增 Seam 4 浏览器端到端测试，用真实进程栈加 Playwright 驱动。 |
 | [0026](0026-logging-and-default-paths.md) | 日志与默认路径 | 已接受 | 数据库与日志目录均可省略，日志同时输出标准错误与按天轮转文件。 |
 | [0027](0027-upstream-subscription-starts-at-node-watermark.md) | 上游订阅起点取节点快照水位 | 已接受。细化 ADR 0021 | 上游订阅起点取该节点快照水位，不持久化上游游标。 |
-| [0028](0028-forwarding-timeouts-and-status-ownership.md) | 节点作用域转发的超时与状态归属 | 已接受 | 转发失败不改节点状态，超时按响应类型分档而不按路径判定。 |
+| [0028](0028-forwarding-timeouts-and-status-ownership.md) | 节点作用域转发的超时与状态归属 | 已接受。管理视图写入由 ADR 0041 细化 | 转发失败不改节点状态，超时按响应类型分档而不按路径判定。 |
 | [0029](0029-bootstrap-watermark-before-node-requests.md) | 合并 bootstrap 的广播水位在任何节点请求之前取 | 已接受。细化 ADR 0018 的水位定义与 ADR 0021 的合并 bootstrap | 合并 bootstrap 在任何节点请求前取广播水位，各节点请求并发发起。 |
 | [0030](0030-upstream-resync-is-reconnect-not-failure.md) | 上游 resync 只触发重连，不写节点状态 | 已接受。细化 ADR 0018 的 resync 语义与 ADR 0021 的节点状态机 | 上游 Resync 只结束订阅并按原游标重连，不写节点状态。 |
 | [0031](0031-provider-rate-limit-retry.md) | 供应商限流用独立失败类别并有限重试 | 已接受。细化 ADR 0014 的失败类别与 ADR 0018 的实时事件 | 新增 model_rate_limited 类别，在单次模型调用内有限重试，只发实时提示。 |
@@ -44,3 +44,4 @@
 | [0038](0038-skeleton-events.md) | 事件与快照只带骨架，正文按需拉取 | 已接受。取代 ADR 0019 的 `tool_call_recorded` | 事实事件与快照只带节点骨架，正文按消息 id 批量拉取并缓存，进行中的内容挂在未来定型的消息 id 上。 |
 | [0039](0039-steer-at-step-boundary.md) | 插话在步骤边界接入当前 run | 已接受 | `mode=steer` 的插话在提交时入树，在模型请求与收尾前的步骤边界接入同一个 run；工具不打断；run 结束未消费则降级为排队。 |
 | [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已接受 | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |
+| [0041](0041-node-table-commands-write-node-view.md) | 节点表命令可以写节点视图 | 已接受。细化 ADR 0028 的状态归属 | 探测结果只由 watcher 写，停用与等待连接的管理状态由节点表命令写，共用同一条 node_status_changed。 |

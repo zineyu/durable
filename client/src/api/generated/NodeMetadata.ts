@@ -4,4 +4,8 @@ import type { NodeName } from "./NodeName";
 /**
  * 节点表中的一行。`url` 是 hub 连接该节点 `agent` 的基地址。
  */
-export type NodeMetadata = { name: NodeName, url: string, createdAt: number, };
+export type NodeMetadata = { name: NodeName, url: string, 
+/**
+ * 停用的节点不建上游订阅，命令一律返回不可用。
+ */
+enabled: boolean, createdAt: number, updatedAt: number, };

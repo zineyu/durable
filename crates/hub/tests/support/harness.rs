@@ -85,13 +85,35 @@ impl Harness {
             .expect("请求注册节点")
     }
 
-    pub(crate) async fn rename_node(&self, name: &str, next: &str) -> reqwest::Response {
+    pub(crate) async fn update_node(
+        &self,
+        name: &str,
+        body: serde_json::Value,
+    ) -> reqwest::Response {
         reqwest::Client::new()
             .patch(self.url(&format!("/api/nodes/{name}")))
-            .json(&serde_json::json!({ "name": next }))
+            .json(&body)
             .send()
             .await
-            .expect("请求重命名节点")
+            .expect("请求修改节点")
+    }
+
+    pub(crate) async fn rename_node(&self, name: &str, next: &str) -> reqwest::Response {
+        self.update_node(name, serde_json::json!({ "name": next }))
+            .await
+    }
+
+    pub(crate) async fn set_node_enabled(&self, name: &str, enabled: bool) -> reqwest::Response {
+        self.update_node(name, serde_json::json!({ "enabled": enabled }))
+            .await
+    }
+
+    pub(crate) async fn reconnect_node(&self, name: &str) -> reqwest::Response {
+        reqwest::Client::new()
+            .post(self.url(&format!("/api/nodes/{name}/reconnect")))
+            .send()
+            .await
+            .expect("请求重连节点")
     }
 
     pub(crate) async fn remove_node(&self, name: &str) -> reqwest::Response {

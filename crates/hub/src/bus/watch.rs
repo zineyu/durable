@@ -28,8 +28,10 @@ impl NodeWatcher {
         node: NodeMetadata,
         client: reqwest::Client,
         options: HubOptions,
+        epoch: u64,
     ) -> Self {
-        let handle = tokio::spawn(async move { watch_forever(bus, node, client, options).await });
+        let handle =
+            tokio::spawn(async move { watch_forever(bus, node, client, options, epoch).await });
         Self { handle }
     }
 }
@@ -45,8 +47,9 @@ async fn watch_forever(
     node: NodeMetadata,
     client: reqwest::Client,
     options: HubOptions,
+    epoch: u64,
 ) {
-    match watch_loop(&bus, &node, &client, options).await {
+    match watch_loop(&bus, &node, &client, options, epoch).await {
         Ok(never) => match never {},
         Err(error) => {
             tracing::error!(node = %node.name, error = %error, "总线状态不可用，停止该节点的上游订阅");
@@ -60,19 +63,21 @@ async fn watch_loop(
     node: &NodeMetadata,
     client: &reqwest::Client,
     options: HubOptions,
+    epoch: u64,
 ) -> Result<Infallible, ApiError> {
     let mut last_id: Option<i64> = None;
     let mut attempt = 0u32;
     loop {
         let was_ok = bus.view(&node.name)?.status == NodeStatus::Ok;
-        let end = match run_stream(bus, client, node, &mut last_id, options).await {
+        let end = match run_stream(bus, client, node, &mut last_id, options, epoch).await {
             Ok(never) => match never {},
             Err(WatchError::End(end)) => end,
             Err(WatchError::Bus(error)) => return Err(error),
         };
         if let StreamEnd::Failure(failure) = &end {
-            bus.set_view(
+            bus.set_probe_view(
                 node.name.clone(),
+                epoch,
                 NodeView {
                     status: failure.status,
                     detail: Some(failure.detail.clone()),
@@ -193,9 +198,11 @@ async fn run_stream(
     node: &NodeMetadata,
     last_id: &mut Option<i64>,
     options: HubOptions,
+    epoch: u64,
 ) -> StreamResult {
     let base = node_probe::base_url(node);
     let name = &node.name;
+    let started = tokio::time::Instant::now();
     let health = client
         .get(format!("{base}/api/health"))
         .timeout(options.connect_timeout)
@@ -206,6 +213,8 @@ async fn run_stream(
         .json()
         .await
         .map_err(|error| Failure::unreachable(format!("health 响应无法解析: {error}")))?;
+    let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    bus.record_latency(name, latency_ms)?;
     if health.protocol_version != REQUIRED_AGENT_PROTOCOL_VERSION {
         return Err(Failure::incompatible(format!(
             "agent 协议版本 {} 与 hub 要求的 {} 不一致",
@@ -213,8 +222,9 @@ async fn run_stream(
         ))
         .into());
     }
-    bus.set_view(
+    bus.set_probe_view(
         name.clone(),
+        epoch,
         NodeView {
             status: NodeStatus::Ok,
             detail: None,

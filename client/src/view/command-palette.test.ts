@@ -7,11 +7,12 @@ import type { PaletteInput } from './command-palette';
 import { emptyNodeState } from './node-state';
 import type { NodeRecord } from './types';
 
-const nodeA: NodeRecord = { name: 'macbook-air-01', url: 'http://a', status: 'ok', detail: null };
-const nodeB: NodeRecord = { name: 'studio', url: 'http://b', status: 'ok', detail: null };
+const nodeA: NodeRecord = { name: 'macbook-air-01', url: 'http://a', enabled: true, status: 'ok', detail: null };
+const nodeB: NodeRecord = { name: 'studio', url: 'http://b', enabled: true, status: 'ok', detail: null };
 const nodeC: NodeRecord = {
   name: 'retired',
   url: 'http://c',
+  enabled: true,
   status: 'unreachable',
   detail: '隧道断开',
 };
