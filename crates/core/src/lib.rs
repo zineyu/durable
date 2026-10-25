@@ -29,7 +29,7 @@ pub use message::{
     MessageRoleError, MessageSkeleton, MessageText, MessageTextError, PartSkeleton, PartState,
     PartStateError, ProviderMeta,
 };
-pub use node::{NodeMetadata, NodeName, NodeNameError};
+pub use node::{NodeMetadata, NodeName, NodeNameError, NodeUpdate};
 pub use queue::{QueueItem, SubmitMode};
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTree};

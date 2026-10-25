@@ -89,7 +89,16 @@ function snapshot(
   status: NodeStatus = 'ok',
   detail: string | null = null,
 ): NodeSnapshot {
-  return { name, url: `http://127.0.0.1:${name}`, status, detail, bootstrap: node };
+  return {
+    name,
+    url: `http://127.0.0.1:${name}`,
+    enabled: true,
+    status,
+    detail,
+    lastEventAt: null,
+    latencyMs: null,
+    bootstrap: node,
+  };
 }
 
 function hub(nodes: NodeSnapshot[], maxHubSeq: number): HubBootstrap {
@@ -990,11 +999,18 @@ describe('节点表变更', () => {
     const registered = streamed(loaded(), {
       type: 'node_registered',
       hubSeq: 8,
-      node: { name: 'legacy-lab', url: 'http://127.0.0.1:7081', createdAt: 40 },
+      node: {
+        name: 'legacy-lab',
+        url: 'http://127.0.0.1:7081',
+        enabled: true,
+        createdAt: 40,
+        updatedAt: 40,
+      },
     });
     expect(registered.hub.nodes.at(-1)).toEqual({
       name: 'legacy-lab',
       url: 'http://127.0.0.1:7081',
+      enabled: true,
       status: 'unreachable',
       detail: null,
     });
@@ -1030,6 +1046,7 @@ describe('节点表变更', () => {
     expect(state.hub.nodes.find((record) => record.name === nodeB)).toEqual({
       name: nodeB,
       url: `http://127.0.0.1:${nodeB}`,
+      enabled: true,
       status: 'unreachable',
       detail: '连接节点失败: 隧道已断开',
     });
@@ -1041,7 +1058,13 @@ describe('节点表变更', () => {
     const registered = streamed(removed, {
       type: 'node_registered',
       hubSeq: 9,
-      node: { name: 'studio-2', url: `http://127.0.0.1:${nodeB}`, createdAt: 20 },
+      node: {
+        name: 'studio-2',
+        url: `http://127.0.0.1:${nodeB}`,
+        enabled: true,
+        createdAt: 20,
+        updatedAt: 20,
+      },
     });
 
     expect(registered.hub.nodes.map((record) => record.name)).toEqual([nodeA, 'studio-2']);
@@ -1057,6 +1080,31 @@ describe('节点表变更', () => {
     expect(removed.hub.nodes.map((record) => record.name)).toEqual([nodeA]);
     expect(removed.nodes[nodeB]).toBeUndefined();
     expect(removed.hub.selected).toBe(nodeB);
+  });
+
+  it('node_updated 只改 URL 与启用标志，不动状态与分片', () => {
+    const state = loaded();
+    const updated = streamed(state, {
+      type: 'node_updated',
+      hubSeq: 8,
+      node: {
+        name: nodeB,
+        url: 'http://127.0.0.1:19090',
+        enabled: false,
+        createdAt: 20,
+        updatedAt: 30,
+      },
+    });
+
+    expect(updated.hub.nodes.find((record) => record.name === nodeB)?.url).toBe(
+      'http://127.0.0.1:19090',
+    );
+    expect(updated.hub.nodes.find((record) => record.name === nodeB)?.enabled).toBe(false);
+    expect(updated.hub.nodes.find((record) => record.name === nodeB)?.status).toBe(
+      state.hub.nodes.find((record) => record.name === nodeB)?.status,
+    );
+    expect(updated.nodes[nodeB]).toBe(state.nodes[nodeB]);
+    expect(updated.hub.cursor).toBe(8);
   });
 
   it('resync 事件只提示重连，不改变视图状态', () => {

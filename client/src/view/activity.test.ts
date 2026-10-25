@@ -14,8 +14,8 @@ import { reduce } from './reducer';
 import type { ClientState } from './reducer';
 import type { NodeRecord } from './types';
 
-const nodeA: NodeRecord = { name: 'macbook-air-01', url: 'http://a', status: 'ok', detail: null };
-const nodeB: NodeRecord = { name: 'studio', url: 'http://b', status: 'ok', detail: null };
+const nodeA: NodeRecord = { name: 'macbook-air-01', url: 'http://a', enabled: true, status: 'ok', detail: null };
+const nodeB: NodeRecord = { name: 'studio', url: 'http://b', enabled: true, status: 'ok', detail: null };
 
 function session(id: string, updatedAt: number, busy = false, queueLength = 0): SessionMetadata {
   return { id, workspace: '/work/a', title: `标题 ${id}`, busy, queueLength, updatedAt };

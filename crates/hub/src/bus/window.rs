@@ -58,6 +58,7 @@ fn seq_of(event: &HubStreamEvent) -> u64 {
         HubStreamEvent::Fact { hub_seq, .. }
         | HubStreamEvent::NodeRegistered { hub_seq, .. }
         | HubStreamEvent::NodeRemoved { hub_seq, .. }
+        | HubStreamEvent::NodeUpdated { hub_seq, .. }
         | HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
         HubStreamEvent::Delta { .. }
         | HubStreamEvent::Retry { .. }

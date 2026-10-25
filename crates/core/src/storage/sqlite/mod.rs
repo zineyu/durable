@@ -101,16 +101,19 @@ impl SqliteStorage {
 
     /// 节点表中的全部节点，按注册顺序排列。
     pub(crate) async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
-        sqlx::query("SELECT name, url, created_at FROM node ORDER BY created_at ASC, name ASC")
-            .fetch_all(&self.pool)
-            .await?
-            .iter()
-            .map(parse_node)
-            .collect()
+        sqlx::query(
+            "SELECT name, url, enabled, created_at, updated_at FROM node
+             ORDER BY created_at ASC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(parse_node)
+        .collect()
     }
 
     pub(crate) async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
-        sqlx::query("SELECT name, url, created_at FROM node WHERE name = ?1")
+        sqlx::query("SELECT name, url, enabled, created_at, updated_at FROM node WHERE name = ?1")
             .bind(name.as_str())
             .fetch_optional(&self.pool)
             .await?

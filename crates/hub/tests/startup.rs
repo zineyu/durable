@@ -113,3 +113,41 @@ fn startup_log_record(log_directory: &Path, message: &str) -> Option<serde_json:
     }
     None
 }
+
+/// 规格 user story H-59：启动参数设总线容量，并写进启动日志。
+#[tokio::test]
+async fn applies_bus_capacity_arguments() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let database = directory.path().join("hub.sqlite");
+    let logs = directory.path().join("logs");
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hub"));
+    command
+        .args([
+            "--listen",
+            "127.0.0.1:0",
+            "--database",
+            database.to_str().expect("临时路径是 UTF-8"),
+            "--log-dir",
+            logs.to_str().expect("临时路径是 UTF-8"),
+            "--broadcast-capacity",
+            "7",
+            "--replay-window",
+            "1",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command.spawn().expect("启动 hub");
+
+    let line = first_line(&mut child);
+    assert!(
+        line.starts_with("hub listening on http://"),
+        "启动输出: {line}"
+    );
+
+    let record = wait_for_startup_log(&logs).await;
+    assert_eq!(record["broadcast_capacity"].as_u64(), Some(7));
+    assert_eq!(record["replay_window"].as_u64(), Some(1));
+
+    child.kill().expect("结束 hub");
+    child.wait().expect("等待 hub 退出");
+}

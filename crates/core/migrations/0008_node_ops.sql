@@ -1,0 +1,4 @@
+ALTER TABLE node ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE node ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
+
+UPDATE node SET updated_at = created_at;

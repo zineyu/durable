@@ -241,3 +241,41 @@ async fn reconnects_quickly_with_small_backoff_base() {
         "一秒内应多次重连，但不应退到几十秒一次，实际 {attempts}"
     );
 }
+
+/// 规格 user story H-57 与 H-58：快照带最后事件时间与 health 往返延迟。
+#[tokio::test]
+async fn reports_last_event_time_and_health_latency() {
+    let harness = Harness::start_with_options(options()).await;
+    let node = ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    let available = harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    assert_eq!(available.last_event_at, None, "尚未收到事实事件");
+    assert!(available.latency_ms.is_some(), "health 往返应已记录");
+    wait_for_upstream(&node).await;
+
+    node.publish_fact(1000, fact());
+    let read = tokio::time::Instant::now();
+    loop {
+        let snapshot = harness.snapshot("laptop").await;
+        if snapshot.last_event_at.is_some() {
+            assert_eq!(
+                snapshot.last_event_at,
+                Some(1000),
+                "记录收到的最后一条事实自带的时间戳"
+            );
+            break;
+        }
+        assert!(
+            read.elapsed() < Duration::from_secs(5),
+            "最后事件时间未在时限内出现"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        harness.snapshot("laptop").await.last_event_at,
+        Some(1000),
+        "没有新事实时该值不变"
+    );
+}

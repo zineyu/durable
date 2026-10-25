@@ -5,6 +5,7 @@ mod view;
 mod watch;
 mod window;
 
+pub(crate) use self::view::DISABLED_DETAIL;
 pub use self::view::NodeView;
 pub(crate) use self::watch::NodeWatcher;
 
@@ -15,7 +16,7 @@ use durable::{NodeName, ResyncReason, SessionId};
 use tokio::sync::broadcast;
 
 use crate::ApiError;
-use crate::protocol::HubStreamEvent;
+use crate::protocol::{HubStreamEvent, NodeMetrics};
 
 /// 一个客户端订阅时得到的内容：可回放的事件、实时接收端，或一条 resync 指示。
 pub struct Subscription {
@@ -35,6 +36,9 @@ struct BusState {
     seq: u64,
     window: VecDeque<HubStreamEvent>,
     views: HashMap<NodeName, NodeView>,
+    metrics: HashMap<NodeName, NodeMetrics>,
+    /// 每个节点的视图纪元。管理写入推进它，过期的探测写入被忽略。
+    epochs: HashMap<NodeName, u64>,
 }
 
 impl Bus {
@@ -47,6 +51,8 @@ impl Bus {
                 seq: 0,
                 window: VecDeque::new(),
                 views: HashMap::new(),
+                metrics: HashMap::new(),
+                epochs: HashMap::new(),
             }),
             replay_window,
         }
@@ -78,6 +84,7 @@ impl Bus {
         timestamp: i64,
         event: durable::FactEvent,
     ) -> Result<(), ApiError> {
+        self.record_fact_time(&node, timestamp)?;
         self.publish_fact(|hub_seq| HubStreamEvent::Fact {
             hub_seq,
             node,

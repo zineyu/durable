@@ -135,7 +135,7 @@ maxAttempts: number,
 /**
  * 本次等待时长。
  */
-delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };
+delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_updated", hubSeq: number, node: NodeMetadata, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };
 ```
 
 ## MessageBodiesRequest
@@ -192,7 +192,11 @@ export type MessageText = string;
 /**
  * 节点表中的一行。`url` 是 hub 连接该节点 `agent` 的基地址。
  */
-export type NodeMetadata = { name: NodeName, url: string, createdAt: number, };
+export type NodeMetadata = { name: NodeName, url: string, 
+/**
+ * 停用的节点不建上游订阅，命令一律返回不可用。
+ */
+enabled: boolean, createdAt: number, updatedAt: number, };
 ```
 
 ## NodeName
@@ -210,7 +214,19 @@ export type NodeName = string;
 /**
  * 侧栏与 bootstrap 看到的单个节点。`bootstrap` 只有 `ok` 的节点才有。
  */
-export type NodeSnapshot = { name: NodeName, url: string, status: NodeStatus, detail: string | null, bootstrap: BootstrapResponse | null, };
+export type NodeSnapshot = { name: NodeName, url: string, 
+/**
+ * 停用的节点不建上游订阅，命令一律返回不可用。
+ */
+enabled: boolean, status: NodeStatus, detail: string | null, 
+/**
+ * 最后一条事实事件自带的时间戳。进程内计数，不落库。
+ */
+lastEventAt: number | null, 
+/**
+ * 最近一次 health 的往返延迟。进程内计数，不落库。
+ */
+latencyMs: number | null, bootstrap: BootstrapResponse | null, };
 ```
 
 ## NodeStatus
@@ -282,12 +298,6 @@ export type RegisterWorkspaceRequest = { path: string, };
 
 ```ts
 export type RemoveWorkspaceRequest = { path: string, };
-```
-
-## RenameNodeRequest
-
-```ts
-export type RenameNodeRequest = { name: string, };
 ```
 
 ## RenameSessionRequest
@@ -461,6 +471,24 @@ export type ToolOutcome = { "status": "succeeded", content: string, } | { "statu
  * 非幂等工具在执行中崩溃后写 [`ToolResultState::Unknown`]，表示丢失了观测。
  */
 export type ToolResultState = { "status": "running" } | { "status": "finished", outcome: ToolOutcome, } | { "status": "unknown" };
+```
+
+## UpdateNodeRequest
+
+```ts
+export type UpdateNodeRequest = { 
+/**
+ * 改名后的节点名。省略表示保留原名。
+ */
+name: string | null, 
+/**
+ * 新的上游基地址。省略表示保留原 URL。
+ */
+url: string | null, 
+/**
+ * 是否启用上游订阅。省略表示保留原状态。
+ */
+enabled: boolean | null, };
 ```
 
 ## WorkspaceMetadata

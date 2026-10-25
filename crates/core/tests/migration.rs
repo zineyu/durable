@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use durable::{ContentPart, MessageRole, SessionId, Store};
+use durable::{ContentPart, MessageRole, NodeName, SessionId, Store};
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
@@ -49,10 +49,46 @@ const LEGACY_SEED: &str = "
 
 /// 用 0001–0005 建库、写入旧数据，再交给 [`Store::open`] 应用 0006。
 async fn legacy_database(directory: &tempfile::TempDir) -> PathBuf {
-    let migrations = directory.path().join("migrations");
-    std::fs::create_dir(&migrations).expect("创建迁移目录");
-    for (name, sql) in LEGACY_MIGRATIONS {
-        std::fs::write(migrations.join(name), sql).expect("写出旧迁移");
+    database_with(directory, &LEGACY_MIGRATIONS, LEGACY_SEED).await
+}
+
+/// 0008 之前的全部迁移。
+const NODE_MIGRATIONS: [(&str, &str); 7] = [
+    ("0001_init.sql", include_str!("../migrations/0001_init.sql")),
+    (
+        "0002_queue.sql",
+        include_str!("../migrations/0002_queue.sql"),
+    ),
+    ("0003_run.sql", include_str!("../migrations/0003_run.sql")),
+    (
+        "0004_branch.sql",
+        include_str!("../migrations/0004_branch.sql"),
+    ),
+    ("0005_node.sql", include_str!("../migrations/0005_node.sql")),
+    (
+        "0006_message_parts.sql",
+        include_str!("../migrations/0006_message_parts.sql"),
+    ),
+    (
+        "0007_steer.sql",
+        include_str!("../migrations/0007_steer.sql"),
+    ),
+];
+
+/// 0008 之前的节点表只登记名称、URL 与注册时间。
+const NODE_SEED: &str = "INSERT INTO node (name, url, created_at)
+     VALUES ('laptop', 'http://127.0.0.1:18081', 1234);";
+
+/// 用给定迁移建库、写入种子数据，再交给 [`Store::open`] 应用剩余迁移。
+async fn database_with(
+    directory: &tempfile::TempDir,
+    migrations: &[(&str, &str)],
+    seed: &'static str,
+) -> PathBuf {
+    let migrations_directory = directory.path().join("migrations");
+    std::fs::create_dir(&migrations_directory).expect("创建迁移目录");
+    for (name, sql) in migrations {
+        std::fs::write(migrations_directory.join(name), sql).expect("写出旧迁移");
     }
     let path = directory.path().join("legacy.sqlite");
     let options = SqliteConnectOptions::new()
@@ -63,18 +99,37 @@ async fn legacy_database(directory: &tempfile::TempDir) -> PathBuf {
         .connect_with(options)
         .await
         .expect("打开旧库");
-    Migrator::new(migrations.as_path())
+    Migrator::new(migrations_directory.as_path())
         .await
         .expect("读取旧迁移")
         .run(&pool)
         .await
         .expect("应用旧迁移");
-    sqlx::raw_sql(LEGACY_SEED)
+    sqlx::raw_sql(seed)
         .execute(&pool)
         .await
         .expect("写入旧数据");
     pool.close().await;
     path
+}
+
+/// 迁移在既有库上升级后节点表内容不变，`enabled` 为 true，`updated_at` 取原注册时间。
+#[tokio::test]
+async fn upgrades_node_table_with_enabled_and_updated_at() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let path = database_with(&directory, &NODE_MIGRATIONS, NODE_SEED).await;
+    let store = Store::open(&path).await.expect("升级旧库");
+    let name = NodeName::parse("laptop").expect("合法节点名");
+
+    let node = store
+        .node(&name)
+        .await
+        .expect("读取节点")
+        .expect("升级后节点仍在");
+    assert_eq!(node.url, "http://127.0.0.1:18081");
+    assert_eq!(node.created_at, 1234);
+    assert!(node.enabled, "旧节点升级后默认启用");
+    assert_eq!(node.updated_at, 1234, "更新时间从注册时间补齐");
 }
 
 /// 规格 A-8：旧库升级后工具调用成为 tool 节点，transcript 仍是链上顺序。

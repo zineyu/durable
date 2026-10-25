@@ -14,7 +14,7 @@ import type { NodeSnapshot } from './generated/NodeSnapshot';
 import type { QueueItem } from './generated/QueueItem';
 import type { RegisterNodeRequest } from './generated/RegisterNodeRequest';
 import type { RegisterWorkspaceRequest } from './generated/RegisterWorkspaceRequest';
-import type { RenameNodeRequest } from './generated/RenameNodeRequest';
+import type { UpdateNodeRequest } from './generated/UpdateNodeRequest';
 import type { RemoveWorkspaceRequest } from './generated/RemoveWorkspaceRequest';
 import type { RenameSessionRequest } from './generated/RenameSessionRequest';
 import type { SessionMetadata } from './generated/SessionMetadata';
@@ -91,7 +91,7 @@ export const api = {
     return request('POST', '/api/nodes', body);
   },
   renameNode(name: NodeName, next: string): Promise<ApiResult<NodeSnapshot>> {
-    const body: RenameNodeRequest = { name: next };
+    const body: UpdateNodeRequest = { name: next, url: null, enabled: null };
     return request('PATCH', `/api/nodes/${encodeURIComponent(name)}`, body);
   },
   removeNode(name: NodeName): Promise<ApiResult<void>> {

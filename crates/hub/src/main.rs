@@ -21,6 +21,12 @@ struct Arguments {
     /// 日志目录。省略时使用标准日志目录。
     #[arg(long = "log-dir")]
     log_dir: Option<PathBuf>,
+    /// 广播通道容量。每个客户端最多落后这么多条事件。
+    #[arg(long = "broadcast-capacity", default_value_t = hub::DEFAULT_BROADCAST_CAPACITY)]
+    broadcast_capacity: usize,
+    /// 回放窗口条数。游标落在窗口之外时客户端收到 resync。
+    #[arg(long = "replay-window", default_value_t = hub::DEFAULT_REPLAY_WINDOW)]
+    replay_window: usize,
 }
 
 /// 已确定的启动路径与日志参数。
@@ -28,6 +34,7 @@ struct Prepared {
     address: SocketAddr,
     database: PathBuf,
     log: LogConfig,
+    options: hub::HubOptions,
 }
 
 #[tokio::main]
@@ -62,6 +69,13 @@ fn startup_failure(error: impl std::fmt::Display) -> ExitCode {
 
 fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>> {
     let address = hub::parse_listen_address(&arguments.listen)?;
+    if arguments.broadcast_capacity == 0 || arguments.replay_window == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "--broadcast-capacity 与 --replay-window 必须大于 0",
+        )
+        .into());
+    }
     let paths = dirs::startup_paths(
         arguments.database.as_deref(),
         arguments.log_dir.as_deref(),
@@ -71,6 +85,11 @@ fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>
         address,
         database: paths.database,
         log: LogConfig::new(paths.log_directory, hub::LOG_FILE_PREFIX),
+        options: hub::HubOptions {
+            broadcast_capacity: arguments.broadcast_capacity,
+            replay_window: arguments.replay_window,
+            ..hub::HubOptions::default()
+        },
     })
 }
 
@@ -86,10 +105,12 @@ async fn run(prepared: Prepared) -> Result<(), Box<dyn std::error::Error>> {
         database = %prepared.database.display(),
         log_directory = %prepared.log.directory.display(),
         log_filter = %prepared.log.filter,
+        broadcast_capacity = prepared.options.broadcast_capacity,
+        replay_window = prepared.options.replay_window,
         "hub 启动"
     );
     println!("hub listening on http://{bound}");
     info!(listen = %bound, "hub 开始监听");
-    hub::serve(listener, store).await?;
+    hub::serve_with(listener, store, prepared.options).await?;
     Ok(())
 }

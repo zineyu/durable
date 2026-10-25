@@ -179,6 +179,7 @@ fn seq_of(event: &hub::HubStreamEvent) -> u64 {
         hub::HubStreamEvent::Fact { hub_seq, .. }
         | hub::HubStreamEvent::NodeRegistered { hub_seq, .. }
         | hub::HubStreamEvent::NodeRemoved { hub_seq, .. }
+        | hub::HubStreamEvent::NodeUpdated { hub_seq, .. }
         | hub::HubStreamEvent::NodeStatusChanged { hub_seq, .. } => *hub_seq,
         hub::HubStreamEvent::Delta { .. }
         | hub::HubStreamEvent::Retry { .. }
@@ -227,5 +228,39 @@ async fn forwards_retry_hint_without_advancing_cursor() {
         harness.bootstrap().await.max_hub_seq,
         cursor,
         "重试提示不推进广播序号"
+    );
+}
+
+/// 规格 user story H-59：回放窗口容量为 1 时，窗口内游标回放，窗口外游标收到 resync。
+#[tokio::test]
+async fn honours_single_event_replay_window() {
+    let harness = Harness::start_with_options(hub::HubOptions {
+        replay_window: 1,
+        broadcast_capacity: 64,
+        ..hub::HubOptions::default()
+    })
+    .await;
+    let node = ScriptedNode::start().await;
+    harness.register_node("laptop", &node.url).await;
+    harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
+    wait_for_upstream(&node).await;
+
+    node.publish_fact(1, fact());
+    let first = harness.wait_for_seq_after(0).await;
+    node.publish_fact(2, fact());
+    let second = harness.wait_for_seq_after(first).await;
+
+    let mut inside = EventStream::connect(&harness, first).await;
+    let replayed = inside.next_matching(is_fact).await;
+    match replayed {
+        hub::HubStreamEvent::Fact { id, .. } => assert_eq!(id, 2),
+        other => panic!("不是事实事件: {other:?}"),
+    }
+
+    let mut outside = EventStream::connect(&harness, second.saturating_sub(2)).await;
+    let event = outside.next_event().await;
+    assert!(
+        matches!(event, hub::HubStreamEvent::Resync { .. }),
+        "窗口外游标必须收到 resync: {event:?}"
     );
 }

@@ -1,5 +1,5 @@
-//! hub 二进制库：路由、节点表命令、节点作用域转发、静态资源与类型导出入口。
-//! 总线与上游订阅在 `bus`，合并事件流在 `sse`。
+//! hub 二进制库：路由、节点作用域转发、静态资源与类型导出入口。
+//! 节点表命令在 `nodes`，总线与上游订阅在 `bus`，合并事件流在 `sse`。
 
 use std::collections::HashMap;
 use std::fmt;
@@ -9,8 +9,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use axum::body::{Body, Bytes};
-use axum::extract::rejection::JsonRejection;
-use axum::extract::{FromRequest, Path as UrlPath, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post};
@@ -19,12 +18,12 @@ use durable::{NodeMetadata, NodeName, Store};
 use futures_util::future::join_all;
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use rust_embed::Embed;
-use serde::de::DeserializeOwned;
 use ts_rs::TS;
 
 mod bus;
 mod error;
 mod node_probe;
+mod nodes;
 mod protocol;
 mod sse;
 
@@ -32,8 +31,8 @@ pub use bus::{Bus, NodeView};
 pub use error::ApiError;
 pub use protocol::{
     HUB_PROTOCOL_VERSION, HubBootstrap, HubErrorCode, HubErrorResponse, HubHealth, HubStatus,
-    HubStreamEvent, NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION, RegisterNodeRequest,
-    RenameNodeRequest,
+    HubStreamEvent, NodeMetrics, NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION,
+    RegisterNodeRequest, UpdateNodeRequest,
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
@@ -41,8 +40,10 @@ pub const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 pub const DEFAULT_DATABASE_FILE: &str = "hub.sqlite";
 /// 日志文件的前缀。
 pub const LOG_FILE_PREFIX: &str = "hub";
-const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
-const DEFAULT_REPLAY_WINDOW: usize = 4096;
+/// 广播通道的默认容量。
+pub const DEFAULT_BROADCAST_CAPACITY: usize = 4096;
+/// 回放窗口的默认条数。
+pub const DEFAULT_REPLAY_WINDOW: usize = 4096;
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// 上游事件流的空闲超时。等于 3 个上游 keep-alive 间隔（15 秒）。
@@ -117,17 +118,29 @@ impl HubState {
         };
         tracing::info!(nodes = nodes.len(), "恢复节点订阅");
         for node in nodes {
-            state.watch(node).map_err(std::io::Error::other)?;
+            if node.enabled {
+                state.watch(node).map_err(std::io::Error::other)?;
+            } else {
+                state
+                    .bus
+                    .set_view(node.name.clone(), NodeView::disabled())
+                    .map_err(std::io::Error::other)?;
+            }
         }
         Ok(state)
     }
 
+    /// 建立或替换该节点的上游订阅。替换时旧订阅被丢弃，从而立即断开。
+    ///
+    /// 新订阅取一个新纪元，旧订阅之后写出的探测结果会被忽略。
     fn watch(&self, node: NodeMetadata) -> Result<(), ApiError> {
+        let epoch = self.bus.invalidate_view(&node.name)?;
         let watcher = bus::NodeWatcher::start(
             Arc::clone(&self.bus),
             node.clone(),
             self.client.clone(),
             self.options,
+            epoch,
         );
         self.watchers()?.insert(node.name, watcher);
         Ok(())
@@ -136,6 +149,18 @@ impl HubState {
     fn unwatch(&self, name: &NodeName) -> Result<(), ApiError> {
         self.watchers()?.remove(name);
         Ok(())
+    }
+
+    /// 按启用标志建立或停止上游订阅，并把视图写成对应的等待状态。
+    fn apply_enabled(&self, node: NodeMetadata) -> Result<(), ApiError> {
+        if node.enabled {
+            self.bus
+                .set_view(node.name.clone(), NodeView::connecting())?;
+            self.watch(node)
+        } else {
+            self.unwatch(&node.name)?;
+            self.bus.set_view(node.name.clone(), NodeView::disabled())
+        }
     }
 
     /// 取 watcher 表的锁。毒化之后共享状态不再可信，只能作为内部错误上报。
@@ -184,8 +209,12 @@ pub fn router(state: HubState) -> Router {
         .route("/api/health", get(health))
         .route("/api/bootstrap", get(bootstrap))
         .route("/api/events", get(sse::events))
-        .route("/api/nodes", post(register_node))
-        .route("/api/nodes/{name}", delete(remove_node).patch(rename_node))
+        .route("/api/nodes", post(nodes::register_node))
+        .route(
+            "/api/nodes/{name}",
+            delete(nodes::remove_node).patch(nodes::update_node),
+        )
+        .route("/api/nodes/{name}/reconnect", post(nodes::reconnect_node))
         .route("/api/n/{node}", any(forward_node))
         .route("/api/n/{node}/{*rest}", any(forward_node))
         .fallback(static_asset)
@@ -231,7 +260,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     HubBootstrap::export_all(&config)?;
     HubStreamEvent::export_all(&config)?;
     RegisterNodeRequest::export_all(&config)?;
-    RenameNodeRequest::export_all(&config)?;
+    UpdateNodeRequest::export_all(&config)?;
     HubErrorCode::export_all(&config)?;
     HubErrorResponse::export_all(&config)?;
     NodeName::export_all(&config)?;
@@ -249,98 +278,18 @@ async fn health() -> Json<HubHealth> {
 async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, ApiError> {
     let max_hub_seq = state.bus.max_seq()?;
     let nodes = state.store.nodes().await?;
-    let snapshots = join_all(nodes.into_iter().map(|node| snapshot_of(&state, node)))
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()?;
+    let snapshots = join_all(
+        nodes
+            .into_iter()
+            .map(|node| nodes::snapshot_of(&state, node)),
+    )
+    .await
+    .into_iter()
+    .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(HubBootstrap {
         nodes: snapshots,
         max_hub_seq,
     }))
-}
-
-/// 单个节点的快照。总线认为不可达的节点不再探测，直接回它的说明。
-///
-/// 探测失败只体现在这次快照里，不回写总线视图：节点状态的唯一写入者是 watcher
-/// （ADR 0028）。「这次能否取到元数据」与「上游事件流是否通」是两个观测，允许短暂不一致。
-async fn snapshot_of(state: &HubState, node: NodeMetadata) -> Result<NodeSnapshot, ApiError> {
-    let view = state.bus.view(&node.name)?;
-    Ok(match view.status {
-        NodeStatus::Ok => {
-            match node_probe::fetch_bootstrap(&state.client, &node, state.options.connect_timeout)
-                .await
-            {
-                Ok(bootstrap) => NodeSnapshot::ok(node, bootstrap),
-                Err(detail) => NodeSnapshot::failed(node, NodeStatus::Unreachable, detail),
-            }
-        }
-        status => NodeSnapshot::failed(
-            node,
-            status,
-            view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
-        ),
-    })
-}
-
-async fn register_node(
-    State(state): State<HubState>,
-    JsonBody(request): JsonBody<RegisterNodeRequest>,
-) -> Result<(StatusCode, Json<NodeSnapshot>), ApiError> {
-    let name = NodeName::parse(&request.name)?;
-    let url = request.url.trim();
-    if url.is_empty() {
-        return Err(ApiError::invalid_request(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "节点 URL 不能为空".to_owned(),
-        ));
-    }
-    let node = state.store.register_node(name, url.to_owned()).await?;
-    state.bus.node_registered(node.clone())?;
-    state.watch(node.clone())?;
-    tracing::info!(node = %node.name, url = %node.url, "注册节点");
-    Ok((
-        StatusCode::CREATED,
-        Json(NodeSnapshot::failed(
-            node,
-            NodeStatus::Unreachable,
-            "正在建立上游连接".to_owned(),
-        )),
-    ))
-}
-
-/// 重命名节点。旧名立即失效，总线广播旧名的删除与新名的登记。
-async fn rename_node(
-    State(state): State<HubState>,
-    UrlPath(name): UrlPath<String>,
-    JsonBody(request): JsonBody<RenameNodeRequest>,
-) -> Result<Json<NodeSnapshot>, ApiError> {
-    let name = NodeName::parse(&name)?;
-    let next = NodeName::parse(&request.name)?;
-    let node = state.store.rename_node(&name, next).await?;
-    tracing::info!(from = %name, to = %node.name, "重命名节点");
-    if node.name != name {
-        state.unwatch(&name)?;
-        state.bus.node_removed(name)?;
-        state.bus.node_registered(node.clone())?;
-        state.watch(node.clone())?;
-    }
-    Ok(Json(NodeSnapshot::failed(
-        node,
-        NodeStatus::Unreachable,
-        "正在建立上游连接".to_owned(),
-    )))
-}
-
-async fn remove_node(
-    State(state): State<HubState>,
-    UrlPath(name): UrlPath<String>,
-) -> Result<StatusCode, ApiError> {
-    let name = NodeName::parse(&name)?;
-    state.store.remove_node(&name).await?;
-    tracing::info!(node = %name, "移除节点");
-    state.unwatch(&name)?;
-    state.bus.node_removed(name)?;
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// 节点作用域请求：剥掉 `/api/n/<node>` 前缀后原样转发，含 SSE 流式响应。
@@ -351,7 +300,7 @@ async fn forward_node(
     let uri = request.uri().clone();
     let (raw_name, rest) = split_node_path(uri.path())?;
     let name = NodeName::parse(raw_name)?;
-    let node = lookup(&state, &name).await?;
+    let node = nodes::lookup(&state, &name).await?;
     let view = state.bus.view(&name)?;
     if view.status != NodeStatus::Ok {
         return Err(ApiError::node_unavailable(
@@ -478,37 +427,8 @@ fn split_node_path(path: &str) -> Result<(&str, &str), ApiError> {
     }
 }
 
-async fn lookup(state: &HubState, name: &NodeName) -> Result<NodeMetadata, ApiError> {
-    state
-        .store
-        .node(name)
-        .await?
-        .ok_or_else(|| ApiError::unknown_node(format!("节点不存在: {name}")))
-}
-
 fn query_suffix(query: Option<&str>) -> String {
     query.map(|query| format!("?{query}")).unwrap_or_default()
-}
-
-/// 请求体；反序列化失败时返回协议错误信封而非纯文本。
-struct JsonBody<T>(T);
-
-impl<S, T> FromRequest<S> for JsonBody<T>
-where
-    T: DeserializeOwned,
-    S: Send + Sync,
-{
-    type Rejection = ApiError;
-
-    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let Json(value) =
-            Json::<T>::from_request(request, state)
-                .await
-                .map_err(|rejection: JsonRejection| {
-                    ApiError::invalid_request(rejection.status(), rejection.body_text())
-                })?;
-        Ok(Self(value))
-    }
 }
 
 async fn static_asset(uri: Uri) -> Response {

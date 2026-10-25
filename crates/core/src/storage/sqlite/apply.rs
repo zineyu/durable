@@ -24,6 +24,7 @@ pub(super) async fn apply_change(
         Change::InsertWorkspace(workspace) => insert_workspace(connection, workspace).await,
         Change::DeleteWorkspace(path) => delete_workspace(connection, path).await,
         Change::InsertNode(node) => insert_node(connection, node).await,
+        Change::UpdateNode(node) => update_node(connection, node).await,
         Change::DeleteNode(name) => delete_node(connection, name).await,
         Change::InsertSession(session) => insert_session(connection, session).await,
         Change::UpdateSession {
@@ -101,13 +102,33 @@ async fn insert_node(
     connection: &mut SqliteConnection,
     node: &NodeMetadata,
 ) -> Result<(), StoreError> {
-    sqlx::query("INSERT INTO node (name, url, created_at) VALUES (?1, ?2, ?3)")
-        .bind(node.name.as_str())
-        .bind(&node.url)
-        .bind(node.created_at)
-        .execute(&mut *connection)
-        .await?;
+    sqlx::query(
+        "INSERT INTO node (name, url, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+    )
+    .bind(node.name.as_str())
+    .bind(&node.url)
+    .bind(node.enabled)
+    .bind(node.created_at)
+    .bind(node.updated_at)
+    .execute(&mut *connection)
+    .await?;
     Ok(())
+}
+
+async fn update_node(
+    connection: &mut SqliteConnection,
+    node: &NodeMetadata,
+) -> Result<(), StoreError> {
+    let result =
+        sqlx::query("UPDATE node SET url = ?2, enabled = ?3, updated_at = ?4 WHERE name = ?1")
+            .bind(node.name.as_str())
+            .bind(&node.url)
+            .bind(node.enabled)
+            .bind(node.updated_at)
+            .execute(&mut *connection)
+            .await?;
+    ensure_written(&result, "更新 node")
 }
 
 async fn delete_node(connection: &mut SqliteConnection, name: &NodeName) -> Result<(), StoreError> {

@@ -80,6 +80,18 @@ impl std::error::Error for NodeNameError {}
 pub struct NodeMetadata {
     pub name: NodeName,
     pub url: String,
+    /// 停用的节点不建上游订阅，命令一律返回不可用。
+    pub enabled: bool,
     #[ts(type = "number")]
     pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+/// 节点行的局部更新。`None` 表示保留原值；`name` 是改名后的节点名。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NodeUpdate {
+    pub name: Option<NodeName>,
+    pub url: Option<String>,
+    pub enabled: Option<bool>,
 }
