@@ -245,8 +245,10 @@ async fn honours_single_event_replay_window() {
     harness.wait_for_status("laptop", hub::NodeStatus::Ok).await;
     wait_for_upstream(&node).await;
 
+    // 以当前序号为基准，避免把此前节点的登记与状态事件误当成第一条事实。
+    let before = harness.bootstrap().await.max_hub_seq;
     node.publish_fact(1, fact());
-    let first = harness.wait_for_seq_after(0).await;
+    let first = harness.wait_for_seq_after(before).await;
     node.publish_fact(2, fact());
     let second = harness.wait_for_seq_after(first).await;
 
