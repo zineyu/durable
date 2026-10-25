@@ -282,6 +282,7 @@ async fn removes_pending_queue_item_before_execution() {
         .expect("解析队列项");
 
     let running = harness.wait_busy(&session.id).await;
+    harness.wait_for_requests(1).await;
     assert_eq!(
         running.queue.iter().map(|item| item.id).collect::<Vec<_>>(),
         vec![second.id, third.id]

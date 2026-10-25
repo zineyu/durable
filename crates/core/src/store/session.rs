@@ -1,8 +1,7 @@
-//! session 的创建、改名、删除与读取，以及分支命令共用的空闲判定。
-//! 队列写入在 `queue`，run 生命周期在 `run`，分支命令在 `branch`。
+//! session 的创建、改名、删除与读取。
+//! 队列写入在 `queue`，run 生命周期在 `run`，分支命令在 `branch`，写命令入口在 `command`。
 
-use super::{Store, now_millis, snapshot_into_tree};
-use crate::change::Changeset;
+use super::{Store, snapshot_into_tree};
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
@@ -28,30 +27,30 @@ impl Store {
         workspace: &WorkspacePath,
         title: SessionTitle,
     ) -> Result<SessionMetadata, StoreError> {
-        let _line = self.line.lock().await;
-        if self.storage.workspace(workspace).await?.is_none() {
-            return Err(StoreError::WorkspaceNotFound(workspace.clone()));
-        }
-        let created_at = now_millis();
-        let session = SessionRecord {
-            id: SessionId::generate(),
-            workspace: workspace.clone(),
-            title,
-            title_auto: true,
-            created_at,
-            updated_at: created_at,
-            active_leaf: None,
-        };
-        let mut changes = Changeset::new();
-        changes.insert_session(session.clone());
-        changes.append_event(
-            FactEvent::SessionCreated {
-                session: session.metadata(0, false),
-            },
-            created_at,
-        );
-        self.commit(&changes).await?;
-        Ok(session.metadata(0, false))
+        self.command_root(async |command| {
+            if self.storage.workspace(workspace).await?.is_none() {
+                return Err(StoreError::WorkspaceNotFound(workspace.clone()));
+            }
+            let now = command.now();
+            let session = SessionRecord {
+                id: SessionId::generate(),
+                workspace: workspace.clone(),
+                title: title.clone(),
+                title_auto: true,
+                created_at: now,
+                updated_at: now,
+                active_leaf: None,
+            };
+            let view = command.insert_session(session.clone());
+            command.changes().append_event(
+                FactEvent::SessionCreated {
+                    session_id: session.id.clone(),
+                },
+                now,
+            );
+            Ok(view)
+        })
+        .await
     }
 
     /// 重命名 session。
@@ -65,35 +64,26 @@ impl Store {
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
-    /// 副作用：更新标题与 `updated_at`，写入 `session_renamed` 事实事件。
+    /// 副作用：标题变化时更新标题与 `updated_at`，写入 `session_renamed` 事实事件。
     pub async fn rename_session(
         &self,
         id: &SessionId,
         title: &SessionTitle,
     ) -> Result<SessionMetadata, StoreError> {
-        let _line = self.line.lock().await;
-        let mut session = self.find_session(id).await?;
-        session.title = title.clone();
-        session.title_auto = false;
-        session.updated_at = now_millis();
-        let pending = self.storage.queue_length(id).await?;
-        let busy = self.storage.busy(id).await?;
-        let mut changes = Changeset::new();
-        changes.update_session(
-            session.id.clone(),
-            session.title.clone(),
-            session.title_auto,
-            session.updated_at,
-            session.active_leaf,
-        );
-        changes.append_event(
-            FactEvent::SessionRenamed {
-                session: session.metadata(pending, busy),
-            },
-            session.updated_at,
-        );
-        self.commit(&changes).await?;
-        Ok(session.metadata(pending, busy))
+        self.command(id, async |command| {
+            command.session_mut().title = title.clone();
+            command.session_mut().title_auto = false;
+            let view = command.view()?;
+            let now = command.now();
+            command.changes().append_event(
+                FactEvent::SessionRenamed {
+                    session_id: id.clone(),
+                },
+                now,
+            );
+            Ok(view)
+        })
+        .await
     }
 
     /// 删除 session。
@@ -109,17 +99,18 @@ impl Store {
     /// 副作用：删除该 session 的消息树、队列、run 与历史事件，再写入 `session_deleted` 事实事件。
     /// 不访问 workspace 文件系统。
     pub async fn delete_session(&self, id: &SessionId) -> Result<(), StoreError> {
-        let _line = self.line.lock().await;
-        self.find_session(id).await?;
-        let mut changes = Changeset::new();
-        changes.delete_session(id.clone());
-        changes.append_event(
-            FactEvent::SessionDeleted {
-                session_id: id.clone(),
-            },
-            now_millis(),
-        );
-        self.commit(&changes).await.map(|_| ())
+        self.command(id, async |command| {
+            let now = command.now();
+            command.changes().delete_session(id.clone());
+            command.changes().append_event(
+                FactEvent::SessionDeleted {
+                    session_id: id.clone(),
+                },
+                now,
+            );
+            Ok(())
+        })
+        .await
     }
 
     /// 读取单个 session 的消息树。
@@ -165,17 +156,6 @@ impl Store {
         self.storage.message_bodies(id, ids).await
     }
 
-    /// 分支命令的前置条件：session 空闲且队列为空。队列非空优先于 run 进行中报告。
-    pub(super) async fn ensure_idle(&self, id: &SessionId) -> Result<(), StoreError> {
-        if self.storage.queue_length(id).await? > 0 {
-            return Err(StoreError::QueueNotEmpty(id.clone()));
-        }
-        if self.storage.busy(id).await? {
-            return Err(StoreError::RunInProgress(id.clone()));
-        }
-        Ok(())
-    }
-
     pub(super) async fn session_snapshot(
         &self,
         id: &SessionId,
@@ -184,15 +164,6 @@ impl Store {
             .session_tree(id)
             .await?
             .ok_or_else(|| StoreError::SessionNotFound(id.clone()))
-    }
-
-    /// session 是否有 running 的 run。
-    ///
-    /// # Errors
-    ///
-    /// - `StoreError::Database`：数据库读取失败。
-    pub async fn busy(&self, id: &SessionId) -> Result<bool, StoreError> {
-        self.storage.busy(id).await
     }
 
     /// 需要执行循环的 session：有 running 的 run 或队列非空。

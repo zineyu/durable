@@ -36,7 +36,7 @@
 | `event.rs` | `FactEvent` 领域事实枚举 |
 | `change.rs` | 一次事务内的变更清单 |
 | `stream.rs` | `StreamEvent` 与进程内广播 |
-| `store/` | 唯一写入线：`mod.rs` 门面与提交入口、其余子模块按对象分写入命令 |
+| `store/` | 唯一写入线：`mod.rs` 门面与读方法、`command.rs` 写命令入口、其余子模块按对象分写入命令 |
 | `storage/` | 快照查询与全部 SQL |
 
 `runtime`：`dirs.rs` 跨平台标准目录与启动路径；`logging.rs` 日志双写与轮转。

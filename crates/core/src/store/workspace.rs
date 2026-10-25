@@ -1,11 +1,11 @@
 //! workspace 的注册与移除。
-//! session 的创建与删除在 `session`；事实事件定义在 `crate::event`。
+//! session 的创建与删除在 `session`；事实事件定义在 `crate::event`；写命令入口在 `command`。
 
-use super::{Store, now_millis};
-use crate::change::Changeset;
+use super::Store;
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::WorkspacePath;
+use crate::store::Command;
 use crate::workspace::WorkspaceMetadata;
 
 impl Store {
@@ -25,11 +25,13 @@ impl Store {
         &self,
         path: &WorkspacePath,
     ) -> Result<WorkspaceMetadata, StoreError> {
-        let _line = self.line.lock().await;
-        if self.storage.workspace(path).await?.is_some() {
-            return Err(StoreError::WorkspaceDuplicate(path.clone()));
-        }
-        self.insert_workspace(path).await
+        self.command_root(async |command| {
+            if self.storage.workspace(path).await?.is_some() {
+                return Err(StoreError::WorkspaceDuplicate(path.clone()));
+            }
+            Ok(insert_workspace(command, path))
+        })
+        .await
     }
 
     /// 注册启动参数给出的初始 workspace。
@@ -42,40 +44,23 @@ impl Store {
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
-    /// 副作用：为新路径写入 workspace 行与事实事件。
+    /// 副作用：为新路径写入 workspace 行与事实事件。整批一次提交。
     pub async fn register_initial_workspaces(
         &self,
         paths: &[WorkspacePath],
     ) -> Result<(), StoreError> {
-        let _line = self.line.lock().await;
-        for path in paths {
-            if self.storage.workspace(path).await?.is_some() {
-                continue;
+        self.command_root(async |command| {
+            let mut added: Vec<&WorkspacePath> = Vec::new();
+            for path in paths {
+                if added.contains(&path) || self.storage.workspace(path).await?.is_some() {
+                    continue;
+                }
+                added.push(path);
+                insert_workspace(command, path);
             }
-            self.insert_workspace(path).await?;
-        }
-        Ok(())
-    }
-
-    async fn insert_workspace(
-        &self,
-        path: &WorkspacePath,
-    ) -> Result<WorkspaceMetadata, StoreError> {
-        let registered_at = now_millis();
-        let workspace = WorkspaceMetadata {
-            path: path.clone(),
-            registered_at,
-        };
-        let mut changes = Changeset::new();
-        changes.insert_workspace(workspace.clone());
-        changes.append_event(
-            FactEvent::WorkspaceRegistered {
-                workspace: workspace.clone(),
-            },
-            registered_at,
-        );
-        self.commit(&changes).await?;
-        Ok(workspace)
+            Ok(())
+        })
+        .await
     }
 
     /// 移除 workspace 注册记录。
@@ -91,19 +76,37 @@ impl Store {
     ///
     /// 副作用：删除 workspace 行，写入 `workspace_removed` 事实事件。
     pub async fn remove_workspace(&self, path: &WorkspacePath) -> Result<(), StoreError> {
-        let _line = self.line.lock().await;
-        if self.storage.workspace(path).await?.is_none() {
-            return Err(StoreError::WorkspaceNotFound(path.clone()));
-        }
-        if self.storage.session_count(path).await? > 0 {
-            return Err(StoreError::WorkspaceNotEmpty(path.clone()));
-        }
-        let mut changes = Changeset::new();
-        changes.delete_workspace(path.clone());
-        changes.append_event(
-            FactEvent::WorkspaceRemoved { path: path.clone() },
-            now_millis(),
-        );
-        self.commit(&changes).await.map(|_| ())
+        self.command_root(async |command| {
+            if self.storage.workspace(path).await?.is_none() {
+                return Err(StoreError::WorkspaceNotFound(path.clone()));
+            }
+            if self.storage.session_count(path).await? > 0 {
+                return Err(StoreError::WorkspaceNotEmpty(path.clone()));
+            }
+            let now = command.now();
+            command.changes().delete_workspace(path.clone());
+            command
+                .changes()
+                .append_event(FactEvent::WorkspaceRemoved { path: path.clone() }, now);
+            Ok(())
+        })
+        .await
     }
+}
+
+/// 登记一次 workspace 插入，并返回它的元数据。
+fn insert_workspace(command: &mut Command<'_>, path: &WorkspacePath) -> WorkspaceMetadata {
+    let registered_at = command.now();
+    let workspace = WorkspaceMetadata {
+        path: path.clone(),
+        registered_at,
+    };
+    command.changes().insert_workspace(workspace.clone());
+    command.changes().append_event(
+        FactEvent::WorkspaceRegistered {
+            workspace: workspace.clone(),
+        },
+        registered_at,
+    );
+    workspace
 }

@@ -81,6 +81,7 @@ impl Bus {
         node: NodeName,
         id: i64,
         session_id: Option<SessionId>,
+        session: Option<durable::SessionMetadata>,
         timestamp: i64,
         event: durable::FactEvent,
     ) -> Result<(), ApiError> {
@@ -90,6 +91,7 @@ impl Bus {
             node,
             id,
             session_id,
+            session,
             timestamp,
             event,
         })

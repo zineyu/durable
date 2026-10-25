@@ -53,16 +53,6 @@ fn request_contents(harness: &Harness, index: usize) -> Vec<String> {
         .collect()
 }
 
-async fn wait_for_requests(harness: &Harness, count: usize) {
-    for _ in 0..250 {
-        if harness.provider.requests().len() >= count {
-            return;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    panic!("provider 未在预期时间内收到 {count} 次请求");
-}
-
 /// 等待标记文件出现：`bash` 工具已经开始执行。
 async fn wait_for_marker(harness: &Harness, name: &str) {
     let marker = harness.workspace_path("workspace").join(name);
@@ -284,7 +274,7 @@ async fn downgrades_pending_steer_to_queue_on_cancel() {
     let session = harness.session("workspace").await;
     harness.submit_message(&session.id, "被打断的任务").await;
     harness.wait_busy(&session.id).await;
-    wait_for_requests(&harness, 1).await;
+    harness.wait_for_requests(1).await;
 
     let response = harness
         .submit_steer_message(&session.id, "改为另一个方向")
@@ -341,7 +331,7 @@ async fn keeps_transcript_after_anchor_delivered_by_later_run() {
     let session = harness.session("workspace").await;
     harness.submit_message(&session.id, "第一条").await;
     harness.wait_busy(&session.id).await;
-    wait_for_requests(&harness, 1).await;
+    harness.wait_for_requests(1).await;
     harness.submit_message(&session.id, "第二条").await;
     harness.submit_message(&session.id, "第三条").await;
     let steer: agent::QueueItem = harness

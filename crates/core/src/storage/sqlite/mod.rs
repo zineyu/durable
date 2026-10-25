@@ -7,7 +7,8 @@ mod rows;
 
 use self::apply::apply_change;
 use self::rows::{
-    parse_node, parse_queue_item, parse_run, parse_session, parse_session_metadata, parse_workspace,
+    parse_node, parse_queue_item, parse_run, parse_session, parse_session_head,
+    parse_session_metadata, parse_workspace,
 };
 
 use std::fmt;
@@ -24,13 +25,20 @@ use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
 use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
-use crate::session::SessionRecord;
-use crate::storage::Snapshot;
+use crate::session::{SessionMetadata, SessionRecord};
+use crate::storage::{SessionHead, Snapshot};
 use crate::workspace::WorkspaceMetadata;
 
 pub(crate) struct SqliteStorage {
     pool: SqlitePool,
 }
+
+/// session 记录与两个轻量计数的查询。全量快照与命令入口共用，两处计数因此一致。
+pub(crate) const SESSION_HEAD_SQL: &str =
+    "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf,
+            (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
+            (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
+     FROM session WHERE id = ?1";
 
 impl SqliteStorage {
     /// 打开 SQLite 文件并应用尚未执行的迁移。
@@ -138,15 +146,16 @@ impl SqliteStorage {
         .transpose()
     }
 
-    /// session 当前是否有 running 的 run。
-    pub(crate) async fn busy(&self, id: &SessionId) -> Result<bool, StoreError> {
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM run WHERE session_id = ?1 AND status = 'running'",
-        )
-        .bind(id.as_str())
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(count > 0)
+    /// 命令入口的轻量快照：记录、队列长度与是否有 running 的 run。
+    pub(crate) async fn session_head(
+        &self,
+        id: &SessionId,
+    ) -> Result<Option<SessionHead>, StoreError> {
+        let row = sqlx::query(SESSION_HEAD_SQL)
+            .bind(id.as_str())
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(parse_session_head).transpose()
     }
 
     pub(crate) async fn session_count(&self, workspace: &WorkspacePath) -> Result<i64, StoreError> {
@@ -204,28 +213,6 @@ impl SqliteStorage {
         .fetch_all(&self.pool)
         .await?;
         rows.iter().map(parse_queue_item).collect()
-    }
-
-    /// 全部仍为 running 的 run，按 id 升序。
-    pub(crate) async fn running_runs(&self) -> Result<Vec<RunRecord>, StoreError> {
-        let rows = sqlx::query(
-            "SELECT id, session_id, status, failure, created_at, updated_at FROM run
-             WHERE status = 'running' ORDER BY id ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        rows.iter().map(parse_run).collect()
-    }
-
-    /// session 的队列长度。
-    pub(crate) async fn queue_length(&self, id: &SessionId) -> Result<u32, StoreError> {
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM queue_item WHERE session_id = ?1")
-                .bind(id.as_str())
-                .fetch_one(&self.pool)
-                .await?;
-        u32::try_from(count)
-            .map_err(|_| StoreError::Invariant(format!("队列长度超出 u32: {count}")))
     }
 
     /// session 的消息节点数量。
@@ -290,11 +277,12 @@ impl SqliteStorage {
     pub(crate) async fn apply(
         &self,
         changes: &Changeset,
+        session: Option<&SessionMetadata>,
     ) -> Result<Vec<CommittedEvent>, StoreError> {
         let mut transaction = self.pool.begin().await?;
         let mut committed = Vec::new();
         for change in changes.operations() {
-            apply_change(&mut transaction, change, &mut committed).await?;
+            apply_change(&mut transaction, change, session, &mut committed).await?;
         }
         transaction.commit().await?;
         Ok(committed)
@@ -302,16 +290,22 @@ impl SqliteStorage {
 
     /// 按 id 升序回放事实事件。
     pub(crate) async fn events_after(&self, after: i64) -> Result<Vec<CommittedEvent>, StoreError> {
-        let rows =
-            sqlx::query("SELECT id, created_at, event FROM event WHERE id > ?1 ORDER BY id ASC")
-                .bind(after)
-                .fetch_all(&self.pool)
-                .await?;
+        let rows = sqlx::query(
+            "SELECT id, session, created_at, event FROM event WHERE id > ?1 ORDER BY id ASC",
+        )
+        .bind(after)
+        .fetch_all(&self.pool)
+        .await?;
         rows.iter()
             .map(|row| {
+                let session: Option<String> = row.get("session");
                 Ok(CommittedEvent {
                     id: row.get("id"),
                     event: serde_json::from_str::<FactEvent>(&row.get::<String, _>("event"))?,
+                    session: session
+                        .as_deref()
+                        .map(serde_json::from_str::<SessionMetadata>)
+                        .transpose()?,
                     created_at: row.get("created_at"),
                 })
             })

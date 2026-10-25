@@ -158,7 +158,11 @@ export function applyStreamEvent(state: ClientState, event: HubStreamEvent): Cli
       if (shard === undefined) {
         return advanced;
       }
-      return withShard(advanced, event.node, applyNodeFact(shard, event.id, event.event));
+      return withShard(
+        advanced,
+        event.node,
+        applyNodeFact(shard, { id: event.id, session: event.session, event: event.event }),
+      );
     }
     case 'delta': {
       const shard = state.nodes[event.node];

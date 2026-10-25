@@ -3,11 +3,13 @@ import type { MessageSkeleton } from "./MessageSkeleton";
 import type { QueueItem } from "./QueueItem";
 import type { RunRecord } from "./RunRecord";
 import type { SessionId } from "./SessionId";
-import type { SessionMetadata } from "./SessionMetadata";
 import type { WorkspaceMetadata } from "./WorkspaceMetadata";
 import type { WorkspacePath } from "./WorkspacePath";
 
 /**
  * 持久化到 SQLite 的领域事实事件。
+ *
+ * 载荷只带事实身份与事实本体；事实提交后的 session 视图在事件信封上（见
+ * [`CommittedEvent`]），不在载荷里。同一变体因此不因元数据变化而改变。
  */
-export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", session: SessionMetadata, } | { "kind": "session_renamed", session: SessionMetadata, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "message_updated", session: SessionMetadata, message: MessageSkeleton, } | { "kind": "active_leaf_changed", session: SessionMetadata, activeLeaf: number | null, } | { "kind": "message_queued", session: SessionMetadata, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", session: SessionMetadata, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", session: SessionMetadata, item: QueueItem, } | { "kind": "run_started", session: SessionMetadata, run: RunRecord, } | { "kind": "run_finished", session: SessionMetadata, run: RunRecord, };
+export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", sessionId: SessionId, } | { "kind": "session_renamed", sessionId: SessionId, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "message_updated", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "active_leaf_changed", sessionId: SessionId, activeLeaf: number | null, } | { "kind": "message_queued", sessionId: SessionId, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", sessionId: SessionId, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", sessionId: SessionId, item: QueueItem, } | { "kind": "run_started", sessionId: SessionId, run: RunRecord, } | { "kind": "run_finished", sessionId: SessionId, run: RunRecord, };

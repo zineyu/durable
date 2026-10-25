@@ -11,13 +11,14 @@ use crate::message::{ContentPart, Message};
 use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
-use crate::session::SessionRecord;
+use crate::session::{SessionMetadata, SessionRecord};
 use crate::workspace::WorkspaceMetadata;
 
 /// 把单条变更写入事务；事实事件在写入后追加到 `committed`。
 pub(super) async fn apply_change(
     connection: &mut SqliteConnection,
     change: &Change,
+    session: Option<&SessionMetadata>,
     committed: &mut Vec<CommittedEvent>,
 ) -> Result<(), StoreError> {
     match change {
@@ -70,7 +71,7 @@ pub(super) async fn apply_change(
             updated_at,
         } => update_run(connection, *id, *status, failure.as_ref(), *updated_at).await,
         Change::AppendEvent { event, created_at } => {
-            append_event(connection, event, *created_at, committed).await
+            append_event(connection, event, session, *created_at, committed).await
         }
     }
 }
@@ -371,19 +372,23 @@ async fn update_run(
 async fn append_event(
     connection: &mut SqliteConnection,
     event: &FactEvent,
+    session: Option<&SessionMetadata>,
     created_at: i64,
     committed: &mut Vec<CommittedEvent>,
 ) -> Result<(), StoreError> {
-    let result =
-        sqlx::query("INSERT INTO event (session_id, created_at, event) VALUES (?1, ?2, ?3)")
-            .bind(event.session_id().map(SessionId::as_str))
-            .bind(created_at)
-            .bind(serde_json::to_string(event)?)
-            .execute(&mut *connection)
-            .await?;
+    let result = sqlx::query(
+        "INSERT INTO event (session_id, session, created_at, event) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind(event.session_id().map(SessionId::as_str))
+    .bind(session.map(serde_json::to_string).transpose()?)
+    .bind(created_at)
+    .bind(serde_json::to_string(event)?)
+    .execute(&mut *connection)
+    .await?;
     committed.push(CommittedEvent {
         id: result.last_insert_rowid(),
         event: event.clone(),
+        session: session.cloned(),
         created_at,
     });
     Ok(())

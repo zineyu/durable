@@ -7,10 +7,10 @@ use sqlx::Row;
 use sqlx::sqlite::SqliteConnection;
 
 use super::rows::{
-    parse_busy, parse_message, parse_part_skeleton, parse_queue_item, parse_queue_length,
-    parse_run, parse_session, parse_skeleton,
+    parse_message, parse_part_skeleton, parse_queue_item, parse_run, parse_session_head,
+    parse_skeleton,
 };
-use super::{SqliteStorage, corrupted};
+use super::{SESSION_HEAD_SQL, SqliteStorage, corrupted};
 use crate::error::StoreError;
 use crate::id::{MessageId, SessionId};
 use crate::message::{ContentPart, Message, MessageBody, MessageNode, MessageSkeleton};
@@ -27,22 +27,15 @@ impl SqliteStorage {
         let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
             .fetch_one(&mut *transaction)
             .await?;
-        let row = sqlx::query(
-            "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf,
-                    (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
-                    (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
-             FROM session WHERE id = ?1",
-        )
-        .bind(id.as_str())
-        .fetch_optional(&mut *transaction)
-        .await?;
+        let row = sqlx::query(SESSION_HEAD_SQL)
+            .bind(id.as_str())
+            .fetch_optional(&mut *transaction)
+            .await?;
         let Some(row) = row else {
             transaction.commit().await?;
             return Ok(None);
         };
-        let session = parse_session(&row)?;
-        let queue_length = parse_queue_length(&row)?;
-        let busy = parse_busy(&row);
+        let head = parse_session_head(&row)?;
         let messages = session_messages(&mut transaction, id).await?;
         let queue = sqlx::query(
             "SELECT id, text, anchor, created_at, pending_steer FROM queue_item WHERE session_id = ?1 ORDER BY id ASC",
@@ -65,9 +58,7 @@ impl SqliteStorage {
         .collect::<Result<Vec<RunRecord>, _>>()?;
         transaction.commit().await?;
         Ok(Some(SessionSnapshot {
-            session,
-            busy,
-            queue_length,
+            head,
             messages,
             queue,
             runs,

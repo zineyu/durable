@@ -45,3 +45,4 @@
 | [0039](0039-steer-at-step-boundary.md) | 插话在步骤边界接入当前 run | 已接受 | `mode=steer` 的插话在提交时入树，在模型请求与收尾前的步骤边界接入同一个 run；工具不打断；run 结束未消费则降级为排队。 |
 | [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已接受 | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |
 | [0041](0041-node-table-commands-write-node-view.md) | 节点表命令可以写节点视图 | 已接受。细化 ADR 0028 的状态归属 | 探测结果只由 watcher 写，停用与等待连接的管理状态由节点表命令写，共用同一条 node_status_changed。 |
+| [0042](0042-fact-envelope-carries-session-view.md) | 事实信封携带 session 视图 | 已接受。取代 ADR 0013 的队列长度递减约定，细化 ADR 0012 的单一写入线 | 事实载荷只留身份，session 视图由命令入口推导并落在事件信封上，`event` 表新增 `session` 列，协议版本升到 5。 |

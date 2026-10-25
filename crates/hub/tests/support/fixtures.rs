@@ -341,6 +341,23 @@ pub(crate) mod scripted {
             self.publish(durable::StreamEvent::Fact {
                 id,
                 session_id: None,
+                session: None,
+                timestamp: id,
+                event,
+            });
+        }
+
+        /// 向上游推送一条带 session 视图的事实。
+        pub(crate) fn publish_fact_with_view(
+            &self,
+            id: i64,
+            session: durable::SessionMetadata,
+            event: durable::FactEvent,
+        ) {
+            self.publish(durable::StreamEvent::Fact {
+                id,
+                session_id: Some(session.id.clone()),
+                session: Some(session),
                 timestamp: id,
                 event,
             });

@@ -11,9 +11,10 @@ import { dropFinished, dropPlaceholder, forgetBodies, invalidateBody } from './b
 import type { MessagePlaceholder } from './bodies';
 import type { RetryState } from './types';
 
-/// 已应用的事实。快照可能比已应用的尾部旧，用它补齐快照水位之后的事实。
-type AppliedFact = {
+/// 一条事实事件的信封：事件 id、事实提交后的 session 视图与事实本体。
+export type FactEnvelope = {
   id: number;
+  session: SessionMetadata | null;
   event: FactEvent;
 };
 
@@ -47,7 +48,8 @@ export type NodeState = {
   lastSeenAt: Record<string, number>;
   /// 已应用的最大事实事件 id；`null` 表示尚未装配快照基线。
   lastEventId: number | null;
-  applied: AppliedFact[];
+  /// 已应用的事实。快照可能比已应用的尾部旧，用它补齐快照水位之后的事实。
+  applied: FactEnvelope[];
 };
 
 export const emptyNodeState: NodeState = {
@@ -82,20 +84,30 @@ export function loadNodeBootstrap(state: NodeState, bootstrap: BootstrapResponse
   });
 }
 
-export function applyNodeFact(state: NodeState, id: number, event: FactEvent): NodeState {
-  if (state.lastEventId !== null && id <= state.lastEventId) {
+export function applyNodeFact(state: NodeState, fact: FactEnvelope): NodeState {
+  if (state.lastEventId !== null && fact.id <= state.lastEventId) {
     return state;
   }
-  const applied = applyFactEvent({ ...state, lastEventId: id }, event);
+  const applied = applyFactEvent({ ...state, lastEventId: fact.id }, fact);
   return {
     ...applied,
-    applied: [...state.applied.filter((fact) => fact.id !== id), { id, event }].slice(
+    applied: [...state.applied.filter((entry) => entry.id !== fact.id), fact].slice(
       -APPLIED_FACT_LIMIT,
     ),
   };
 }
 
-export function applyFactEvent(state: NodeState, event: FactEvent): NodeState {
+/// 属于 session 的事实的信封视图。协议保证这类事实一定带视图。
+function sessionOf(fact: FactEnvelope): SessionMetadata {
+  const session = fact.session;
+  if (session === null) {
+    throw new Error(`事实事件 ${fact.id} 缺少 session 视图`);
+  }
+  return session;
+}
+
+export function applyFactEvent(state: NodeState, fact: FactEnvelope): NodeState {
+  const event = fact.event;
   switch (event.kind) {
     case 'workspace_registered':
       return { ...state, workspaces: upsertWorkspace(state.workspaces, event.workspace) };
@@ -103,65 +115,89 @@ export function applyFactEvent(state: NodeState, event: FactEvent): NodeState {
       return removeWorkspace(state, event.path);
     case 'session_created':
     case 'session_renamed':
-      return storeSession(state, event.session);
-    case 'message_appended':
+      return storeSession(state, sessionOf(fact));
+    case 'message_appended': {
+      const session = sessionOf(fact);
       return dropPlaceholder(
-        withSession(state, event.session, (tree) => ({
+        withSession(state, session, (tree) => ({
           ...tree,
           nodes: upsertNode(tree.nodes, event.message),
         })),
-        event.session.id,
+        session.id,
         event.message.id,
       );
+    }
     case 'message_updated': {
-      const updated = withSession(state, event.session, (tree) => ({
+      const session = sessionOf(fact);
+      const updated = withSession(state, session, (tree) => ({
         ...tree,
         nodes: upsertNode(tree.nodes, event.message),
       }));
       return dropPlaceholder(
         invalidateBody(updated, event.message.id),
-        event.session.id,
+        session.id,
         event.message.id,
       );
     }
     case 'active_leaf_changed':
-      return withSession(state, event.session, (tree) => ({
+      return withSession(state, sessionOf(fact), (tree) => ({
         ...tree,
         activeLeaf: event.activeLeaf,
       }));
     case 'message_queued':
-      return withSession(state, event.session, (tree) => ({
+      return withSession(state, sessionOf(fact), (tree) => ({
         ...tree,
         queue: appendQueue(tree.queue, event.item),
       }));
     case 'steer_applied':
-      return storeSession(state, event.session);
+      return storeSession(state, sessionOf(fact));
     case 'steer_downgraded':
-      return withSession(state, event.session, (tree) => ({
+      return withSession(state, sessionOf(fact), (tree) => ({
         ...tree,
         queue: tree.queue.map((item) => (item.id === event.item.id ? event.item : item)),
       }));
-    case 'run_started':
+    case 'run_started': {
+      const session = sessionOf(fact);
       return clearRetry(
-        withSession(state, event.session, (tree) => ({
+        withSession(state, session, (tree) => ({
           ...tree,
           runs: upsertRun(tree.runs, event.run),
         })),
-        event.session.id,
+        session.id,
       );
-    case 'run_finished':
+    }
+    case 'run_finished': {
+      const session = sessionOf(fact);
       return clearRetry(
         dropFinished(
-          withSession(state, event.session, (tree) => ({
+          withSession(state, session, (tree) => ({
             ...tree,
             runs: upsertRun(tree.runs, event.run),
           })),
-          event.session.id,
+          session.id,
         ),
-        event.session.id,
+        session.id,
       );
-    case 'queue_item_removed':
-      return removeQueueItem(state, event.sessionId, event.itemId);
+    }
+    case 'queue_item_removed': {
+      const update = (tree: SessionTreeState): SessionTreeState => ({
+        ...tree,
+        queue: tree.queue.filter((item) => item.id !== event.itemId),
+      });
+      const session = fact.session;
+      // 迁移前的 queue_item_removed 没有 session 视图：只删队列项，不改 session 元数据。
+      if (session === null) {
+        const tree = state.trees[event.sessionId];
+        if (tree === undefined) {
+          return state;
+        }
+        return {
+          ...state,
+          trees: { ...state.trees, [event.sessionId]: update(tree) },
+        };
+      }
+      return withSession(state, session, update);
+    }
     case 'session_deleted':
       return removeSession(state, event.sessionId);
     default: {
@@ -234,7 +270,7 @@ export function sessionById(state: NodeState, id: string): SessionMetadata | und
 function rebase(state: NodeState, watermark: number, base: NodeState): NodeState {
   return state.applied
     .filter((fact) => fact.id > watermark)
-    .reduce((current, fact) => applyNodeFact(current, fact.id, fact.event), base);
+    .reduce((current, fact) => applyNodeFact(current, fact), base);
 }
 
 function withSession(
@@ -262,26 +298,6 @@ export function clearRetry(state: NodeState, sessionId: string): NodeState {
     return state;
   }
   return { ...state, retries: withoutRetryKey(state.retries, sessionId) };
-}
-
-function removeQueueItem(state: NodeState, sessionId: string, itemId: number): NodeState {
-  const sessions = state.sessions.map((session) =>
-    session.id === sessionId
-      ? { ...session, queueLength: Math.max(0, session.queueLength - 1) }
-      : session,
-  );
-  const tree = state.trees[sessionId];
-  if (tree === undefined) {
-    return { ...state, sessions };
-  }
-  return {
-    ...state,
-    sessions,
-    trees: {
-      ...state.trees,
-      [sessionId]: { ...tree, queue: tree.queue.filter((item) => item.id !== itemId) },
-    },
-  };
 }
 
 function removeSession(state: NodeState, sessionId: string): NodeState {
