@@ -18,6 +18,7 @@ import { Sidebar } from './components/Sidebar';
 import { buildPalette, filterPalette, stepPaletteIndex } from './view/command-palette';
 import type { PaletteEntry } from './view/command-palette';
 import {
+  hasSession,
   nodeSummary,
   orderedSessions,
   paletteSessions,
@@ -99,15 +100,15 @@ export function App(): ReactElement {
       return;
     }
     const current = state.hub.nodes.find((entry) => entry.name === selectedNode);
-    if (current?.status !== 'ok' || summary === null) {
+    if (current?.status !== 'ok' || shard === undefined) {
       return;
     }
     const last = readLastSession(storage, selectedNode);
-    if (last === null || !orderedSessions(summary.workspaces).some((entry) => entry.id === last)) {
+    if (last === null || !hasSession(shard, last)) {
       return;
     }
     navigate(selectedNode, last);
-  }, [navigate, selectedNode, selection.sessionId, state.hub.nodes, summary]);
+  }, [navigate, selectedNode, selection.sessionId, shard, state.hub.nodes]);
 
   useEffect(() => {
     if (selectedNode !== null && selection.sessionId !== null) {

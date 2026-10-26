@@ -32,11 +32,11 @@ import type {
 /// 组件渲染在 `components/`。
 
 export function sessionSummaries(shard: NodeState): SessionSummary[] {
-  return rowsOf(shard).map((row) => row.summary);
+  return summaryRows(shard).map((row) => row.summary);
 }
 
 export function workspaceSummaries(shard: NodeState): WorkspaceSummary[] {
-  const rows = rowsOf(shard);
+  const rows = summaryRows(shard);
   return [...shard.workspaces].sort(compareWorkspaces).map((workspace) => ({
     id: toWorkspaceId(workspace.path),
     path: toWorkspacePath(workspace.path),
@@ -81,21 +81,17 @@ export function runningEntries(
   shards: Record<NodeName, NodeState>,
 ): RunningEntry[] {
   const entries: RunningEntry[] = [];
-  for (const record of nodes) {
-    const shard = shards[record.name];
-    if (shard === undefined) {
-      continue;
-    }
-    for (const session of shard.sessions) {
-      if (!session.busy) {
+  for (const { record, shard } of withShard(nodes, shards)) {
+    for (const summary of sessionSummaries(shard)) {
+      if (summary.state !== 'running') {
         continue;
       }
-      const running = shard.trees[session.id]?.runs.find((run) => run.status === 'running');
+      const running = shard.trees[summary.id]?.runs.find((run) => run.status === 'running');
       entries.push({
         node: record.name,
-        sessionId: toSessionId(session.id),
-        title: session.title,
-        queueLength: session.queueLength,
+        sessionId: summary.id,
+        title: summary.title,
+        queueLength: summary.queuedCount,
         startedAt: running?.createdAt ?? null,
       });
     }
@@ -108,28 +104,40 @@ export function runningEntries(
   );
 }
 
-/// 跨节点的 session 列表，供命令面板使用。
+/// 跨节点的 session 列表，供命令面板使用。workspace 不在摘要里，因此取整行。
 export function paletteSessions(
   nodes: NodeRecord[],
   shards: Record<NodeName, NodeState>,
 ): PaletteSession[] {
-  const sessions: PaletteSession[] = [];
+  return withShard(nodes, shards).flatMap(({ record, shard }) =>
+    summaryRows(shard).map(({ session, summary }) => ({
+      node: record.name,
+      sessionId: summary.id,
+      title: summary.title,
+      workspace: session.workspace,
+      updatedAt: summary.updatedAt,
+    })),
+  );
+}
+
+/// 节点表里已有分片的节点。跨节点派生只经这里遍历分片表。
+function withShard(
+  nodes: NodeRecord[],
+  shards: Record<NodeName, NodeState>,
+): { record: NodeRecord; shard: NodeState }[] {
+  const entries: { record: NodeRecord; shard: NodeState }[] = [];
   for (const record of nodes) {
     const shard = shards[record.name];
-    if (shard === undefined) {
-      continue;
-    }
-    for (const session of shard.sessions) {
-      sessions.push({
-        node: record.name,
-        sessionId: toSessionId(session.id),
-        title: session.title,
-        workspace: session.workspace,
-        updatedAt: session.updatedAt,
-      });
+    if (shard !== undefined) {
+      entries.push({ record, shard });
     }
   }
-  return sessions;
+  return entries;
+}
+
+/// 该 session 是否已进入分片。正文拉取与树快照据此决定要不要发请求。
+export function hasSession(shard: NodeState, sessionId: string): boolean {
+  return shard.sessions.some((session) => session.id === sessionId);
 }
 
 /// `ok` 但尚无分片的节点名。调用方据此取节点作用域的 bootstrap。
@@ -173,7 +181,7 @@ export function sessionHistory(transcript: TranscriptEntry[]): string[] {
   return history;
 }
 
-function rowsOf(
+function summaryRows(
   shard: NodeState,
 ): { session: SessionMetadata; summary: SessionSummary }[] {
   return shard.sessions.map((session) => ({ session, summary: summaryOf(shard, session) }));

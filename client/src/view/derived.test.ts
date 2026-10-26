@@ -11,6 +11,7 @@ import {
   nodeSummary,
   orderedSessions,
   paletteSessions,
+  hasSession,
   runningEntries,
   sessionSummaries,
   sessionView,
@@ -416,6 +417,14 @@ describe('缺失正文', () => {
 
     expect(missingBodyIds(value, 's-1')).toEqual([3]);
     expect(missingBodyIds(value, 'missing')).toEqual([]);
+  });
+});
+
+describe('session 存在判定', () => {
+  it('分片里有该 session 才算存在', () => {
+    expect(hasSession(shard(), 's-1')).toBe(true);
+    expect(hasSession(shard(), 'missing')).toBe(false);
+    expect(hasSession(shard({ sessions: [] }), 's-1')).toBe(false);
   });
 });
 
