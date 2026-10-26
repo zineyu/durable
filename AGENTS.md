@@ -55,7 +55,7 @@
 
 `hub`：`lib.rs` 路由、节点作用域转发与静态资源；`nodes.rs` 节点表命令与节点快照；`bus/` 广播序号、回放窗口、节点视图、进程内计数与上游 watcher；`sse.rs` 合并事件流；`node_probe.rs` 上游探测；`protocol.rs` 与 `error.rs`。
 
-`client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer 与状态推导；`components/`、`stories/`、`styles/`。
+`client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer、派生视图与状态推导；`components/`、`stories/`、`styles/`。
 
 ## 模块头
 
@@ -73,7 +73,8 @@
 | hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus/watch.rs` |
 | 节点表命令或节点快照 | `crates/hub/src/nodes.rs`，路由在 `lib.rs` |
 | 协议类型与 TS 生成 | `crates/agent/src/lib.rs`、`crates/hub/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
-| 客户端状态推导 | `client/src/view/reducer.ts` 与 `node-state.ts` |
+| 客户端状态推导 | 事实归约在 `client/src/view/reducer.ts` 与 `node-state.ts`，呈现所需的派生在 `derived.ts` |
+| 客户端写命令与对话框 | `client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
 | 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
 | 集成测试 | `crates/*/tests/`，脚手架在 `tests/support/` |
 | 浏览器端到端测试 | `client/e2e/` |

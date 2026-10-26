@@ -9,7 +9,7 @@ ADR 0002 定义单一 SSE 事件流与 `after` 游标，ADR 0004 与 ADR 0016 �
 
 ## 决策
 
-**单一纯 reducer 持有全部业务状态**。`ClientState` 含模型名、workspace 与 session 元数据、按 session id 索引的树状态（节点、active leaf、队列、run）、连接状态、最后应用的事件 id 与当前错误。bootstrap、事实事件、token 增量、`session_tree` 快照、连接状态与错误都经同一个 `reduce(state, action)` 归约。组件只接收派生后的 props。
+**单一纯 reducer 持有全部业务状态**。ADR 0044 在 reducer 之上加了派生视图层：本 ADR 的「组件只接收派生后的 props」由 `client/src/view/derived.ts` 兑现，reducer 的语义不变。`ClientState` 含模型名、workspace 与 session 元数据、按 session id 索引的树状态（节点、active leaf、队列、run）、连接状态、最后应用的事件 id 与当前错误。bootstrap、事实事件、token 增量、`session_tree` 快照、连接状态与错误都经同一个 `reduce(state, action)` 归约。组件只接收派生后的 props。
 
 **transcript 由节点与 active leaf 推导**。transcript 是从 root 沿 `parent_id` 到 active leaf 的路径。分支切换器显示在存在兄弟（同一 `parent_id`）的节点上，序号取兄弟按 id 升序的位置。切换分支只调用 `POST /api/sessions/{id}/active-leaf`；新叶子仍由 server 按「目标子树中 id 最大的叶子」推导，客户端不复制该规则。
 

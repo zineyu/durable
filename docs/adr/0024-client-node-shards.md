@@ -11,7 +11,7 @@ ADR 0018 的续传只有一个游标，且事实事件 id 就是快照水位。�
 
 ## 决策
 
-**状态分两层。** `ClientState` 是 `{ hub: { nodes, selected, cursor }, nodes: Record<node, NodeState> }`。`hub` 层持有节点表、选中节点与广播游标；`NodeState` 分片持有该节点的 model、workspace、session、树与已应用的最大事实事件 id。分片由既有事实归约推导，分片之间互不影响。
+**状态分两层。** `ClientState` 是 `{ hub: { nodes, cursor }, nodes: Record<node, NodeState> }`。`hub` 层持有节点表与广播游标（选中位置的处置见下文与 ADR 0044）；`NodeState` 分片持有该节点的 model、workspace、session、树与已应用的最大事实事件 id。分片由既有事实归约推导，分片之间互不影响。
 
 **分片只在快照落地后存在。** 非 `ok` 节点没有分片，其列表为空。分片建立前到达的事实只推进广播游标，不建立分片；`ok` 状态到达时客户端取一次节点作用域的 `bootstrap`。事实包含在快照里，因此丢弃早到的事实不丢数据。
 
@@ -19,7 +19,7 @@ ADR 0018 的续传只有一个游标，且事实事件 id 就是快照水位。�
 
 **快照在分片内补齐尾部。** 应用快照时，分片水位取 `min(水位, 快照水位)`，分片保留最近若干条已应用事实；随后按升序重放缓存的、id 大于快照水位的事实。`hub.cursor` 不回退：回退它只会重放已丢弃的广播序号。
 
-**选中节点是 URL 的一部分。** `#/n/<node>/s/<session_id>` 决定选中节点与 session，`hashchange` 只设置 reducer 的选中节点。切换节点因此零网络请求，分片内容不变。
+**选中节点是 URL 的一部分。** `#/n/<node>/s/<session_id>` 决定选中节点与 session，URL 哈希是选中位置的唯一所有者。切换节点因此零网络请求，分片内容不变。ADR 0044 删除了 `hub.selected`：它只写不读，与哈希并存会让同一份状态有两个所有者。
 
 ## 后果
 
