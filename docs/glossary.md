@@ -81,7 +81,10 @@
 | 协议版本 | `/api/health` 返回的协议版本。与 hub 期望不符时该节点为 `incompatible`。 |
 | 取消信号 | 中止在途模型请求与工具执行的显式信号。取消后 run 以 `cancelled` 结束，未定型的内容丢弃。 |
 | bootstrap | 客户端启动时获取的元数据快照与事件游标。 |
-| 客户端状态 | 浏览器内由纯 reducer 从 bootstrap、事实事件、token 增量与 session 树快照推导的视图模型。 |
+| 客户端状态 | 浏览器内由纯 reducer 从 bootstrap、事实事件、token 增量与 session 树快照归约出的节点表与节点分片。呈现所需的数据不在此处，由派生视图给出。 |
+| 派生视图 | 由节点分片经纯函数推导出的呈现数据，代码在 `client/src/view/derived.ts`。节点内的 session 摘要全算；完整视图只对可见 session 计算。组件只接收派生后的 props，不读分片。 |
+| session 摘要 | 一个 session 的标题、状态、未读数、最近结局、队列长度与更新时间。侧栏分组、命令面板与运行中列表读它。 |
+| session 派生视图 | 一个 session 的完整派生数据：摘要、transcript（消息连同正文、消息状态与说明、分支位置）、工具结局、队列、未定型占位与空闲判定。主面板、session 内搜索与 Markdown 导出读它。 |
 | 命令面板 | `Ctrl/⌘+K` 打开的单一面板。分 session（跨节点）、动作与节点三组，条目可模糊过滤并用键盘执行。 |
 | 草稿 | 按 (node, session) 存在浏览器 `localStorage` 的未发送输入。含折叠的长粘贴块。 |
 | 未读标记 | 客户端分片内按 `lastSeenAt` 推导的 session 状态：未读、最近完成或最近失败。只在本地，不入库。 |
