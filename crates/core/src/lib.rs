@@ -17,7 +17,7 @@ mod tool;
 mod workspace;
 
 pub use change::Changeset;
-pub use error::StoreError;
+pub use error::{StoreError, StoreErrorClass, StoreErrorKind};
 pub use event::{CommittedEvent, FactEvent};
 pub use id::{
     DEFAULT_SESSION_TITLE, MessageId, MessageIdError, QueueItemId, QueueItemIdError, RunId,

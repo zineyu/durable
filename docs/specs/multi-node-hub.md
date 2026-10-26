@@ -142,7 +142,7 @@
 
 类型命名：`hub` 自有的协议类型加 `Hub` 前缀（`HubBootstrap`、`HubHealth`、`HubErrorCode`、`HubErrorResponse`），避免与 agent 导出的同名类型在生成目录里互相覆盖。节点领域类型（`NodeName`、`NodeSnapshot`）由 `hub` 导出。
 
-新增错误码：`unknown_node`、`node_name_taken`、`node_name_invalid`、`node_unavailable`。
+新增错误码：`node_not_found`、`node_name_taken`、`node_name_invalid`、`node_unavailable`。
 
 ### 总线
 
@@ -215,16 +215,16 @@ stateDiagram-v2
 
 - 两个可达节点加一个不可达 URL 的 bootstrap 返回 200，状态分别为 `ok`、`ok`、`unreachable`。
 - `POST /api/n/a/sessions` 只落在节点 a；节点 b 的 session 列表不变。
-- 未知节点名返回 `unknown_node`；非 `ok` 节点的命令返回 `node_unavailable`。
+- 未知节点名返回 `node_not_found`；非 `ok` 节点的命令返回 `node_unavailable`。
 - 重复注册同一节点名返回 `node_name_taken`；空名返回 `node_name_invalid`。
-- 改名保留 URL 与注册时间，旧名立即返回 `unknown_node`，新名可达；改名对已打开的客户端表现为 `node_removed` 加 `node_registered`。
+- 改名保留 URL 与注册时间，旧名立即返回 `node_not_found`，新名可达；改名对已打开的客户端表现为 `node_removed` 加 `node_registered`。
 - 合并事件流的 `hub_seq` 严格递增且不重复。
 - 游标落在窗口内时回放缺失事件，且不重复已见事件。
 - 游标落在窗口外时返回 resync 指示。
 - 落后的订阅者收到 `resync` 且其流结束；同一 hub 的其它订阅者不受影响。该条由 `hub` 内 SSE 处理器的单元测试覆盖：落后在 socket 缓冲层面无法稳定复现，测试直接驱动订阅到事件序列的映射。
 - 协议版本不匹配的 `agent` 使节点状态变为 `incompatible`。
 - `hub` 重启后窗口为空，带旧游标的订阅要求 resync。
-- 删除节点后其上游流关闭，且再次请求该节点返回 `unknown_node`。
+- 删除节点后其上游流关闭，且再次请求该节点返回 `node_not_found`。
 - 改 URL 后命令转发到新地址，节点记录与 `created_at` 不变，客户端收到 `node_updated`。
 - 停用后节点表仍在、状态为 `unreachable` 且说明「节点已停用」，命令返回 `node_unavailable`，且不再有上游连接尝试。
 - 启用后无需等待退避即建立上游连接；手动重连在隧道恢复后 1 秒内把状态改回 `ok`。

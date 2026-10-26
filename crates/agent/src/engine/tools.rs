@@ -2,13 +2,11 @@
 //! 剩余调用以「结果未知」入树，保持 assistant 的调用与 tool 节点配对。
 //! 工具实现与 workspace 边界在 `crate::tools`；续跑点推导在 `recover`。
 
-use durable::{
-    MessageId, RunFailure, RunFailureCode, RunId, RunStart, SessionId, StoreError, ToolResultState,
-};
+use durable::{MessageId, RunFailure, RunId, RunStart, SessionId, StoreError, ToolResultState};
 
 use crate::cancel::Cancellation;
-use crate::engine::RunEngine;
 use crate::engine::recover::PendingTool;
+use crate::engine::{RunEngine, storage_failure};
 use crate::tools::{ToolCall, ToolContext};
 
 impl RunEngine {
@@ -31,7 +29,7 @@ impl RunEngine {
             let message_id = self
                 .ensure_tool_node(session, start.run.id, &tool)
                 .await
-                .map_err(|error| upstream(&error))?;
+                .map_err(|error| storage_failure(&error))?;
             let call = ToolCall {
                 id: tool.call_id,
                 name: tool.name,
@@ -43,11 +41,11 @@ impl RunEngine {
             self.store
                 .finish_tool(session, message_id, &call.id, state)
                 .await
-                .map_err(|error| upstream(&error))?;
+                .map_err(|error| storage_failure(&error))?;
             if cancellation.is_cancelled() {
                 self.abandon_tools(session, start.run.id, remaining.collect())
                     .await
-                    .map_err(|error| upstream(&error))?;
+                    .map_err(|error| storage_failure(&error))?;
                 return Ok(false);
             }
         }
@@ -85,13 +83,6 @@ impl RunEngine {
                 .await?;
         }
         Ok(())
-    }
-}
-
-fn upstream(error: &StoreError) -> RunFailure {
-    RunFailure {
-        code: RunFailureCode::ModelUpstream,
-        message: error.to_string(),
     }
 }
 

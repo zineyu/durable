@@ -63,6 +63,9 @@ pub enum RunFailureCode {
     ModelRateLimited,
     ContextLimitExceeded,
     StepLimitExceeded,
+    /// 本地存储失败：引擎内任意 `durable::StoreError` 都记为此类别，典型原因是数据库、
+    /// 不变量与序列化。见 ADR 0043。
+    StorageFailed,
     /// 进程中断。ADR 0037 之后不再产生，保留它是为了读出历史记录里的旧值。
     Interrupted,
 }

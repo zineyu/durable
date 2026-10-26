@@ -109,7 +109,7 @@ async fn renames_node_and_drops_old_name() {
         .await
         .expect("请求旧名");
     assert_eq!(old.status(), StatusCode::NOT_FOUND);
-    assert_eq!(error_code(old).await, hub::HubErrorCode::UnknownNode);
+    assert_eq!(error_code(old).await, hub::HubErrorCode::NodeNotFound);
 
     harness.wait_for_status("studio", hub::NodeStatus::Ok).await;
     let new = reqwest::get(harness.url("/api/n/studio/bootstrap"))
@@ -142,7 +142,7 @@ async fn rejects_invalid_taken_or_unknown_rename() {
 
     let unknown = harness.rename_node("ghost", "laptop").await;
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-    assert_eq!(error_code(unknown).await, hub::HubErrorCode::UnknownNode);
+    assert_eq!(error_code(unknown).await, hub::HubErrorCode::NodeNotFound);
 
     let names: Vec<String> = harness
         .bootstrap()
@@ -205,7 +205,7 @@ async fn removes_node_and_rejects_unknown_node() {
 
     let response = harness.remove_node("laptop").await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    assert_eq!(error_code(response).await, hub::HubErrorCode::UnknownNode);
+    assert_eq!(error_code(response).await, hub::HubErrorCode::NodeNotFound);
 }
 
 /// 规格 user story H-10：重启 hub 后节点表仍在。
@@ -442,7 +442,7 @@ async fn rejects_invalid_update_fields() {
         .update_node("ghost", serde_json::json!({ "enabled": false }))
         .await;
     assert_eq!(unknown.status(), StatusCode::NOT_FOUND);
-    assert_eq!(error_code(unknown).await, hub::HubErrorCode::UnknownNode);
+    assert_eq!(error_code(unknown).await, hub::HubErrorCode::NodeNotFound);
 }
 
 fn fast_options() -> hub::HubOptions {

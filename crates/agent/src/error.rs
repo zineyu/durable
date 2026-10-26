@@ -1,12 +1,13 @@
 //! HTTP 错误信封：状态码与错误码的映射。
-//! 内核错误在 `durable::StoreError`。
+//! 分类与结局类别由内核给出（`durable::StoreErrorKind`、`durable::StoreErrorClass`），
+//! 本模块只把分类穷尽映射为协议码，不再自行判断错误性质。
 
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use durable::{
     MessageIdError, MessageTextError, QueueItemIdError, SessionIdError, SessionTitleError,
-    StoreError, WorkspacePathError,
+    StoreError, StoreErrorClass, StoreErrorKind, WorkspacePathError,
 };
 
 use crate::protocol::{ErrorCode, ErrorResponse};
@@ -19,6 +20,11 @@ pub struct ApiError {
 }
 
 impl ApiError {
+    /// 由内核错误分类构造信封。`From<StoreError>` 与分类表测试共用这一条路径。
+    fn from_kind(kind: StoreErrorKind, message: String) -> Self {
+        Self::new(code_of(kind), status_of(kind.class()), message)
+    }
+
     fn new(code: ErrorCode, status: StatusCode, message: String) -> Self {
         Self {
             code,
@@ -96,41 +102,42 @@ impl From<MessageTextError> for ApiError {
 
 impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
-        let (code, status) = match &error {
-            StoreError::Database(_)
-            | StoreError::Migration(_)
-            | StoreError::DatabaseDirectory { .. }
-            | StoreError::Serialization(_)
-            | StoreError::CorruptedData(_)
-            | StoreError::Invariant(_)
-            | StoreError::NodeNameTaken(_)
-            | StoreError::NodeNotFound(_) => {
-                (ErrorCode::Internal, StatusCode::INTERNAL_SERVER_ERROR)
-            }
-            StoreError::WorkspaceDuplicate(_) => {
-                (ErrorCode::WorkspaceDuplicate, StatusCode::CONFLICT)
-            }
-            StoreError::WorkspaceNotEmpty(_) => {
-                (ErrorCode::WorkspaceNotEmpty, StatusCode::CONFLICT)
-            }
-            StoreError::WorkspaceNotFound(_) => {
-                (ErrorCode::WorkspaceNotFound, StatusCode::NOT_FOUND)
-            }
-            StoreError::SessionNotFound(_) => (ErrorCode::SessionNotFound, StatusCode::NOT_FOUND),
-            StoreError::QueueItemNotFound(_, _) => {
-                (ErrorCode::QueueItemNotFound, StatusCode::NOT_FOUND)
-            }
-            StoreError::MessageNotFound(_, _) => {
-                (ErrorCode::MessageNotFound, StatusCode::NOT_FOUND)
-            }
-            StoreError::MessageRoleMismatch(_, _) => (
-                ErrorCode::MessageRoleMismatch,
-                StatusCode::UNPROCESSABLE_ENTITY,
-            ),
-            StoreError::RunInProgress(_) => (ErrorCode::RunInProgress, StatusCode::CONFLICT),
-            StoreError::QueueNotEmpty(_) => (ErrorCode::QueueNotEmpty, StatusCode::CONFLICT),
-        };
-        Self::new(code, status, error.to_string())
+        Self::from_kind(error.kind(), error.to_string())
+    }
+}
+
+/// 分类到协议码。穷尽匹配：新增分类时编译器要求在这里给出协议码。
+fn code_of(kind: StoreErrorKind) -> ErrorCode {
+    match kind {
+        StoreErrorKind::Database
+        | StoreErrorKind::Migration
+        | StoreErrorKind::DatabaseDirectory
+        | StoreErrorKind::Serialization
+        | StoreErrorKind::CorruptedData
+        | StoreErrorKind::Invariant => ErrorCode::Internal,
+        StoreErrorKind::WorkspaceDuplicate => ErrorCode::WorkspaceDuplicate,
+        StoreErrorKind::WorkspaceNotFound => ErrorCode::WorkspaceNotFound,
+        StoreErrorKind::WorkspaceNotEmpty => ErrorCode::WorkspaceNotEmpty,
+        StoreErrorKind::SessionNotFound => ErrorCode::SessionNotFound,
+        StoreErrorKind::QueueItemNotFound => ErrorCode::QueueItemNotFound,
+        StoreErrorKind::MessageNotFound => ErrorCode::MessageNotFound,
+        StoreErrorKind::MessageRoleMismatch => ErrorCode::MessageRoleMismatch,
+        StoreErrorKind::RunInProgress => ErrorCode::RunInProgress,
+        StoreErrorKind::QueueNotEmpty => ErrorCode::QueueNotEmpty,
+        StoreErrorKind::NodeNameTaken => ErrorCode::NodeNameTaken,
+        StoreErrorKind::NodeNotFound => ErrorCode::NodeNotFound,
+    }
+}
+
+/// 结局类别到 HTTP 状态码。状态码只由内核的结局类别决定。
+fn status_of(class: StoreErrorClass) -> StatusCode {
+    match class {
+        StoreErrorClass::NotFound => StatusCode::NOT_FOUND,
+        StoreErrorClass::Conflict => StatusCode::CONFLICT,
+        StoreErrorClass::InvalidArgument => StatusCode::UNPROCESSABLE_ENTITY,
+        StoreErrorClass::Internal | StoreErrorClass::StorageFailure => {
+            StatusCode::INTERNAL_SERVER_ERROR
+        }
     }
 }
 
@@ -144,5 +151,93 @@ impl IntoResponse for ApiError {
             }),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::response::IntoResponse;
+    use durable::{StoreError, StoreErrorClass, StoreErrorKind};
+
+    use super::{ApiError, code_of, status_of};
+    use crate::protocol::ErrorCode;
+
+    /// 分类到协议码与状态码的独立事实源。
+    const TABLE: [(StoreErrorKind, ErrorCode, u16); 17] = [
+        (StoreErrorKind::Database, ErrorCode::Internal, 500),
+        (StoreErrorKind::Migration, ErrorCode::Internal, 500),
+        (StoreErrorKind::DatabaseDirectory, ErrorCode::Internal, 500),
+        (StoreErrorKind::Serialization, ErrorCode::Internal, 500),
+        (StoreErrorKind::CorruptedData, ErrorCode::Internal, 500),
+        (StoreErrorKind::Invariant, ErrorCode::Internal, 500),
+        (
+            StoreErrorKind::WorkspaceDuplicate,
+            ErrorCode::WorkspaceDuplicate,
+            409,
+        ),
+        (
+            StoreErrorKind::WorkspaceNotFound,
+            ErrorCode::WorkspaceNotFound,
+            404,
+        ),
+        (
+            StoreErrorKind::WorkspaceNotEmpty,
+            ErrorCode::WorkspaceNotEmpty,
+            409,
+        ),
+        (
+            StoreErrorKind::SessionNotFound,
+            ErrorCode::SessionNotFound,
+            404,
+        ),
+        (
+            StoreErrorKind::QueueItemNotFound,
+            ErrorCode::QueueItemNotFound,
+            404,
+        ),
+        (
+            StoreErrorKind::MessageNotFound,
+            ErrorCode::MessageNotFound,
+            404,
+        ),
+        (
+            StoreErrorKind::MessageRoleMismatch,
+            ErrorCode::MessageRoleMismatch,
+            422,
+        ),
+        (StoreErrorKind::RunInProgress, ErrorCode::RunInProgress, 409),
+        (StoreErrorKind::QueueNotEmpty, ErrorCode::QueueNotEmpty, 409),
+        (StoreErrorKind::NodeNameTaken, ErrorCode::NodeNameTaken, 409),
+        (StoreErrorKind::NodeNotFound, ErrorCode::NodeNotFound, 404),
+    ];
+
+    /// ADR 0043：分类到协议码与状态码的映射穷尽，状态码取自结局类别。
+    #[test]
+    fn maps_every_kind_to_its_code_and_its_class_status() {
+        for (kind, code, status) in TABLE {
+            assert_eq!(code_of(kind), code, "{kind:?}");
+            let response = ApiError::from_kind(kind, String::new()).into_response();
+            assert_eq!(
+                response.status().as_u16(),
+                status,
+                "{kind:?} 的状态码取自 {:?}",
+                kind.class()
+            );
+        }
+    }
+
+    /// ADR 0043：`ApiError` 的状态码来自内核的结局类别，不由 agent 决定。
+    #[test]
+    fn api_error_takes_status_from_the_kernel_class() {
+        let error = StoreError::DatabaseDirectory {
+            path: std::path::PathBuf::from("/nowhere"),
+            message: "测试".to_owned(),
+        };
+        assert_eq!(error.kind().class(), StoreErrorClass::StorageFailure);
+        let response = ApiError::from(error).into_response();
+        assert_eq!(
+            response.status(),
+            status_of(StoreErrorClass::StorageFailure)
+        );
     }
 }

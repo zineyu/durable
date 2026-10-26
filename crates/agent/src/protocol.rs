@@ -17,7 +17,10 @@ pub enum HealthStatus {
 /// 4：提交消息必须写明 `mode`。不带 `mode` 的旧客户端被拒绝；旧节点忽略该字段，会把插话静默排队。
 /// 5：事实事件的载荷不再带 `session`，session 视图移到事件信封。旧 hub 读不到 `sessionId`，
 ///    新 hub 读不到旧载荷的 `session`，两个方向都不兼容。
-pub const PROTOCOL_VERSION: u32 = 5;
+/// 6：`runFailureCode` 新增 `storage_failed`，`errorCode` 新增 `node_name_taken` 与
+///    `node_not_found`。客户端的失败标签表是穷尽 `Record`，旧客户端遇未知键会渲染出
+///    `undefined` 前缀的失败说明。
+pub const PROTOCOL_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +54,8 @@ pub enum ErrorCode {
     MessageRoleMismatch,
     RunInProgress,
     QueueNotEmpty,
+    NodeNameTaken,
+    NodeNotFound,
     InvalidTitle,
     InvalidMessage,
     InvalidRequest,

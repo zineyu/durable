@@ -9,7 +9,7 @@ use durable::{
 use futures_util::StreamExt;
 
 use crate::cancel::Cancellation;
-use crate::engine::{RunEngine, StepEnd, StreamOpen, ToolCallBuilder};
+use crate::engine::{RunEngine, StepEnd, StreamOpen, ToolCallBuilder, storage_failure};
 use crate::provider::{ChatChunk, ChatMessage, ProviderError};
 
 /// 限流退避的上限。供应商不给建议时单次等待不超过它。
@@ -30,12 +30,7 @@ impl RunEngine {
     ) -> StepEnd {
         let id = match self.store.mint_message_id().await {
             Ok(id) => id,
-            Err(error) => {
-                return StepEnd::Failure(RunFailure {
-                    code: RunFailureCode::ModelUpstream,
-                    message: error.to_string(),
-                });
-            }
+            Err(error) => return StepEnd::Failure(storage_failure(&error)),
         };
         let messages = match self.assemble(transcript) {
             Ok(messages) => messages,

@@ -28,7 +28,7 @@
 | session 全局键 | `(node, session_id)` 二元组。session id 只在 node 内唯一。URL 用 `#/n/<node>/s/<session_id>`。 |
 | run | 一次用户消息触发的执行。从发起模型请求开始，到 assistant 不再请求工具结束。 |
 | run 状态 | `running`、`succeeded`、`failed`、`cancelled`。排队中的 run 由队列项表示。 |
-| run 失败类别 | `model_upstream`、`context_limit_exceeded`、`step_limit_exceeded`、`interrupted`。 |
+| run 失败类别 | `model_upstream`、`model_rate_limited`、`context_limit_exceeded`、`step_limit_exceeded`、`storage_failed`、`interrupted`（只为读出历史值，不再产生）。 |
 | step | run 内的一次模型请求及其工具调用。 |
 | message tree | session 内消息节点构成的树。节点含 id、parent_id、role、内容块与 run 元数据。一个节点是一条消息。 |
 | 内容块 | 一条消息正文中的一个类型化片段：文本、推理、工具调用、工具结果、图像。块序即产生顺序。 |

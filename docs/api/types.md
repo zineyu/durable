@@ -50,7 +50,7 @@ export type EditMessageRequest = { text: string, };
 ## ErrorCode
 
 ```ts
-export type ErrorCode = "workspace_path_invalid" | "workspace_duplicate" | "workspace_not_found" | "workspace_not_empty" | "session_not_found" | "queue_item_not_found" | "message_not_found" | "message_role_mismatch" | "run_in_progress" | "queue_not_empty" | "invalid_title" | "invalid_message" | "invalid_request" | "internal";
+export type ErrorCode = "workspace_path_invalid" | "workspace_duplicate" | "workspace_not_found" | "workspace_not_empty" | "session_not_found" | "queue_item_not_found" | "message_not_found" | "message_role_mismatch" | "run_in_progress" | "queue_not_empty" | "node_name_taken" | "node_not_found" | "invalid_title" | "invalid_message" | "invalid_request" | "internal";
 ```
 
 ## ErrorResponse
@@ -99,7 +99,7 @@ maxHubSeq: number, };
 ## HubErrorCode
 
 ```ts
-export type HubErrorCode = "node_name_invalid" | "node_name_taken" | "unknown_node" | "node_unavailable" | "invalid_request" | "internal";
+export type HubErrorCode = "node_name_invalid" | "node_name_taken" | "node_not_found" | "node_unavailable" | "invalid_request" | "internal";
 ```
 
 ## HubErrorResponse
@@ -337,7 +337,7 @@ export type RunFailure = { code: RunFailureCode, message: string, };
 /**
  * run 失败的稳定类别。
  */
-export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_limit_exceeded" | "step_limit_exceeded" | "interrupted";
+export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_limit_exceeded" | "step_limit_exceeded" | "storage_failed" | "interrupted";
 ```
 
 ## RunRecord

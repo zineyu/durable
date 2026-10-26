@@ -6,7 +6,7 @@ use futures_util::StreamExt;
 
 use crate::cancel::Cancellation;
 use crate::engine::prompt;
-use crate::engine::{RunEngine, StreamOpen};
+use crate::engine::{RunEngine, StreamOpen, storage_failure};
 use crate::provider::ChatChunk;
 
 impl RunEngine {
@@ -51,11 +51,11 @@ impl RunEngine {
             .store
             .mint_message_id()
             .await
-            .map_err(|error| context_limit(&error.to_string()))?;
+            .map_err(|error| storage_failure(&error))?;
         self.store
             .append_compaction(session, id, vec![ContentPart::text(summary)])
             .await
-            .map_err(|error| context_limit(&error.to_string()))?;
+            .map_err(|error| storage_failure(&error))?;
         Ok(())
     }
 }
