@@ -47,4 +47,5 @@
 | [0041](0041-node-table-commands-write-node-view.md) | 节点表命令可以写节点视图 | 已接受。细化 ADR 0028 的状态归属 | 探测结果只由 watcher 写，停用与等待连接的管理状态由节点表命令写，共用同一条 node_status_changed。 |
 | [0042](0042-fact-envelope-carries-session-view.md) | 事实信封携带 session 视图 | 已接受。取代 ADR 0013 的队列长度递减约定，细化 ADR 0012 的单一写入线 | 事实载荷只留身份，session 视图由命令入口推导并落在事件信封上，`event` 表新增 `session` 列，协议版本升到 5。 |
 | [0043](0043-store-error-classification.md) | 错误分类归内核 | 已接受。细化 ADR 0014 的失败类别、ADR 0028 的状态码选型与 ADR 0031 的类别约定 | `StoreError` 给出无载荷的分类与结局类别，状态码只由结局类别决定，两个 seam 穷尽映射协议码并把节点码统一为 `node_not_found`；新增 `storage_failed` 失败类别，协议版本升到 6。 |
-| [0044](0044-client-derived-view.md) | 客户端派生视图层 | 已接受。细化 ADR 0017 的「组件只接收派生后的 props」与 ADR 0024 的分片形状 | 新增纯函数派生层 `view/derived.ts`，摘要全算、完整视图按需算，按分片对象缓存；它是分片表的唯一常规读取者，组件只收 `SessionView`；`SessionTreeState` 由 `SessionTree` 派生；选中位置只由 URL 哈希持有。 |
+| [0044](0044-client-derived-view.md) | 客户端派生视图层 | 已接受。细化 ADR 0017 的「组件只接收派生后的 props」与 ADR 0024 的分片形状 | 新增纯函数派生层 `view/derived.ts`，摘要全算、完整视图按需算，按分片对象缓存；它是分片表的唯一常规读取者，组件只收 `SessionView`；`SessionTreeState` 由 `SessionTreeSnapshot` 派生；选中位置只由 URL 哈希持有。 |
+| [0045](0045-message-tree-module.md) | 消息树成为独立 module | 已接受。细化 ADR 0036 的压缩截断与 ADR 0038 的骨架读取 | 新增领域类型 `MessageTree`，一次建索引后只回答树的问题；存储只返回行，链上顺序、压缩截断与叶子选择由它回答；协议快照改名 `SessionTreeSnapshot`。 |

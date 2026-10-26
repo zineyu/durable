@@ -14,6 +14,7 @@ mod storage;
 mod store;
 mod stream;
 mod tool;
+mod tree;
 mod workspace;
 
 pub use change::Changeset;
@@ -32,9 +33,10 @@ pub use message::{
 pub use node::{NodeMetadata, NodeName, NodeNameError, NodeUpdate};
 pub use queue::{QueueItem, SubmitMode};
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
-pub use session::{SessionMetadata, SessionRecord, SessionTree};
+pub use session::{SessionMetadata, SessionRecord, SessionTreeSnapshot};
 pub use storage::Snapshot;
 pub use store::{Command, RunStart, SessionCommand, Store};
 pub use stream::{DeltaKind, EventBus, ResyncReason, StreamEvent};
 pub use tool::{ToolErrorCode, ToolOutcome, ToolResultState};
+pub use tree::MessageTree;
 pub use workspace::WorkspaceMetadata;

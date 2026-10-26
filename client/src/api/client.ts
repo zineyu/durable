@@ -18,7 +18,7 @@ import type { UpdateNodeRequest } from './generated/UpdateNodeRequest';
 import type { RemoveWorkspaceRequest } from './generated/RemoveWorkspaceRequest';
 import type { RenameSessionRequest } from './generated/RenameSessionRequest';
 import type { SessionMetadata } from './generated/SessionMetadata';
-import type { SessionTree } from './generated/SessionTree';
+import type { SessionTreeSnapshot } from './generated/SessionTreeSnapshot';
 import type { SubmitMessageRequest } from './generated/SubmitMessageRequest';
 import type { SubmitMode } from './generated/SubmitMode';
 import type { SwitchActiveLeafRequest } from './generated/SwitchActiveLeafRequest';
@@ -97,7 +97,7 @@ export const api = {
   removeNode(name: NodeName): Promise<ApiResult<void>> {
     return request('DELETE', `/api/nodes/${encodeURIComponent(name)}`);
   },
-  sessionTree(node: NodeName, id: string): Promise<ApiResult<SessionTree>> {
+  sessionTree(node: NodeName, id: string): Promise<ApiResult<SessionTreeSnapshot>> {
     return request('GET', `${sessionPath(node, id)}/tree`);
   },
   registerWorkspace(node: NodeName, path: string): Promise<ApiResult<WorkspaceMetadata>> {

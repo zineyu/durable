@@ -13,7 +13,7 @@ ADR 0002 规定客户端用 `after` 游标断线续传。事实事件持久化�
 
 **落后是显式事件。** `StreamEvent` 增加 `Resync` 变体，携带 `ResyncReason::Lagged { skipped }`。`agent` 在 `Lagged` 时发送该事件，然后结束该 SSE 连接。客户端因此能区分“实时”与“可能丢失事件”。
 
-**快照携带水位。** `BootstrapResponse.maxEventId` 与 `SessionTree.maxEventId` 是快照读取事务开始时的全局最大事实事件 id。快照包含该 id 及之前的全部事实。
+**快照携带水位。** `BootstrapResponse.maxEventId` 与 `SessionTreeSnapshot.maxEventId` 是快照读取事务开始时的全局最大事实事件 id。快照包含该 id 及之前的全部事实。
 
 **游标在快照落地时回退。** 客户端只保留一个游标 `lastEventId`，取值是“已应用的最大事实事件 id”。应用快照后的游标为：尚无基线时取快照水位；已有基线时取 `min(游标, 水位)`。回退使事件流用 `after` 重放快照未覆盖的尾部。回退后客户端立即用新游标重开事件流。
 

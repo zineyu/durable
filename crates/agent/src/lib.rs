@@ -26,11 +26,12 @@ pub use config::{
 };
 pub use durable::{
     ContentKind, ContentPart, DEFAULT_SESSION_TITLE, DeltaKind, FactEvent, MessageBody, MessageId,
-    MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, PartSkeleton,
-    PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode, RunId, RunRecord,
-    RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle, SessionTitleError,
-    SessionTree, Store, StoreError, StreamEvent, SubmitMode, ToolErrorCode, ToolOutcome,
-    ToolResultState, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, MessageTree,
+    PartSkeleton, PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode,
+    RunId, RunRecord, RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle,
+    SessionTitleError, SessionTreeSnapshot, Store, StoreError, StreamEvent, SubmitMode,
+    ToolErrorCode, ToolOutcome, ToolResultState, WorkspaceMetadata, WorkspacePath,
+    WorkspacePathError,
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
@@ -123,7 +124,7 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     RunFailureCode::export_all(&config)?;
     RunFailure::export_all(&config)?;
     RunRecord::export_all(&config)?;
-    SessionTree::export_all(&config)?;
+    SessionTreeSnapshot::export_all(&config)?;
     FactEvent::export_all(&config)?;
     StreamEvent::export_all(&config)?;
     ErrorCode::export_all(&config)?;

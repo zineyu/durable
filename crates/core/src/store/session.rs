@@ -1,12 +1,14 @@
 //! session 的创建、改名、删除与读取。
 //! 队列写入在 `queue`，run 生命周期在 `run`，分支命令在 `branch`，写命令入口在 `command`。
 
+use std::collections::HashMap;
+
 use super::{Store, snapshot_into_tree};
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
-use crate::message::{MessageBody, MessageNode};
-use crate::session::{SessionMetadata, SessionRecord, SessionTree};
+use crate::message::{ContentPart, MessageBody, MessageNode, MessageSkeleton};
+use crate::session::{SessionMetadata, SessionRecord, SessionTreeSnapshot};
 use crate::storage::SessionSnapshot;
 
 impl Store {
@@ -120,7 +122,7 @@ impl Store {
     /// - `StoreError::SessionNotFound`：session 不存在。
     /// - `StoreError::Database`：数据库读取失败。
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
-    pub async fn session_tree(&self, id: &SessionId) -> Result<SessionTree, StoreError> {
+    pub async fn session_tree(&self, id: &SessionId) -> Result<SessionTreeSnapshot, StoreError> {
         self.storage
             .session_tree(id)
             .await?
@@ -128,7 +130,9 @@ impl Store {
             .ok_or_else(|| StoreError::SessionNotFound(id.clone()))
     }
 
-    /// 读取 session 的 transcript：root 到 active leaf 的路径。
+    /// 读取 session 的 transcript：root 到 active leaf 的路径，到最近一条压缩消息为止。
+    ///
+    /// 链上顺序与截断由 [`crate::tree::MessageTree`] 回答，正文只按链上的 id 取。
     ///
     /// # Errors
     ///
@@ -136,8 +140,26 @@ impl Store {
     /// - `StoreError::Database`：数据库读取失败。
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     pub async fn transcript(&self, id: &SessionId) -> Result<Vec<MessageNode>, StoreError> {
-        self.find_session(id).await?;
-        self.storage.transcript(id).await
+        let session = self.find_session(id).await?;
+        let Some(leaf) = session.active_leaf else {
+            return Ok(Vec::new());
+        };
+        let chain: Vec<MessageSkeleton> = self.message_tree(id).await?.transcript(leaf);
+        let ids: Vec<MessageId> = chain.iter().map(|node| node.id).collect();
+        let mut parts: HashMap<MessageId, Vec<ContentPart>> = self
+            .storage
+            .message_bodies(id, &ids)
+            .await?
+            .into_iter()
+            .map(|body| (body.id, body.parts))
+            .collect();
+        Ok(chain
+            .into_iter()
+            .map(|node| {
+                let body = parts.remove(&node.id).unwrap_or_default();
+                node.into_node(body)
+            })
+            .collect())
     }
 
     /// 按消息 id 批量读取块正文。

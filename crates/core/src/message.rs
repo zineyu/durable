@@ -1,5 +1,5 @@
 //! 消息正文的内容块、角色与消息树节点；骨架描述结构与块状态，正文单独存放。
-//! 分支选择规则在 `store/branch`，快照结构在 `session`。
+//! 树的问题在 `tree`，分支选择规则在 `store/branch`，快照结构在 `session`。
 
 use std::fmt;
 
@@ -375,6 +375,21 @@ pub struct MessageSkeleton {
     #[ts(type = "number")]
     pub created_at: i64,
     pub parts: Vec<PartSkeleton>,
+}
+
+impl MessageSkeleton {
+    /// 用读出的块正文组装完整节点。骨架里的块描述只说明形状，正文单独存放。
+    #[must_use]
+    pub fn into_node(self, parts: Vec<ContentPart>) -> MessageNode {
+        MessageNode {
+            id: self.id,
+            parent_id: self.parent_id,
+            role: self.role,
+            parts,
+            run_id: self.run_id,
+            created_at: self.created_at,
+        }
+    }
 }
 
 /// 块骨架：序号、类型、字节数与状态。

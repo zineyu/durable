@@ -27,11 +27,12 @@
 | --- | --- |
 | `id.rs` | 强类型 id，`WorkspacePath` 与 `SessionTitle` 的解析校验 |
 | `message.rs` | 消息正文、角色与 `MessageNode` 的父子指针 |
-| `session.rs` | session 元数据、`SessionTree` 快照与自动标题 |
+| `session.rs` | session 元数据、`SessionTreeSnapshot` 快照与自动标题 |
 | `queue.rs` | 待执行队列项与锚点 |
 | `run.rs` | 运行实体、状态与失败码 |
 | `tool.rs` | 工具调用记录、结果与错误码 |
 | `workspace.rs` | workspace 元数据 |
+| `tree.rs` | 消息树的问题：transcript、子树叶子与祖先；存储只返回行，链上顺序由它回答 |
 | `node.rs` | 节点名与节点元数据 |
 | `event.rs` | `FactEvent` 领域事实枚举 |
 | `change.rs` | 一次事务内的变更清单 |

@@ -5,7 +5,7 @@ import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { QueueItem } from '../api/generated/QueueItem';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
-import type { SessionTree } from '../api/generated/SessionTree';
+import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { dropFinished, dropPlaceholder, forgetBodies, invalidateBody } from './bodies';
 import type { MessagePlaceholder, RetryState } from './types';
@@ -21,7 +21,7 @@ export type FactEnvelope = {
 const APPLIED_FACT_LIMIT = 128;
 
 /// 分片内的树状态。除快照信封的两个字段外全部保留，因此协议新增字段会自动流入。
-export type SessionTreeState = Omit<SessionTree, 'session' | 'maxEventId'>;
+export type SessionTreeState = Omit<SessionTreeSnapshot, 'session' | 'maxEventId'>;
 
 /// 单个节点的分片。一个节点的事件只归约到自己的分片，分片之间互不影响。
 export type NodeState = {
@@ -207,7 +207,7 @@ export function applyRetry(state: NodeState, sessionId: string, retry: RetryStat
   return { ...state, retries: { ...state.retries, [sessionId]: retry } };
 }
 
-export function loadSessionTree(state: NodeState, tree: SessionTree): NodeState {
+export function loadSessionTree(state: NodeState, tree: SessionTreeSnapshot): NodeState {
   const loaded = rebase(state, tree.maxEventId, {
     ...state,
     lastEventId: snapshotCursor(state.lastEventId, tree.maxEventId),
@@ -283,7 +283,7 @@ function emptyTree(): SessionTreeState {
 }
 
 /// 去掉快照信封的 session 视图与水位；其余字段整体进入分片。
-function treeState(tree: SessionTree): SessionTreeState {
+function treeState(tree: SessionTreeSnapshot): SessionTreeState {
   const { session, maxEventId, ...rest } = tree;
   return rest;
 }

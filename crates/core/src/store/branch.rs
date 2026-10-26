@@ -1,12 +1,13 @@
 //! 分支命令：编辑用户消息、重试 assistant、切换 active leaf。
-//! 三者都要求 session 空闲，判定由 `command_idle` 完成；消息树结构在 `crate::message`。
+//! 三者都要求 session 空闲，判定由 `command_idle` 完成；树的问题在 `crate::tree`。
 
-use super::{Store, append_node, branch_leaf, find_node, user_ancestor};
+use super::{Store, append_node};
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{MessageId, SessionId};
-use crate::message::{ContentPart, MessageNode, MessageRole, MessageText};
+use crate::message::{ContentPart, MessageNode, MessageRole, MessageSkeleton, MessageText};
 use crate::queue::QueueItem;
+use crate::tree::MessageTree;
 
 impl Store {
     /// 编辑一条历史用户消息：在其父节点下创建兄弟用户节点，把 active leaf 移到新节点并入队执行。
@@ -33,8 +34,8 @@ impl Store {
     ) -> Result<MessageNode, StoreError> {
         self.command_idle(id, async |command| {
             let snapshot = self.session_snapshot(id).await?;
-            let target_node = find_node(&snapshot.messages, target)
-                .ok_or_else(|| StoreError::MessageNotFound(id.clone(), target))?;
+            let tree = MessageTree::new(snapshot.messages);
+            let target_node = stored_node(&tree, id, target)?;
             if target_node.role != MessageRole::User {
                 return Err(StoreError::MessageRoleMismatch(target, target_node.role));
             }
@@ -94,17 +95,22 @@ impl Store {
     ) -> Result<(), StoreError> {
         self.command_idle(id, async |command| {
             let snapshot = self.session_snapshot(id).await?;
-            let target_node = find_node(&snapshot.messages, target)
-                .ok_or_else(|| StoreError::MessageNotFound(id.clone(), target))?;
+            let tree = MessageTree::new(snapshot.messages);
+            let target_node = stored_node(&tree, id, target)?;
             if target_node.role != MessageRole::Assistant {
                 return Err(StoreError::MessageRoleMismatch(target, target_node.role));
             }
             let parent_id = target_node.parent_id.ok_or_else(|| {
                 StoreError::Invariant(format!("assistant 消息 {} 缺少父节点", target.get()))
             })?;
-            let user_id = user_ancestor(&snapshot.messages, parent_id).ok_or_else(|| {
-                StoreError::Invariant(format!("assistant 消息 {} 之前没有用户消息", target.get()))
-            })?;
+            let user_id = tree
+                .ancestor(target, |node| node.role == MessageRole::User)
+                .ok_or_else(|| {
+                    StoreError::Invariant(format!(
+                        "assistant 消息 {} 之前没有用户消息",
+                        target.get()
+                    ))
+                })?;
             let stored = self
                 .storage
                 .message(id, user_id)
@@ -158,11 +164,11 @@ impl Store {
     ) -> Result<MessageId, StoreError> {
         self.command_idle(id, async |command| {
             let snapshot = self.session_snapshot(id).await?;
-            let nodes = snapshot.messages.clone();
-            if !nodes.iter().any(|node| node.id == target) {
+            let tree = MessageTree::new(snapshot.messages);
+            if tree.get(target).is_none() {
                 return Err(StoreError::MessageNotFound(id.clone(), target));
             }
-            let leaf = branch_leaf(&nodes, target).ok_or_else(|| {
+            let leaf = tree.leaf_of(target).ok_or_else(|| {
                 StoreError::Invariant(format!("目标 {} 的子树没有叶子", target.get()))
             })?;
             let now = command.now();
@@ -178,4 +184,15 @@ impl Store {
         })
         .await
     }
+}
+
+/// 按 id 取树中的节点，不存在时为 `MessageNotFound`。
+fn stored_node(
+    tree: &MessageTree,
+    session: &SessionId,
+    target: MessageId,
+) -> Result<MessageSkeleton, StoreError> {
+    tree.get(target)
+        .cloned()
+        .ok_or_else(|| StoreError::MessageNotFound(session.clone(), target))
 }

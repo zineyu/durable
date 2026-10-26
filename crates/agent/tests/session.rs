@@ -26,7 +26,7 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
     assert_eq!(bootstrap.max_event_id, 2);
     assert_eq!(bootstrap.sessions, vec![created.clone()]);
 
-    let tree: agent::SessionTree = harness
+    let tree: agent::SessionTreeSnapshot = harness
         .session_tree(&created.id)
         .await
         .json()
@@ -42,7 +42,7 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
     assert_eq!(renamed.title.as_str(), "重命名后的标题");
     assert!(renamed.updated_at >= created.updated_at);
     assert_eq!(harness.bootstrap().await.sessions, vec![renamed.clone()]);
-    let tree: agent::SessionTree = harness
+    let tree: agent::SessionTreeSnapshot = harness
         .session_tree(&created.id)
         .await
         .json()
@@ -137,7 +137,7 @@ async fn restores_workspaces_sessions_and_titles_after_restart() {
     assert_eq!(after.workspaces, vec![workspace]);
     assert_eq!(after.sessions, vec![renamed.clone()]);
 
-    let tree: agent::SessionTree = harness
+    let tree: agent::SessionTreeSnapshot = harness
         .session_tree(&created.id)
         .await
         .json()
@@ -167,7 +167,7 @@ async fn rename_updates_updated_at_and_preserves_session_metadata() {
 
     let bootstrap = harness.bootstrap().await;
     assert_eq!(bootstrap.sessions, vec![renamed.clone()]);
-    let tree: agent::SessionTree = harness
+    let tree: agent::SessionTreeSnapshot = harness
         .session_tree(&created.id)
         .await
         .json()

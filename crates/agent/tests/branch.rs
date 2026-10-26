@@ -1,8 +1,3 @@
-#![expect(
-    clippy::expect_used,
-    reason = "消息树辅助函数用 expect 直接报告夹具与断言失败。"
-)]
-
 use reqwest::StatusCode;
 
 mod support;
@@ -10,21 +5,16 @@ mod support;
 use support::provider::ToolCallSpec;
 use support::{Harness, Script, error_code, recorded_facts};
 
-/// 消息树中 root 到 active leaf 的节点 id。
-fn transcript_ids(tree: &agent::SessionTree) -> Vec<agent::MessageId> {
-    let mut ids = Vec::new();
-    let mut current = tree.active_leaf;
-    while let Some(id) = current {
-        let node = tree
-            .nodes
-            .iter()
-            .find(|node| node.id == id)
-            .expect("transcript 的节点存在");
-        ids.push(id);
-        current = node.parent_id;
-    }
-    ids.reverse();
-    ids
+/// 消息树中 root 到 active leaf 的节点 id。走与生产相同的树接口。
+fn transcript_ids(tree: &agent::SessionTreeSnapshot) -> Vec<agent::MessageId> {
+    let Some(leaf) = tree.active_leaf else {
+        return Vec::new();
+    };
+    agent::MessageTree::new(tree.nodes.clone())
+        .transcript(leaf)
+        .into_iter()
+        .map(|node| node.id)
+        .collect()
 }
 
 /// 规格 user story A-16：编辑用户消息产生同父兄弟节点，active leaf 移到新分支并执行。

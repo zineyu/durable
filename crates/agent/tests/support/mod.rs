@@ -304,7 +304,7 @@ impl Harness {
             .expect("读取消息树")
     }
 
-    pub(crate) async fn tree(&self, id: &agent::SessionId) -> agent::SessionTree {
+    pub(crate) async fn tree(&self, id: &agent::SessionId) -> agent::SessionTreeSnapshot {
         let response = self.session_tree(id).await;
         let status = response.status();
         let text = response.text().await.expect("读取消息树响应");
@@ -441,7 +441,7 @@ impl Harness {
     }
 
     /// 轮询直到该 session 不再忙碌且队列为空。
-    pub(crate) async fn wait_idle(&self, id: &agent::SessionId) -> agent::SessionTree {
+    pub(crate) async fn wait_idle(&self, id: &agent::SessionId) -> agent::SessionTreeSnapshot {
         for _ in 0..500 {
             let tree = self.tree(id).await;
             if !tree.session.busy && tree.queue.is_empty() {
@@ -467,7 +467,7 @@ impl Harness {
     }
 
     /// 轮询直到该 session 进入忙碌状态。
-    pub(crate) async fn wait_busy(&self, id: &agent::SessionId) -> agent::SessionTree {
+    pub(crate) async fn wait_busy(&self, id: &agent::SessionId) -> agent::SessionTreeSnapshot {
         for _ in 0..500 {
             let tree = self.tree(id).await;
             if tree.session.busy {
@@ -482,8 +482,8 @@ impl Harness {
     pub(crate) async fn wait_for_tree(
         &self,
         id: &agent::SessionId,
-        ready: impl Fn(&agent::SessionTree) -> bool,
-    ) -> agent::SessionTree {
+        ready: impl Fn(&agent::SessionTreeSnapshot) -> bool,
+    ) -> agent::SessionTreeSnapshot {
         for _ in 0..500 {
             let tree = self.tree(id).await;
             if ready(&tree) {

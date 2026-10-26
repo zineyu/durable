@@ -74,7 +74,7 @@ pub(crate) fn derive_title(text: &MessageText) -> Result<SessionTitle, SessionTi
 /// 单个 session 的消息树快照。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct SessionTree {
+pub struct SessionTreeSnapshot {
     pub session: SessionMetadata,
     /// 快照读取时刻的全局最大事实事件 id；快照包含该 id 及之前的全部事实。
     #[ts(type = "number")]

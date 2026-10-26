@@ -4,7 +4,7 @@ import type { HubStreamEvent } from '../api/generated/HubStreamEvent';
 import type { MessageBody } from '../api/generated/MessageBody';
 import type { NodeName } from '../api/generated/NodeName';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
-import type { SessionTree } from '../api/generated/SessionTree';
+import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
 import {
   applyDelta,
   applyMessageBodies,
@@ -50,7 +50,7 @@ export type ClientAction =
   | { type: 'bootstrap'; bootstrap: HubBootstrap }
   | { type: 'node-bootstrap'; node: NodeName; bootstrap: BootstrapResponse }
   | { type: 'stream'; event: HubStreamEvent }
-  | { type: 'tree'; node: NodeName; tree: SessionTree }
+  | { type: 'tree'; node: NodeName; tree: SessionTreeSnapshot }
   | { type: 'session'; node: NodeName; session: SessionMetadata }
   | { type: 'bodies-request'; node: NodeName; ids: number[] }
   | { type: 'bodies-failed'; node: NodeName; ids: number[] }

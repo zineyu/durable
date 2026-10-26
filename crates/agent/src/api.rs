@@ -281,7 +281,7 @@ async fn delete_session(
 async fn session_tree(
     State(state): State<AgentState>,
     SessionPath(id): SessionPath,
-) -> Result<Json<durable::SessionTree>, ApiError> {
+) -> Result<Json<durable::SessionTreeSnapshot>, ApiError> {
     Ok(Json(state.store().session_tree(&id).await?))
 }
 

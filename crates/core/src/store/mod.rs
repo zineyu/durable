@@ -20,13 +20,14 @@ use tokio::sync::Mutex;
 use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
-use crate::id::{MessageId, WorkspacePath};
-use crate::message::{Message, MessageNode, MessageRole, MessageSkeleton};
+use crate::id::{SessionId, WorkspacePath};
+use crate::message::{Message, MessageNode};
 use crate::run::RunRecord;
-use crate::session::{SessionMetadata, SessionTree};
+use crate::session::{SessionMetadata, SessionTreeSnapshot};
 use crate::storage::sqlite::SqliteStorage;
 use crate::storage::{SessionSnapshot, Snapshot};
 use crate::stream::{EventBus, StreamEvent};
+use crate::tree::MessageTree;
 
 /// 一次 run 开始时可用的上下文。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,8 +140,8 @@ fn append_node(command: &mut SessionCommand<'_>, node: &MessageNode) {
     );
 }
 
-fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTree {
-    SessionTree {
+fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTreeSnapshot {
+    SessionTreeSnapshot {
         session: snapshot
             .head
             .session
@@ -153,45 +154,9 @@ fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTree {
     }
 }
 
-fn find_node(messages: &[MessageSkeleton], id: MessageId) -> Option<MessageSkeleton> {
-    messages.iter().find(|node| node.id == id).cloned()
-}
-
-/// 从给定节点沿父链向上找到最近一条用户消息。
-fn user_ancestor(nodes: &[MessageSkeleton], start: MessageId) -> Option<MessageId> {
-    let mut current = Some(start);
-    while let Some(id) = current {
-        let node = nodes.iter().find(|node| node.id == id)?;
-        if node.role == MessageRole::User {
-            return Some(node.id);
-        }
-        current = node.parent_id;
+impl Store {
+    /// 读取 session 的全部消息骨架并建树索引。存储只返回行，链上顺序由树回答。
+    async fn message_tree(&self, id: &SessionId) -> Result<MessageTree, StoreError> {
+        Ok(MessageTree::new(self.storage.message_skeletons(id).await?))
     }
-    None
-}
-
-/// 目标子树中最近创建的叶子（id 最大）。
-///
-/// 消息 id 全局单调递增，因此 id 最大即创建最晚。目标本身是叶子时返回目标。
-fn branch_leaf(nodes: &[MessageSkeleton], target: MessageId) -> Option<MessageId> {
-    nodes
-        .iter()
-        .filter(|node| is_descendant(nodes, node.id, target))
-        .filter(|node| !nodes.iter().any(|other| other.parent_id == Some(node.id)))
-        .map(|node| node.id)
-        .max()
-}
-
-fn is_descendant(nodes: &[MessageSkeleton], id: MessageId, ancestor: MessageId) -> bool {
-    let mut current = Some(id);
-    while let Some(node_id) = current {
-        if node_id == ancestor {
-            return true;
-        }
-        current = nodes
-            .iter()
-            .find(|node| node.id == node_id)
-            .and_then(|node| node.parent_id);
-    }
-    false
 }

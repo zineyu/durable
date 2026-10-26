@@ -96,19 +96,19 @@ impl Store {
     }
 
     /// 登记 run 的起点节点：接续锚定的用户消息，锚定其它角色时以它为起点；
-    /// 未锚定时新建挂在 `parent` 下的用户节点。
+    /// 未锚定时新建挂在当前叶子 `leaf` 下的用户节点。
     async fn run_start_node(
         &self,
         item: &QueueItem,
         run: &RunRecord,
-        parent: Option<MessageId>,
+        leaf: Option<MessageId>,
         changes: &mut Changeset,
     ) -> Result<MessageNode, StoreError> {
         let session = &run.session_id;
         let Some(anchor) = item.anchor else {
             let user = MessageNode {
                 id: self.storage.mint_message_id().await?,
-                parent_id: parent,
+                parent_id: leaf,
                 role: MessageRole::User,
                 parts: vec![ContentPart::text(item.text.as_str())],
                 run_id: Some(run.id),
@@ -140,7 +140,7 @@ impl Store {
         }
         // 插话降级后可能已随链进入过后续请求：再接续它会把 active leaf 拽回，
         // 丢掉后来的消息。这类锚点从链尾接续。
-        if let Some(tail) = self.chain_tail(session, anchor).await? {
+        if let Some(tail) = self.chain_tail(session, leaf, anchor).await? {
             return Ok(tail);
         }
         let bound = MessageNode {
@@ -160,20 +160,34 @@ impl Store {
 
     /// 锚定的用户节点已在链上但不是链尾时返回链尾节点。
     ///
-    /// 它的正文已经随链发给过模型，因此下一次 run 从链尾接续，不把 active leaf 拽回。
+    /// `leaf` 是本次 run 开始前的 active leaf，也是 run 起点节点的挂载点。
+    /// 锚定节点的正文已经随链发给过模型，因此下一次 run 从链尾接续，不把 active leaf 拽回。
     async fn chain_tail(
         &self,
         id: &SessionId,
+        leaf: Option<MessageId>,
         anchor: MessageId,
     ) -> Result<Option<MessageNode>, StoreError> {
-        let chain = self.storage.transcript(id).await?;
-        let Some(position) = chain.iter().position(|node| node.id == anchor) else {
+        let Some(leaf) = leaf else {
             return Ok(None);
         };
-        if chain.get(position + 1).is_none() {
+        let tree = self.message_tree(id).await?;
+        let chain = tree.transcript(leaf);
+        if !chain.iter().any(|node| node.id == anchor) {
             return Ok(None);
         }
-        Ok(chain.last().cloned())
+        let Some(tail) = chain.last() else {
+            return Ok(None);
+        };
+        if tail.id == anchor {
+            return Ok(None);
+        }
+        let stored = self
+            .storage
+            .message(id, tail.id)
+            .await?
+            .ok_or_else(|| StoreError::MessageNotFound(id.clone(), tail.id))?;
+        Ok(Some(stored.node))
     }
 
     /// 把一步模型回复定型入树：挂在当前 active leaf 下，块一次写齐。

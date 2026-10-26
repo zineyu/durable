@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { HubBootstrap } from '../../src/api/generated/HubBootstrap';
 import type { SessionMetadata } from '../../src/api/generated/SessionMetadata';
-import type { SessionTree } from '../../src/api/generated/SessionTree';
+import type { SessionTreeSnapshot } from '../../src/api/generated/SessionTreeSnapshot';
 import { ModelServer } from './model-server';
 import { launchProcess } from './process';
 import type { LaunchedProcess } from './process';
@@ -130,8 +130,8 @@ export class Harness {
     return session.id;
   }
 
-  async sessionTree(sessionId: string): Promise<SessionTree> {
-    return await this.request<SessionTree>(
+  async sessionTree(sessionId: string): Promise<SessionTreeSnapshot> {
+    return await this.request<SessionTreeSnapshot>(
       'GET',
       `/api/n/${this.nodeName}/sessions/${encodeURIComponent(sessionId)}/tree`,
     );

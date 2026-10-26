@@ -5,9 +5,9 @@
 
 ## 背景
 
-ADR 0021 把 `hub` 变成总线：客户端只面对一条合并事件流，游标是 `hub_seq`。每个 `node` 仍有自己的 SQLite 与事实事件 id，快照（合并 bootstrap、`SessionTree`）带的是 node 级水位。
+ADR 0021 把 `hub` 变成总线：客户端只面对一条合并事件流，游标是 `hub_seq`。每个 `node` 仍有自己的 SQLite 与事实事件 id，快照（合并 bootstrap、`SessionTreeSnapshot`）带的是 node 级水位。
 
-ADR 0018 的续传只有一个游标，且事实事件 id 就是快照水位。多节点下这条路走不通：`hub_seq` 与 node 事件 id 是两个序号空间，`hub` 没有二者的映射。`SessionTree` 快照可能比已应用的尾部旧，客户端无法用 `hub` 游标重放这段尾部。
+ADR 0018 的续传只有一个游标，且事实事件 id 就是快照水位。多节点下这条路走不通：`hub_seq` 与 node 事件 id 是两个序号空间，`hub` 没有二者的映射。`SessionTreeSnapshot` 快照可能比已应用的尾部旧，客户端无法用 `hub` 游标重放这段尾部。
 
 ## 决策
 

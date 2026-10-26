@@ -2,10 +2,12 @@
 //! 取出队首并建 run 在 `run`；自动标题规则在 `crate::session`；写命令入口在 `command`。
 
 use super::{Store, append_node};
+use std::collections::HashSet;
+
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::id::{MessageId, QueueItemId, RunId, SessionId};
-use crate::message::{ContentPart, MessageNode, MessageRole, MessageText};
+use crate::message::{ContentPart, MessageNode, MessageRole, MessageSkeleton, MessageText};
 use crate::queue::{QueueItem, SubmitMode};
 use crate::session::derive_title;
 use crate::store::SessionCommand;
@@ -131,7 +133,9 @@ impl Store {
             if items.is_empty() {
                 return Ok(Vec::new());
             }
-            let layout = self.layout_pending_steers(id, &items, Some(run_id)).await?;
+            let layout = self
+                .layout_pending_steers(id, command.session().active_leaf, &items, Some(run_id))
+                .await?;
             let now = command.now();
             rebind_changed(command, id, &layout, now);
             let mut applied = Vec::new();
@@ -181,7 +185,9 @@ impl Store {
             if items.is_empty() {
                 return Ok(Vec::new());
             }
-            let layout = self.layout_pending_steers(id, &items, None).await?;
+            let layout = self
+                .layout_pending_steers(id, command.session().active_leaf, &items, None)
+                .await?;
             let now = command.now();
             rebind_changed(command, id, &layout, now);
             let mut downgraded = Vec::new();
@@ -252,25 +258,31 @@ impl Store {
     async fn layout_pending_steers(
         &self,
         id: &SessionId,
+        leaf: Option<MessageId>,
         items: &[QueueItem],
         run_id: Option<RunId>,
     ) -> Result<SteerLayout, StoreError> {
-        let chain = self.storage.transcript(id).await?;
+        let tree = self.message_tree(id).await?;
+        let chain = leaf.map(|leaf| tree.transcript(leaf)).unwrap_or_default();
         let mut stored = Vec::new();
         for item in items {
-            stored.push(self.pending_steer_node(id, item).await?);
+            stored.push(self.pending_steer_node(id, item).await?.skeleton());
         }
         let pending: Vec<MessageId> = stored.iter().map(|node| node.id).collect();
+        let on_chain: HashSet<MessageId> = chain.iter().map(|node| node.id).collect();
         let mut changed = Vec::new();
         for node in &stored {
-            let Some(child) = chain.iter().find(|entry| entry.parent_id == Some(node.id)) else {
+            let Some(child) = tree
+                .children_of(node.id)
+                .find(|child| on_chain.contains(&child.id))
+            else {
                 continue;
             };
             if pending.contains(&child.id) {
                 continue;
             }
-            changed.push(MessageNode {
-                parent_id: ancestor(&chain, &pending, node.parent_id),
+            changed.push(MessageSkeleton {
+                parent_id: tree.ancestor(node.id, |candidate| !pending.contains(&candidate.id)),
                 ..child.clone()
             });
         }
@@ -281,7 +293,7 @@ impl Store {
             .map(|node| node.id);
         let mut steers = Vec::new();
         for node in &stored {
-            let steered = MessageNode {
+            let steered = MessageSkeleton {
                 parent_id: previous,
                 run_id: run_id.or(node.run_id),
                 ..node.clone()
@@ -314,28 +326,9 @@ impl Store {
 /// 插话重排的结果。
 struct SteerLayout {
     /// 需要改写父节点并写 `message_updated` 的节点：拆出的子节点在前，插话按提交顺序在后。
-    changed: Vec<MessageNode>,
+    changed: Vec<MessageSkeleton>,
     /// 按提交顺序排列的插话节点。
-    steers: Vec<MessageNode>,
-}
-
-/// 沿父链找到最近的、不属于插话的祖先。
-fn ancestor(
-    chain: &[MessageNode],
-    pending: &[MessageId],
-    start: Option<MessageId>,
-) -> Option<MessageId> {
-    let mut current = start;
-    while let Some(id) = current {
-        if !pending.contains(&id) {
-            return Some(id);
-        }
-        current = chain
-            .iter()
-            .find(|node| node.id == id)
-            .and_then(|node| node.parent_id);
-    }
-    None
+    steers: Vec<MessageSkeleton>,
 }
 
 /// 登记插话重排：被拆出的子节点改写父节点，并写 `message_updated`。
@@ -352,7 +345,7 @@ fn rebind_changed(
         command.changes().append_event(
             FactEvent::MessageUpdated {
                 session_id: session.clone(),
-                message: node.skeleton(),
+                message: node.clone(),
             },
             now,
         );

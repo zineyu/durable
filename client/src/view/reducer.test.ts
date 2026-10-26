@@ -11,7 +11,7 @@ import type { NodeStatus } from '../api/generated/NodeStatus';
 import type { PartSkeleton } from '../api/generated/PartSkeleton';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
-import type { SessionTree } from '../api/generated/SessionTree';
+import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId } from './ids';
 import { missingBodyIds, sessionView } from './derived';
@@ -184,7 +184,7 @@ function tree(
   maxEventId: number,
   activeLeaf: number | null,
   nodes: MessageSkeleton[],
-): SessionTree {
+): SessionTreeSnapshot {
   return {
     maxEventId,
     session: session(id, '/work/a', maxEventId),
@@ -195,7 +195,7 @@ function tree(
   };
 }
 
-function withTree(state: ClientState, node: string, value: SessionTree): ClientState {
+function withTree(state: ClientState, node: string, value: SessionTreeSnapshot): ClientState {
   return reduce(state, { type: 'tree', node, tree: value });
 }
 
@@ -964,7 +964,7 @@ describe('分片辅助', () => {
   });
 
   it('分片整体保留快照的协议字段，只取走信封字段', () => {
-    type ExtendedTree = SessionTree & { futureField: string };
+    type ExtendedTree = SessionTreeSnapshot & { futureField: string };
     const extended: ExtendedTree = { ...tree('s-2', 9, null, []), futureField: 'x' };
 
     const shard = loadSessionTree(shardOf(loaded(), nodeA), extended);

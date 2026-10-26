@@ -9,7 +9,7 @@ mod support;
 
 use support::{Harness, Script, connect, error_code, recorded_facts};
 
-fn queue_texts(tree: &agent::SessionTree) -> Vec<&str> {
+fn queue_texts(tree: &agent::SessionTreeSnapshot) -> Vec<&str> {
     tree.queue.iter().map(|item| item.text.as_str()).collect()
 }
 
@@ -17,7 +17,7 @@ fn queue_texts(tree: &agent::SessionTree) -> Vec<&str> {
 async fn role_texts(
     harness: &Harness,
     session: &agent::SessionId,
-    tree: &agent::SessionTree,
+    tree: &agent::SessionTreeSnapshot,
     role: agent::MessageRole,
 ) -> Vec<String> {
     let messages: Vec<agent::MessageId> = tree

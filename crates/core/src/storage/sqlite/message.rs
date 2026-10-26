@@ -1,7 +1,5 @@
-//! 消息读路径：树快照、单节点、transcript 回溯与按 id 批量取正文。
+//! 消息读路径：树快照、单节点、全量骨架与按 id 批量取正文。
 //! 写入在 `apply`，行解码在 `rows`。
-
-use std::collections::HashMap;
 
 use sqlx::Row;
 use sqlx::sqlite::SqliteConnection;
@@ -13,7 +11,7 @@ use super::rows::{
 use super::{SESSION_HEAD_SQL, SqliteStorage, corrupted};
 use crate::error::StoreError;
 use crate::id::{MessageId, SessionId};
-use crate::message::{ContentPart, Message, MessageBody, MessageNode, MessageSkeleton};
+use crate::message::{ContentPart, Message, MessageBody, MessageSkeleton};
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::storage::SessionSnapshot;
@@ -91,43 +89,16 @@ impl SqliteStorage {
         }))
     }
 
-    /// 从 active leaf 向上回溯到根或最近一条压缩消息，顺序为根在前。
+    /// session 的全部消息骨架，按 id 升序。
     ///
-    /// 按回溯深度倒序排列，不按 id 排序：深度 0 是 active leaf，深度越大越靠近根；
-    /// 迁移 0006 会把旧消息重新挂到新铸的工具节点下，此后的 id 顺序不再等于链上顺序。
-    pub(crate) async fn transcript(
+    /// 只负责取行。链上顺序与压缩消息截断由 `MessageTree` 回答：迁移 0006 改挂父指针之后，
+    /// id 顺序不再等于链上顺序。
+    pub(crate) async fn message_skeletons(
         &self,
         session: &SessionId,
-    ) -> Result<Vec<MessageNode>, StoreError> {
-        let leaf: Option<i64> = sqlx::query_scalar("SELECT active_leaf FROM session WHERE id = ?1")
-            .bind(session.as_str())
-            .fetch_optional(&self.pool)
-            .await?;
-        let Some(leaf) = leaf else {
-            return Ok(Vec::new());
-        };
-        let rows = sqlx::query(
-            "WITH RECURSIVE chain(id, parent_id, role, run_id, created_at, depth) AS (
-                 SELECT id, parent_id, role, run_id, created_at, 0 FROM message
-                 WHERE session_id = ?2 AND id = ?1
-                 UNION ALL
-                 SELECT m.id, m.parent_id, m.role, m.run_id, m.created_at, c.depth + 1
-                 FROM message m JOIN chain c ON m.id = c.parent_id
-                 WHERE c.role <> 'compaction'
-             )
-             SELECT id, parent_id, role, run_id, created_at FROM chain ORDER BY depth DESC",
-        )
-        .bind(leaf)
-        .bind(session.as_str())
-        .fetch_all(&self.pool)
-        .await?;
-        let ids = ids_of(&rows)?;
+    ) -> Result<Vec<MessageSkeleton>, StoreError> {
         let mut connection = self.pool.acquire().await?;
-        let mut parts = parts_of(&mut connection, session, &ids).await?;
-        rows.iter()
-            .zip(ids)
-            .map(|(row, id)| parse_message(row, parts.remove(&id).unwrap_or_default()))
-            .collect()
+        session_messages(&mut connection, session).await
     }
 
     /// 按消息 id 批量取块正文；不属于该 session 的 id 被忽略。
@@ -209,32 +180,6 @@ async fn session_messages(
     Ok(messages)
 }
 
-async fn parts_of(
-    executor: &mut SqliteConnection,
-    session: &SessionId,
-    ids: &[MessageId],
-) -> Result<HashMap<MessageId, Vec<ContentPart>>, StoreError> {
-    let rows = sqlx::query(
-        "SELECT p.message_id AS message_id, p.body AS body FROM message_part p
-         JOIN message m ON m.id = p.message_id
-         WHERE m.session_id = ?1 AND p.message_id IN (SELECT value FROM json_each(?2))
-         ORDER BY p.message_id ASC, p.seq ASC",
-    )
-    .bind(session.as_str())
-    .bind(ids_json(ids)?)
-    .fetch_all(&mut *executor)
-    .await?;
-    let mut parts: HashMap<MessageId, Vec<ContentPart>> = HashMap::new();
-    for row in &rows {
-        let id = MessageId::parse(row.get::<i64, _>("message_id"))
-            .map_err(|error| corrupted("message_part.message_id", error))?;
-        let part: ContentPart = serde_json::from_str(&row.get::<String, _>("body"))
-            .map_err(|error| corrupted("message_part.body", error))?;
-        parts.entry(id).or_default().push(part);
-    }
-    Ok(parts)
-}
-
 async fn parts_of_message(
     executor: &mut SqliteConnection,
     id: MessageId,
@@ -247,15 +192,6 @@ async fn parts_of_message(
         .map(|row| {
             serde_json::from_str::<ContentPart>(&row.get::<String, _>("body"))
                 .map_err(|error| corrupted("message_part.body", error))
-        })
-        .collect()
-}
-
-fn ids_of(rows: &[sqlx::sqlite::SqliteRow]) -> Result<Vec<MessageId>, StoreError> {
-    rows.iter()
-        .map(|row| {
-            MessageId::parse(row.get::<i64, _>("id"))
-                .map_err(|error| corrupted("message.id", error))
         })
         .collect()
 }
