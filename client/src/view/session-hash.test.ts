@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { toSessionId } from './ids';
-import { readLocationFromHash, writeLocationToHash } from './session-hash';
+import { readLocationFromHash, readSelection, writeLocationToHash } from './session-hash';
 
 describe('session 位置', () => {
   it('解析节点与 session', () => {
@@ -47,5 +47,24 @@ describe('session 位置', () => {
       node: 'studio',
       sessionId: null,
     });
+  });
+});
+
+describe('选中位置', () => {
+  it('初始化与 hashchange 从同一个函数读出位置', () => {
+    const hash = writeLocationToHash('macbook-air-01', toSessionId('s-1'));
+    expect(readSelection(hash)).toEqual({
+      node: 'macbook-air-01',
+      sessionId: toSessionId('s-1'),
+    });
+    expect(readSelection(writeLocationToHash('studio', null))).toEqual({
+      node: 'studio',
+      sessionId: null,
+    });
+  });
+
+  it('没有位置时节点与会话都为空', () => {
+    expect(readSelection('')).toEqual({ node: null, sessionId: null });
+    expect(readSelection('#session=s-1')).toEqual({ node: null, sessionId: null });
   });
 });

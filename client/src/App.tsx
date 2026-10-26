@@ -27,24 +27,19 @@ import {
 import { readLastSession, writeLastSession } from './view/drafts';
 import type { SessionId } from './view/ids';
 import { unavailableNotice } from './view/labels';
-import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
+import { readSelection, writeLocationToHash } from './view/session-hash';
 import { isEditableTarget, resolveShortcut } from './view/shortcuts';
+import type { Selection } from './view/session-hash';
 import { useClientState } from './view/use-client-state';
-import type { Selection } from './view/use-client-state';
 import { useCommands } from './view/use-commands';
 import { useDocumentTitle } from './view/use-document-title';
 
 const storage = window.localStorage;
 
-function readSelection(): Selection {
-  const location = readLocationFromHash(window.location.hash);
-  return { node: location?.node ?? null, sessionId: location?.sessionId ?? null };
-}
-
 /// 本模块负责会话选择位置、快捷键、命令面板与侧栏装配。写命令在 `view/use-commands.ts`，
 /// 主面板分支在 `components/MainPane.tsx`，派生视图在 `view/derived.ts`。
 export function App(): ReactElement {
-  const [selection, setSelection] = useState<Selection>(readSelection);
+  const [selection, setSelection] = useState<Selection>(() => readSelection(window.location.hash));
   const { state, dispatch, report, runCommand } = useClientState(selection);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
@@ -90,7 +85,7 @@ export function App(): ReactElement {
 
   useEffect(() => {
     const apply = () => {
-      const next = readSelection();
+      const next = readSelection(window.location.hash);
       setSelection(next);
       resetForLocation(next);
       setPaletteOpen(false);

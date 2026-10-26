@@ -12,8 +12,8 @@ import type { Draft } from './drafts';
 import { toSessionId } from './ids';
 import type { SessionId, WorkspacePath } from './ids';
 import type { ClientAction } from './reducer';
+import type { Selection } from './session-hash';
 import type { SessionView } from './types';
-import type { Selection } from './use-client-state';
 
 const storage = window.localStorage;
 
