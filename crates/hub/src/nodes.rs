@@ -15,39 +15,42 @@ use crate::{ApiError, HubState};
 
 /// 单个节点的快照。总线认为不可达的节点不再探测，直接回它的说明。
 ///
-/// 探测失败只体现在这次快照里，不回写总线视图：探测结果只由 watcher 写（ADR 0028）。
+/// 探测失败只体现在这次快照里，不回写总线条目：探测结果只由 watcher 写（ADR 0028）。
 /// 节点表命令另写停用与等待连接的管理状态（ADR 0041）。
 /// 「这次能否取到元数据」与「上游事件流是否通」是两个观测，允许短暂不一致。
 pub(crate) async fn snapshot_of(
     state: &HubState,
     node: NodeMetadata,
 ) -> Result<NodeSnapshot, ApiError> {
-    let view = state.bus.view(&node.name)?;
-    let metrics = state.bus.metrics(&node.name)?;
-    Ok(match view.status {
+    let entry = state.bus.node_entry(&node.name)?;
+    let metrics = entry.metrics;
+    Ok(match entry.view.status {
         NodeStatus::Ok => {
             match node_probe::fetch_bootstrap(&state.client, &node, state.options.connect_timeout)
                 .await
             {
-                Ok(bootstrap) => NodeSnapshot::ok(node, bootstrap).with_metrics(metrics),
-                Err(detail) => NodeSnapshot::failed(node, NodeStatus::Unreachable, detail)
-                    .with_metrics(metrics),
+                Ok(bootstrap) => NodeSnapshot::ok(node, bootstrap, metrics),
+                Err(detail) => NodeSnapshot::failed(node, NodeStatus::Unreachable, detail, metrics),
             }
         }
         status => NodeSnapshot::failed(
             node,
             status,
-            view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
-        )
-        .with_metrics(metrics),
+            entry.view.detail.unwrap_or_else(|| "节点不可用".to_owned()),
+            metrics,
+        ),
     })
 }
 
-/// 节点表命令的响应：以总线视图为准，不探测上游。
+/// 节点表命令的响应：以总线条目为准，不探测上游。
 fn snapshot_of_view(state: &HubState, node: NodeMetadata) -> Result<NodeSnapshot, ApiError> {
-    let view = state.bus.view(&node.name)?;
-    let metrics = state.bus.metrics(&node.name)?;
-    Ok(NodeSnapshot::of_view(node, view.status, view.detail).with_metrics(metrics))
+    let entry = state.bus.node_entry(&node.name)?;
+    Ok(NodeSnapshot::of_view(
+        node,
+        entry.view.status,
+        entry.view.detail,
+        entry.metrics,
+    ))
 }
 
 pub(crate) async fn register_node(

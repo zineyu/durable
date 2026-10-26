@@ -12,7 +12,7 @@ use futures_util::StreamExt;
 use tokio::task::JoinHandle;
 
 use super::Bus;
-use super::view::NodeView;
+use super::node::NodeView;
 use crate::node_probe;
 use crate::protocol::{NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION};
 use crate::{ApiError, HubOptions};
@@ -68,7 +68,7 @@ async fn watch_loop(
     let mut last_id: Option<i64> = None;
     let mut attempt = 0u32;
     loop {
-        let was_ok = bus.view(&node.name)?.status == NodeStatus::Ok;
+        let was_ok = bus.node_entry(&node.name)?.view.status == NodeStatus::Ok;
         let end = match run_stream(bus, client, node, &mut last_id, options, epoch).await {
             Ok(never) => match never {},
             Err(WatchError::End(end)) => end,

@@ -1,5 +1,5 @@
 //! hub 自有协议：节点表 DTO、合并事件信封与协议版本。
-//! 节点状态机在 `bus/view`，上游协议复用 `agent` 的 DTO。
+//! 节点状态机在 `bus/node`，上游协议复用 `agent` 的 DTO。
 
 use agent::BootstrapResponse;
 use durable::{FactEvent, MessageId, NodeMetadata, NodeName, ResyncReason, SessionId};
@@ -70,39 +70,41 @@ pub struct NodeSnapshot {
 
 impl NodeSnapshot {
     #[must_use]
-    pub fn ok(node: NodeMetadata, bootstrap: BootstrapResponse) -> Self {
+    pub fn ok(node: NodeMetadata, bootstrap: BootstrapResponse, metrics: NodeMetrics) -> Self {
         Self {
             bootstrap: Some(bootstrap),
-            ..Self::of_view(node, NodeStatus::Ok, None)
+            ..Self::of_view(node, NodeStatus::Ok, None, metrics)
         }
     }
 
     #[must_use]
-    pub fn failed(node: NodeMetadata, status: NodeStatus, detail: String) -> Self {
-        Self::of_view(node, status, Some(detail))
+    pub fn failed(
+        node: NodeMetadata,
+        status: NodeStatus,
+        detail: String,
+        metrics: NodeMetrics,
+    ) -> Self {
+        Self::of_view(node, status, Some(detail), metrics)
     }
 
-    /// 按总线视图构造快照；不探测上游，`bootstrap` 为空。
+    /// 按总线条目的视图构造快照；不探测上游，`bootstrap` 为空。
     #[must_use]
-    pub fn of_view(node: NodeMetadata, status: NodeStatus, detail: Option<String>) -> Self {
+    pub fn of_view(
+        node: NodeMetadata,
+        status: NodeStatus,
+        detail: Option<String>,
+        metrics: NodeMetrics,
+    ) -> Self {
         Self {
             name: node.name,
             url: node.url,
             enabled: node.enabled,
             status,
             detail,
-            last_event_at: None,
-            latency_ms: None,
+            last_event_at: metrics.last_event_at,
+            latency_ms: metrics.latency_ms,
             bootstrap: None,
         }
-    }
-
-    /// 填入节点的进程内计数。
-    #[must_use]
-    pub fn with_metrics(mut self, metrics: NodeMetrics) -> Self {
-        self.last_event_at = metrics.last_event_at;
-        self.latency_ms = metrics.latency_ms;
-        self
     }
 }
 

@@ -1,12 +1,13 @@
-//! hub 的广播总线：分发、序号、回放窗口与节点视图的对外门面。
-//! 上游订阅与重连在 `watch`，游标与回放窗口在 `window`，节点视图在 `view`。
+//! hub 的广播总线：分发、序号、回放窗口、共享状态字段与节点条目的门面。
+//! 上游订阅与重连在 `watch`，游标与回放窗口在 `window`，节点条目与写入规则在 `node`。
 
-mod view;
+mod node;
 mod watch;
 mod window;
 
-pub(crate) use self::view::DISABLED_DETAIL;
-pub use self::view::NodeView;
+pub(crate) use self::node::DISABLED_DETAIL;
+pub use self::node::NodeView;
+use self::node::{EpochClock, NodeEntry};
 pub(crate) use self::watch::NodeWatcher;
 
 use std::collections::{HashMap, VecDeque};
@@ -16,7 +17,7 @@ use durable::{NodeName, ResyncReason, SessionId};
 use tokio::sync::broadcast;
 
 use crate::ApiError;
-use crate::protocol::{HubStreamEvent, NodeMetrics};
+use crate::protocol::HubStreamEvent;
 
 /// 一个客户端订阅时得到的内容：可回放的事件、实时接收端，或一条 resync 指示。
 pub struct Subscription {
@@ -35,10 +36,10 @@ pub struct Bus {
 struct BusState {
     seq: u64,
     window: VecDeque<HubStreamEvent>,
-    views: HashMap<NodeName, NodeView>,
-    metrics: HashMap<NodeName, NodeMetrics>,
-    /// 每个节点的视图纪元。管理写入推进它，过期的探测写入被忽略。
-    epochs: HashMap<NodeName, u64>,
+    /// 每个节点一条记录。视图、计数与纪元同生同灭。
+    nodes: HashMap<NodeName, NodeEntry>,
+    /// 视图纪元的唯一来源。跨条目与跨删除都不重计。
+    clock: EpochClock,
 }
 
 impl Bus {
@@ -50,9 +51,8 @@ impl Bus {
             state: Mutex::new(BusState {
                 seq: 0,
                 window: VecDeque::new(),
-                views: HashMap::new(),
-                metrics: HashMap::new(),
-                epochs: HashMap::new(),
+                nodes: HashMap::new(),
+                clock: EpochClock::default(),
             }),
             replay_window,
         }

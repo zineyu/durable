@@ -134,7 +134,7 @@ impl HubState {
     ///
     /// 新订阅取一个新纪元，旧订阅之后写出的探测结果会被忽略。
     fn watch(&self, node: NodeMetadata) -> Result<(), ApiError> {
-        let epoch = self.bus.invalidate_view(&node.name)?;
+        let epoch = self.bus.begin_subscription(&node.name)?;
         let watcher = bus::NodeWatcher::start(
             Arc::clone(&self.bus),
             node.clone(),
@@ -301,10 +301,13 @@ async fn forward_node(
     let (raw_name, rest) = split_node_path(uri.path())?;
     let name = NodeName::parse(raw_name)?;
     let node = nodes::lookup(&state, &name).await?;
-    let view = state.bus.view(&name)?;
-    if view.status != NodeStatus::Ok {
+    let entry = state.bus.node_entry(&name)?;
+    if entry.view.status != NodeStatus::Ok {
         return Err(ApiError::node_unavailable(
-            view.detail.unwrap_or_else(|| format!("节点不可用: {name}")),
+            entry
+                .view
+                .detail
+                .unwrap_or_else(|| format!("节点不可用: {name}")),
         ));
     }
 
