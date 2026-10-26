@@ -9,10 +9,13 @@ use ts_rs::TS;
 /// hub 对浏览器的协议版本。任何不兼容的协议改动都递增它。
 ///
 /// 5：事实事件的信封新增 `session`，载荷不再带 `session`。
-pub const HUB_PROTOCOL_VERSION: u32 = 5;
+/// 6：`runFailureCode` 新增 `storage_failed`，`errorCode` 新增 `node_name_taken`，
+///    `unknown_node` 改名为 `node_not_found`；客户端失败标签表是穷尽 `Record`，旧客户端会
+///    渲染 `undefined` 前缀的说明。
+pub const HUB_PROTOCOL_VERSION: u32 = 6;
 
 /// hub 期望的 agent 协议版本。与 `agent::PROTOCOL_VERSION` 由测试保持一致。
-pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 5;
+pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -205,7 +208,7 @@ pub enum HubStreamEvent {
 pub enum HubErrorCode {
     NodeNameInvalid,
     NodeNameTaken,
-    UnknownNode,
+    NodeNotFound,
     NodeUnavailable,
     InvalidRequest,
     Internal,

@@ -55,6 +55,7 @@ export const runFailureLabel: Record<RunFailureCode, string> = {
   model_rate_limited: '供应商限流',
   context_limit_exceeded: '上下文超限',
   step_limit_exceeded: '步数超限',
+  storage_failed: '本地存储失败',
   interrupted: '进程中断',
 };
 

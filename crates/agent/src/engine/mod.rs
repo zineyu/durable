@@ -239,9 +239,7 @@ impl RunEngine {
         loop {
             let transcript = match self.store.transcript(session).await {
                 Ok(transcript) => transcript,
-                Err(error) => {
-                    return failed(RunFailureCode::ModelUpstream, error.to_string());
-                }
+                Err(error) => return failed(storage_failure(&error)),
             };
             let executed = *steps.get_or_insert_with(|| {
                 transcript
@@ -254,17 +252,17 @@ impl RunEngine {
             let resume = recover::resume_point(&transcript);
             // 步数上限先于接入：插话留给下一次 run，不白白消耗在一次必定失败的请求上。
             if matches!(resume, ResumePoint::Request) && executed >= self.config.max_steps {
-                return failed(
-                    RunFailureCode::StepLimitExceeded,
-                    format!("超过 {} 步上限", self.config.max_steps),
-                );
+                return failed(RunFailure {
+                    code: RunFailureCode::StepLimitExceeded,
+                    message: format!("超过 {} 步上限", self.config.max_steps),
+                });
             }
             // 步骤边界：工具执行不打断，因此只在发请求与收尾之前接入待插入插话。
             if !matches!(resume, ResumePoint::Tools(_)) {
                 match self.insert_pending_steers(session, start.run.id).await {
                     Ok(true) => continue,
                     Ok(false) => {}
-                    Err(error) => return failed(RunFailureCode::ModelUpstream, error.to_string()),
+                    Err(error) => return failed(storage_failure(&error)),
                 }
             }
             match resume {
@@ -278,7 +276,7 @@ impl RunEngine {
                                 .append_assistant(session, start.run.id, id, parts)
                                 .await
                             {
-                                return failed(RunFailureCode::ModelUpstream, error.to_string());
+                                return failed(storage_failure(&error));
                             }
                         }
                         StepEnd::Cancelled => return cancelled(),
@@ -289,17 +287,11 @@ impl RunEngine {
                                 if let Err(failure) =
                                     self.compact(session, &transcript, cancellation).await
                                 {
-                                    return RunOutcome {
-                                        status: RunStatus::Failed,
-                                        failure: Some(failure),
-                                    };
+                                    return failed(failure);
                                 }
                                 continue;
                             }
-                            return RunOutcome {
-                                status: RunStatus::Failed,
-                                failure: Some(failure),
-                            };
+                            return failed(failure);
                         }
                     }
                 }
@@ -307,12 +299,7 @@ impl RunEngine {
                     match self.run_tool_calls(start, cancellation, pending).await {
                         Ok(true) => {}
                         Ok(false) => return cancelled(),
-                        Err(failure) => {
-                            return RunOutcome {
-                                status: RunStatus::Failed,
-                                failure: Some(failure),
-                            };
-                        }
+                        Err(failure) => return failed(failure),
                     }
                 }
             }
@@ -390,9 +377,17 @@ fn cancelled() -> RunOutcome {
     }
 }
 
-fn failed(code: RunFailureCode, message: String) -> RunOutcome {
+fn failed(failure: RunFailure) -> RunOutcome {
     RunOutcome {
         status: RunStatus::Failed,
-        failure: Some(RunFailure { code, message }),
+        failure: Some(failure),
+    }
+}
+
+/// 把内核的错误转成 run 失败。引擎内任何 [`StoreError`] 都是本地存储失败。
+pub(super) fn storage_failure(error: &StoreError) -> RunFailure {
+    RunFailure {
+        code: RunFailureCode::StorageFailed,
+        message: error.to_string(),
     }
 }

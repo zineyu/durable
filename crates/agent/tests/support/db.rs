@@ -1,4 +1,4 @@
-//! 直接读测试数据库的辅助：事件回放与连接。
+//! 直接访问测试数据库的辅助：事件回放、连接，以及制造存储失败的写坏与拒绝写入。
 //! 通过 HTTP 的辅助在父模块。
 
 #![expect(
@@ -92,4 +92,24 @@ pub(crate) async fn recorded_event_rows(
             )
         })
         .collect()
+}
+
+/// 把每条内容块的正文写成非法 JSON，让读取 transcript 返回 `CorruptedData`。
+pub(crate) async fn corrupt_message_parts(database: &Path) {
+    sqlx::query("UPDATE message_part SET body = '{'")
+        .execute(&mut connect(database).await)
+        .await
+        .expect("写坏内容块正文");
+}
+
+/// 拒绝写入压缩消息，让压缩的落库返回数据库错误。
+pub(crate) async fn reject_compaction_writes(database: &Path) {
+    sqlx::query(
+        "CREATE TRIGGER reject_compaction BEFORE INSERT ON message
+         WHEN NEW.role = 'compaction'
+         BEGIN SELECT RAISE(ABORT, '测试注入的写入失败'); END",
+    )
+    .execute(&mut connect(database).await)
+    .await
+    .expect("建立拒绝压缩写入的触发器");
 }

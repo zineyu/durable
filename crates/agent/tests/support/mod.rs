@@ -25,8 +25,8 @@ pub(crate) mod db;
 pub(crate) mod provider;
 
 pub(crate) use db::{
-    RecordedFact, connect, recorded_event_ids, recorded_event_kinds, recorded_event_rows,
-    recorded_events, recorded_facts,
+    RecordedFact, connect, corrupt_message_parts, recorded_event_ids, recorded_event_kinds,
+    recorded_event_rows, recorded_events, recorded_facts, reject_compaction_writes,
 };
 
 pub(crate) use provider::{Script, ScriptedProvider};

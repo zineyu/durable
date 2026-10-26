@@ -140,7 +140,7 @@ pub(crate) async fn lookup(state: &HubState, name: &NodeName) -> Result<NodeMeta
         .store
         .node(name)
         .await?
-        .ok_or_else(|| ApiError::unknown_node(format!("节点不存在: {name}")))
+        .ok_or_else(|| ApiError::node_not_found(format!("节点不存在: {name}")))
 }
 
 /// 节点 URL 不能为空。前后空白在写入前去掉。

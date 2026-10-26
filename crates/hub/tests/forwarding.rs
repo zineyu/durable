@@ -93,7 +93,7 @@ async fn rejects_unknown_node() {
         .expect("请求未知节点");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body: hub::HubErrorResponse = response.json().await.expect("解析错误响应");
-    assert_eq!(body.code, hub::HubErrorCode::UnknownNode);
+    assert_eq!(body.code, hub::HubErrorCode::NodeNotFound);
 }
 
 /// 规格 user story H-28：不可达节点的命令返回显式错误。

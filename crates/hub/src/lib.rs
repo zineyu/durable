@@ -420,7 +420,7 @@ fn idle_body(
 fn split_node_path(path: &str) -> Result<(&str, &str), ApiError> {
     let remainder = path
         .strip_prefix("/api/n/")
-        .ok_or_else(|| ApiError::unknown_node(format!("不是节点作用域路径: {path}")))?;
+        .ok_or_else(|| ApiError::node_not_found(format!("不是节点作用域路径: {path}")))?;
     match remainder.find('/') {
         Some(index) => Ok(remainder.split_at(index)),
         None => Ok((remainder, "")),
