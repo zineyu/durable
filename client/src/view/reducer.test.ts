@@ -205,12 +205,15 @@ describe('合并 bootstrap', () => {
 
     expect(state.hub.nodes.map((record) => record.name)).toEqual([nodeA, nodeB]);
     expect(state.hub.cursor).toBe(7);
-    expect(state.hub.selected).toBeNull();
     expect(shardOf(state, nodeA).modelName).toBe('gpt-5-codex');
     expect(shardOf(state, nodeA).lastEventId).toBe(7);
     expect(shardOf(state, nodeB).workspaces.map((workspace) => workspace.path)).toEqual([
       '/work/b',
     ]);
+  });
+
+  it('hub 层只有节点表与广播游标，选中位置不进入 reducer', () => {
+    expect(Object.keys(loaded().hub).sort()).toEqual(['cursor', 'nodes']);
   });
 
   it('非 ok 节点没有分片，列表为空', () => {
@@ -790,12 +793,11 @@ describe('节点表变更', () => {
   });
 
   it('node_removed 删除记录与分片', () => {
-    const state = reduce(loaded(), { type: 'select-node', node: nodeB });
-    const removed = streamed(state, { type: 'node_removed', hubSeq: 8, name: nodeB });
+    const removed = streamed(loaded(), { type: 'node_removed', hubSeq: 8, name: nodeB });
 
     expect(removed.hub.nodes.map((record) => record.name)).toEqual([nodeA]);
     expect(removed.nodes[nodeB]).toBeUndefined();
-    expect(removed.hub.selected).toBe(nodeB);
+    expect(removed.hub.cursor).toBe(8);
   });
 
   it('node_updated 只改 URL 与启用标志，不动状态与分片', () => {

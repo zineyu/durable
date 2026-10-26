@@ -26,9 +26,9 @@ import {
 import type { NodeState } from './node-state';
 import type { ConnectionState, NodeRecord } from './types';
 
+/// `hub` 层状态。不含选中位置：选中位置只由 URL 哈希持有。
 export type HubState = {
   nodes: NodeRecord[];
-  selected: NodeName | null;
   /// 已应用的最大广播序号；`null` 表示尚未装配合并 bootstrap。
   cursor: number | null;
 };
@@ -56,14 +56,13 @@ export type ClientAction =
   | { type: 'bodies-failed'; node: NodeName; ids: number[] }
   | { type: 'bodies-retry'; node: NodeName; ids: number[] }
   | { type: 'bodies'; node: NodeName; ids: number[]; messages: MessageBody[] }
-  | { type: 'select-node'; node: NodeName | null }
   | { type: 'seen'; node: NodeName; sessionId: string; at: number }
   | { type: 'connection'; connection: ConnectionState }
   | { type: 'error'; error: ClientError }
   | { type: 'dismiss-error' };
 
 export const initialClientState: ClientState = {
-  hub: { nodes: [], selected: null, cursor: null },
+  hub: { nodes: [], cursor: null },
   nodes: {},
   connection: 'reconnecting',
   error: null,
@@ -103,8 +102,6 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
       return mapShard(state, action.node, (shard) =>
         applyMessageBodies(shard, action.ids, action.messages),
       );
-    case 'select-node':
-      return { ...state, hub: { ...state.hub, selected: action.node } };
     case 'seen':
       return mapShard(state, action.node, (shard) => markSeen(shard, action.sessionId, action.at));
     case 'connection':
@@ -140,7 +137,6 @@ function applyBootstrap(state: ClientState, bootstrap: HubBootstrap): ClientStat
         status: snapshot.status,
         detail: snapshot.detail,
       })),
-      selected: state.hub.selected,
       cursor: snapshotCursor(state.hub.cursor, bootstrap.maxHubSeq),
     },
     nodes,

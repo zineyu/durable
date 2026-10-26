@@ -5,21 +5,14 @@ import type { ApiFailure, ApiResult } from '../api/client';
 import { openEventStream } from '../api/events';
 import type { EventStream } from '../api/events';
 import type { HubBootstrap } from '../api/generated/HubBootstrap';
-import type { NodeName } from '../api/generated/NodeName';
 import { missingShards } from './derived';
-import type { SessionId } from './ids';
 import { snapshotCursor } from './node-state';
 import { initialClientState, reduce } from './reducer';
 import type { ClientAction, ClientState } from './reducer';
-import { readLocationFromHash } from './session-hash';
+import type { Selection } from './session-hash';
 import { useMessageBodies } from './use-message-bodies';
 
 const RECONNECT_DELAY_MS = 1000;
-
-export type Selection = {
-  node: NodeName | null;
-  sessionId: SessionId | null;
-};
 
 export type ClientController = {
   state: ClientState;
@@ -30,7 +23,7 @@ export type ClientController = {
 
 /// 客户端状态与网络接线：首屏 bootstrap、合并事件流、断线重连与正文拉取。
 export function useClientState(selection: Selection): ClientController {
-  const [state, dispatch] = useReducer(reduce, undefined, initialStateFromHash);
+  const [state, dispatch] = useReducer(reduce, initialClientState);
 
   const report = useCallback((failure: ApiFailure) => {
     dispatch({ type: 'error', error: { code: failure.code, message: failure.message } });
@@ -210,9 +203,4 @@ export function useClientState(selection: Selection): ClientController {
   });
 
   return { state, dispatch, report, runCommand };
-}
-
-function initialStateFromHash(): ClientState {
-  const location = readLocationFromHash(window.location.hash);
-  return reduce(initialClientState, { type: 'select-node', node: location?.node ?? null });
 }
