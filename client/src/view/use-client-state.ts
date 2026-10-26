@@ -6,6 +6,7 @@ import { openEventStream } from '../api/events';
 import type { EventStream } from '../api/events';
 import type { HubBootstrap } from '../api/generated/HubBootstrap';
 import type { NodeName } from '../api/generated/NodeName';
+import { missingShards } from './derived';
 import type { SessionId } from './ids';
 import { snapshotCursor } from './node-state';
 import { initialClientState, reduce } from './reducer';
@@ -59,10 +60,7 @@ export function useClientState(selection: Selection): ClientController {
     selectionRef.current = selection;
   }, [selection]);
 
-  const missingKey = state.hub.nodes
-    .filter((entry) => entry.status === 'ok' && state.nodes[entry.name] === undefined)
-    .map((entry) => entry.name)
-    .join(',');
+  const missingKey = missingShards(state.hub.nodes, state.nodes).join(',');
 
   useEffect(() => {
     if (missingKey === '') {

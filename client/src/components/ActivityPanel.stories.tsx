@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { ActivityPanel } from './ActivityPanel';
 import { toSessionId } from '../view/ids';
-import type { RunningEntry } from '../view/activity';
+import type { RunningEntry } from '../view/types';
 
 const entries: RunningEntry[] = [
   {

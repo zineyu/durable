@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import type { SessionMetadata } from '../api/generated/SessionMetadata';
+import type { NodeName } from '../api/generated/NodeName';
 import { toSessionId } from './ids';
 import { buildPalette, filterPalette, stepPaletteIndex } from './command-palette';
 import type { PaletteInput } from './command-palette';
-import { emptyNodeState } from './node-state';
-import type { NodeRecord } from './types';
+import type { NodeRecord, PaletteSession, SessionSummary } from './types';
 
 const nodeA: NodeRecord = { name: 'macbook-air-01', url: 'http://a', enabled: true, status: 'ok', detail: null };
 const nodeB: NodeRecord = { name: 'studio', url: 'http://b', enabled: true, status: 'ok', detail: null };
@@ -17,22 +16,42 @@ const nodeC: NodeRecord = {
   detail: '隧道断开',
 };
 
-function session(id: string, title: string, updatedAt: number, busy = false): SessionMetadata {
-  return { id, workspace: '/work/a', title, busy, queueLength: 0, updatedAt };
+function paletteSession(
+  node: NodeName,
+  id: string,
+  title: string,
+  updatedAt: number,
+): PaletteSession {
+  return { node, sessionId: toSessionId(id), title, workspace: '/work/a', updatedAt };
+}
+
+function summary(
+  id: string,
+  title: string,
+  updatedAt: number,
+  state: SessionSummary['state'] = 'idle',
+): SessionSummary {
+  return {
+    id: toSessionId(id),
+    title,
+    state,
+    queuedCount: 0,
+    updatedAt,
+    unread: false,
+    outcome: null,
+  };
 }
 
 function input(overrides: Partial<PaletteInput> = {}): PaletteInput {
   return {
     nodes: [nodeA, nodeB, nodeC],
-    shards: {
-      'macbook-air-01': {
-        ...emptyNodeState,
-        sessions: [session('s-1', '迁移与恢复', 20), session('s-2', '反代与内嵌', 10)],
-      },
-      studio: { ...emptyNodeState, sessions: [session('s-3', '类型生成一致性', 30, true)] },
-    },
+    sessions: [
+      paletteSession('macbook-air-01', 's-1', '迁移与恢复', 20),
+      paletteSession('macbook-air-01', 's-2', '反代与内嵌', 10),
+      paletteSession('studio', 's-3', '类型生成一致性', 30),
+    ],
     selectedNode: 'macbook-air-01',
-    selectedSessionId: toSessionId('s-2'),
+    selectedSession: summary('s-2', '反代与内嵌', 10),
     ...overrides,
   };
 }
@@ -56,14 +75,17 @@ describe('命令面板条目', () => {
 
   it('动作包含注册节点、注册 workspace 与停止当前 run', () => {
     const entries = buildPalette(
-      input({ selectedNode: 'studio', selectedSessionId: toSessionId('s-3') }),
+      input({
+        selectedNode: 'studio',
+        selectedSession: summary('s-3', '类型生成一致性', 30, 'running'),
+      }),
     );
     const labels = entries.filter((entry) => entry.group === 'action').map((entry) => entry.label);
     expect(labels).toEqual(['注册节点', '注册 workspace', '停止 run']);
   });
 
   it('节点不可用或 session 空闲时不提供对应动作', () => {
-    const labels = buildPalette(input({ selectedNode: 'retired', selectedSessionId: null }))
+    const labels = buildPalette(input({ selectedNode: 'retired', selectedSession: null }))
       .filter((entry) => entry.group === 'action')
       .map((entry) => entry.label);
     expect(labels).toEqual(['注册节点']);

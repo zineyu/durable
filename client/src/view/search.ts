@@ -1,6 +1,5 @@
 import { bodyText } from './content';
-import { transcriptNodes } from './messages';
-import type { NodeState } from './node-state';
+import type { SessionView } from './types';
 
 /// 一处命中。`index` 是该消息内的第几次出现。
 export type SearchHit = {
@@ -11,19 +10,16 @@ export type SearchHit = {
 
 const EXCERPT_RADIUS = 20;
 
-/// 在选中 session 的活动链上搜索已加载的正文。工具消息不参与。
-export function searchTranscript(state: NodeState, sessionId: string, query: string): SearchHit[] {
+/// 在 session 派生视图的活动链上搜索已加载的正文。
+export function searchTranscript(view: SessionView, query: string): SearchHit[] {
   const needle = query.trim();
   if (needle.length === 0) {
     return [];
   }
   const hits: SearchHit[] = [];
-  for (const node of transcriptNodes(state, sessionId)) {
-    if (node.role === 'tool') {
-      continue;
-    }
-    const parts = state.bodies[node.id];
-    if (parts === undefined) {
+  for (const entry of view.transcript) {
+    const parts = entry.parts;
+    if (parts === null) {
       continue;
     }
     const text = bodyText(parts);
@@ -33,7 +29,7 @@ export function searchTranscript(state: NodeState, sessionId: string, query: str
     let position = haystack.indexOf(target);
     while (position !== -1) {
       hits.push({
-        messageId: node.id,
+        messageId: entry.message.id,
         index: occurrence,
         excerpt: excerptOf(text, position, needle.length),
       });

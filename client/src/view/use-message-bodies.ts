@@ -3,7 +3,7 @@ import type { Dispatch } from 'react';
 import { api } from '../api/client';
 import type { ApiFailure } from '../api/client';
 import type { NodeName } from '../api/generated/NodeName';
-import { missingBodyIds } from './bodies';
+import { missingBodyIds } from './derived';
 import type { NodeState } from './node-state';
 import type { ClientAction } from './reducer';
 
