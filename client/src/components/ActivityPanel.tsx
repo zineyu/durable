@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import { StatusDot } from './StatusDot';
 import styles from './ActivityPanel.module.css';
-import type { RunningEntry } from '../view/activity';
+import type { RunningEntry } from '../view/types';
 import type { SessionId } from '../view/ids';
 
 export type ActivityPanelProps = {

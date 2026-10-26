@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ApiResult } from '../api/client';
 import { api } from '../api/client';
-import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { NodeName } from '../api/generated/NodeName';
-import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SubmitMode } from '../api/generated/SubmitMode';
 import { AssistantContent } from './AssistantContent';
 import { AssistantMessage } from './AssistantMessage';
@@ -17,22 +15,23 @@ import { QueueStrip } from './QueueStrip';
 import { SearchBar } from './SearchBar';
 import { Transcript } from './Transcript';
 import { UserMessage } from './UserMessage';
-import { bodyOf, placeholdersOf, toolResults } from '../view/bodies';
 import { bodyText } from '../view/content';
-import { sessionHistory } from '../view/history';
-import { toQueueItemId, toWorkspacePath } from '../view/ids';
-import { branchPosition, messageView, sessionQueue, transcriptNodes } from '../view/messages';
-import type { NodeState } from '../view/node-state';
-import { sessionStateOf } from '../view/labels';
+import { toWorkspacePath } from '../view/ids';
 import { searchTranscript, stepHit } from '../view/search';
 import { markdownFileName, sessionMarkdown } from '../view/session-markdown';
-import type { BranchControl, ConnectionState, NodeRecord } from '../view/types';
+import type {
+  BranchControl,
+  BranchPosition,
+  ConnectionState,
+  NodeRecord,
+  SessionView,
+  TranscriptEntry,
+} from '../view/types';
 
 export type SessionPaneProps = {
   node: NodeName;
   record: NodeRecord;
-  shard: NodeState;
-  session: SessionMetadata;
+  view: SessionView;
   connection: ConnectionState;
   draft: string;
   pastes: Record<string, string>;
@@ -46,11 +45,12 @@ export type SessionPaneProps = {
   onRetryMessage: (messageId: number) => void;
 };
 
+/// 本模块负责渲染一个 session 的派生视图：头部、搜索栏、transcript、队列与输入框。
+/// 它不读分片，也不判定 session 状态：这些都在 `view/derived.ts`。
 export function SessionPane({
   node,
   record,
-  shard,
-  session,
+  view,
   connection,
   draft,
   pastes,
@@ -68,8 +68,8 @@ export function SessionPane({
   const [hitIndex, setHitIndex] = useState(-1);
 
   const hits = useMemo(
-    () => (searchOpen ? searchTranscript(shard, session.id, query) : []),
-    [searchOpen, shard, session.id, query],
+    () => (searchOpen ? searchTranscript(view, query) : []),
+    [searchOpen, view, query],
   );
   const activeHit =
     hits.length === 0 ? null : hits[Math.max(0, Math.min(hitIndex, hits.length - 1))] ?? null;
@@ -83,45 +83,51 @@ export function SessionPane({
       ?.scrollIntoView({ block: 'center' });
   }, [activeHit]);
 
-  const idle = !session.busy && session.queueLength === 0;
-  const results = toolResults(shard, session.id);
+  const idle = view.idle;
+  const results = view.toolResults;
+  const sessionId = view.session.id;
 
-  const controls = (message: MessageSkeleton): { branch?: BranchControl } => {
-    const position = branchPosition(shard, session.id, message);
-    if (position === null) {
+  const switchLeaf = (leafId: number): void => {
+    runCommand(api.switchActiveLeaf(node, sessionId, leafId));
+  };
+
+  const controls = (branch: BranchPosition | null): { branch?: BranchControl } => {
+    if (branch === null) {
       return {};
     }
-    const control: BranchControl = { index: position.index, total: position.total };
+    const control: BranchControl = { index: branch.index, total: branch.total };
     if (!idle) {
       return { branch: control };
     }
-    const previousId = position.previousId;
-    const nextId = position.nextId;
+    const previousId = branch.previousId;
+    const nextId = branch.nextId;
     if (previousId !== null) {
-      control.onPrev = () => { runCommand(api.switchActiveLeaf(node, session.id, previousId)); };
+      control.onPrev = () => { switchLeaf(previousId); };
     }
     if (nextId !== null) {
-      control.onNext = () => { runCommand(api.switchActiveLeaf(node, session.id, nextId)); };
+      control.onNext = () => { switchLeaf(nextId); };
     }
     return { branch: control };
   };
 
-  const renderEntry = (message: MessageSkeleton): ReactElement => {
-    const parts = bodyOf(shard, message.id);
+  const renderEntry = (entry: TranscriptEntry): ReactElement => {
+    const message = entry.message;
+    const parts = entry.parts;
     const highlighted = activeHit?.messageId === message.id;
     if (message.role === 'user') {
       if (parts === null) {
         return <MessagePending key={message.id} parts={message.parts} />;
       }
+      const text = bodyText(parts);
       return (
         <UserMessage
           key={message.id}
           messageId={message.id}
           highlighted={highlighted}
-          text={bodyText(parts)}
-          onEdit={() => { onEditMessage(message.id, bodyText(parts)); }}
+          text={text}
+          onEdit={() => { onEditMessage(message.id, text); }}
           editDisabled={!idle}
-          {...controls(message)}
+          {...controls(entry.branch)}
         />
       );
     }
@@ -136,38 +142,29 @@ export function SessionPane({
         />
       );
     }
-    const view = messageView(shard, session.id, message);
     return (
       <AssistantMessage
         key={message.id}
         messageId={message.id}
         highlighted={highlighted}
-        state={view.state}
-        {...(view.note === null ? {} : { note: view.note })}
+        state={entry.state}
+        {...(entry.note === null ? {} : { note: entry.note })}
         onRetry={() => { onRetryMessage(message.id); }}
         retryDisabled={!idle}
-        {...controls(message)}
+        {...controls(entry.branch)}
       >
         <AssistantContent parts={parts} skeleton={message.parts} toolResults={results} />
       </AssistantMessage>
     );
   };
 
-  const entries = transcriptNodes(shard, session.id)
-    .filter((message) => message.role !== 'tool')
-    .map(renderEntry);
+  const entries = view.transcript.map(renderEntry);
 
-  const pending = placeholdersOf(shard, session.id).map((placeholder) => (
+  const pending = view.placeholders.map((placeholder) => (
     <AssistantMessage key={`pending-${String(placeholder.id)}`} state="streaming">
       <AssistantContent parts={placeholder.parts} skeleton={[]} toolResults={results} />
     </AssistantMessage>
   ));
-
-  const queue = sessionQueue(shard, session.id).map((item) => ({
-    id: toQueueItemId(String(item.id)),
-    text: item.text,
-    pendingSteer: item.pendingSteer,
-  }));
 
   const closeSearch = (): void => {
     setSearchOpen(false);
@@ -176,11 +173,11 @@ export function SessionPane({
   };
 
   const handleExport = (): void => {
-    const content = sessionMarkdown(shard, session, node);
+    const content = sessionMarkdown(view, node);
     const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = markdownFileName(session.title);
+    anchor.download = markdownFileName(view.session.title);
     anchor.click();
     setTimeout(() => { URL.revokeObjectURL(url); }, 0);
   };
@@ -191,9 +188,9 @@ export function SessionPane({
         node={node}
         nodeStatus={record.status}
         nodeDetail={record.detail}
-        title={session.title}
-        workspacePath={toWorkspacePath(session.workspace)}
-        state={sessionStateOf(session.busy, session.queueLength)}
+        title={view.summary.title}
+        workspacePath={toWorkspacePath(view.session.workspace)}
+        state={view.summary.state}
         connection={connection}
         searchOpen={searchOpen}
         onSearch={() => {
@@ -226,18 +223,18 @@ export function SessionPane({
         )}
       </Transcript>
       <QueueStrip
-        items={queue}
-        onRemove={(viewId) => { runCommand(api.removeQueueItem(node, session.id, Number(viewId))); }}
+        items={view.queue}
+        onRemove={(viewId) => { runCommand(api.removeQueueItem(node, sessionId, Number(viewId))); }}
       />
       <Composer
         value={draft}
         onChange={onDraftChange}
         onSend={onSend}
-        busy={session.busy}
-        mode={session.busy ? sendMode : 'queue'}
+        busy={view.session.busy}
+        mode={view.session.busy ? sendMode : 'queue'}
         onModeChange={onModeChange}
-        {...(session.busy ? { onCancel: onCancelRun } : {})}
-        history={sessionHistory(shard, session.id)}
+        {...(view.session.busy ? { onCancel: onCancelRun } : {})}
+        history={view.history}
         pastes={pastes}
       />
     </>

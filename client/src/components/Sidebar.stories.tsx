@@ -8,7 +8,7 @@ import {
   workspaceWithoutSessions,
   workspaces,
 } from '../fixtures/view';
-import type { RunningEntry } from '../view/activity';
+import type { RunningEntry } from '../view/types';
 
 const meta = {
   title: 'Components/Sidebar',

@@ -1,26 +1,20 @@
 import type { NodeName } from '../api/generated/NodeName';
-import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import { bodyText } from './content';
-import { bodyOf, toolResults } from './bodies';
 import { toolStateLabel } from './labels';
-import { transcriptNodes } from './messages';
-import type { NodeState } from './node-state';
 import { toolCardModel } from './tools';
 import type { ToolCallPart } from './tools';
+import type { SessionView } from './types';
 
-/// 把选中 session 的活动链渲染为 Markdown。工具调用折叠为引用块。
-export function sessionMarkdown(
-  state: NodeState,
-  session: SessionMetadata,
-  node: NodeName,
-): string {
-  const results = toolResults(state, session.id);
+/// 把 session 派生视图的活动链渲染为 Markdown。工具调用折叠为引用块。
+export function sessionMarkdown(view: SessionView, node: NodeName): string {
+  const results = view.toolResults;
   const sections: string[] = [];
-  for (const message of transcriptNodes(state, session.id)) {
-    const parts = bodyOf(state, message.id);
+  for (const entry of view.transcript) {
+    const parts = entry.parts;
     if (parts === null) {
       continue;
     }
+    const message = entry.message;
     if (message.role === 'user') {
       sections.push(`## 用户\n\n${bodyText(parts)}`);
       continue;
@@ -36,14 +30,14 @@ export function sessionMarkdown(
     const tools = parts
       .filter((part): part is ToolCallPart => part.kind === 'tool_call')
       .map((part) => toolQuote(part, results[part.callId]));
-    const body = [text, ...tools].filter((entry) => entry.length > 0).join('\n\n');
+    const body = [text, ...tools].filter((piece) => piece.length > 0).join('\n\n');
     if (body.length > 0) {
       sections.push(`## 助手\n\n${body}`);
     }
   }
   const header = [
-    `# ${session.title}`,
-    [`- 节点：${node}`, `- workspace：${session.workspace}`].join('\n'),
+    `# ${view.session.title}`,
+    [`- 节点：${node}`, `- workspace：${view.session.workspace}`].join('\n'),
   ];
   return `${[...header, ...sections].join('\n\n')}\n`;
 }

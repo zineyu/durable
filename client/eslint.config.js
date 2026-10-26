@@ -58,6 +58,9 @@ export default tseslint.config(
       // 关闭原因：closure 修改的 liveness 标志被 TypeScript 错定为常量，
       // `await` 之后重复的存活检查被判为死代码。这类检查在断线重连路径上必需。
       '@typescript-eslint/no-unnecessary-condition': 'off',
+      // 忽略 rest 解构留下的兄弟变量：用于「去掉若干字段、保留其余字段」的装载函数，
+      // 使协议新增字段自动流入，不必逐字段抄写。
+      '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
       '@typescript-eslint/no-require-imports': 'error',
       '@typescript-eslint/prefer-readonly': 'error',
       '@typescript-eslint/restrict-template-expressions': [

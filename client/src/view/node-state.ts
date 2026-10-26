@@ -8,8 +8,7 @@ import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTree } from '../api/generated/SessionTree';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { dropFinished, dropPlaceholder, forgetBodies, invalidateBody } from './bodies';
-import type { MessagePlaceholder } from './bodies';
-import type { RetryState } from './types';
+import type { MessagePlaceholder, RetryState } from './types';
 
 /// 一条事实事件的信封：事件 id、事实提交后的 session 视图与事实本体。
 export type FactEnvelope = {
@@ -21,12 +20,8 @@ export type FactEnvelope = {
 /// 每节点保留的已应用事实条数。快照与已应用尾部之间的差距远小于它。
 const APPLIED_FACT_LIMIT = 128;
 
-export type SessionTreeState = {
-  activeLeaf: number | null;
-  nodes: MessageSkeleton[];
-  queue: QueueItem[];
-  runs: RunRecord[];
-};
+/// 分片内的树状态。除快照信封的两个字段外全部保留，因此协议新增字段会自动流入。
+export type SessionTreeState = Omit<SessionTree, 'session' | 'maxEventId'>;
 
 /// 单个节点的分片。一个节点的事件只归约到自己的分片，分片之间互不影响。
 export type NodeState = {
@@ -220,12 +215,7 @@ export function loadSessionTree(state: NodeState, tree: SessionTree): NodeState 
     lastSeenAt: seedSeenAt(state.lastSeenAt, tree.session),
     trees: {
       ...state.trees,
-      [tree.session.id]: {
-        activeLeaf: tree.activeLeaf,
-        nodes: tree.nodes,
-        queue: tree.queue,
-        runs: tree.runs,
-      },
+      [tree.session.id]: treeState(tree),
     },
     bodyRequests: [],
     bodyFailures: [],
@@ -290,6 +280,12 @@ function withSession(
 
 function emptyTree(): SessionTreeState {
   return { activeLeaf: null, nodes: [], queue: [], runs: [] };
+}
+
+/// 去掉快照信封的 session 视图与水位；其余字段整体进入分片。
+function treeState(tree: SessionTree): SessionTreeState {
+  const { session, maxEventId, ...rest } = tree;
+  return rest;
 }
 
 /// 清除某个 session 的重试等待。其它 session 不受影响。

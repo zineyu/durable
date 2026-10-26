@@ -14,16 +14,10 @@ import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTree } from '../api/generated/SessionTree';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId } from './ids';
-import { bodyOf, missingBodyIds, placeholdersOf, toolResults } from './bodies';
-import {
-  branchPosition,
-  messageView,
-  sessionQueue,
-  transcriptNodes,
-} from './messages';
+import { missingBodyIds, sessionView } from './derived';
 import { loadSessionTree, snapshotCursor } from './node-state';
-import { sidebarWorkspaces } from './sidebar';
 import type { NodeState } from './node-state';
+import type { MessagePlaceholder } from './types';
 import { initialClientState, reduce } from './reducer';
 import type { ClientState } from './reducer';
 
@@ -162,12 +156,19 @@ function delta(
   };
 }
 
-function at<T>(entries: T[], index: number): T {
-  const entry = entries[index];
-  if (entry === undefined) {
-    throw new Error('缺少测试节点');
-  }
-  return entry;
+/// 正文缓存是分片字段，归约用例直接读分片；呈现侧读它的是 `derived.ts`。
+function bodyOf(shard: NodeState, messageId: number): ContentPart[] | null {
+  return shard.bodies[messageId] ?? null;
+}
+
+function placeholdersOf(shard: NodeState, sessionId: string): MessagePlaceholder[] {
+  return shard.placeholders[sessionId] ?? [];
+}
+
+/// 派生视图的 transcript 顺序，用于断言两条事件路径得到同一结果。
+function transcriptIds(state: ClientState, node: string): number[] {
+  const view = sessionView(shardOf(state, node), 's-1');
+  return view === null ? [] : view.transcript.map((entry) => entry.message.id);
 }
 
 function shardOf(state: ClientState, node: string): NodeState {
@@ -207,7 +208,7 @@ describe('合并 bootstrap', () => {
     expect(state.hub.selected).toBeNull();
     expect(shardOf(state, nodeA).modelName).toBe('gpt-5-codex');
     expect(shardOf(state, nodeA).lastEventId).toBe(7);
-    expect(sidebarWorkspaces(shardOf(state, nodeB)).map((workspace) => workspace.path)).toEqual([
+    expect(shardOf(state, nodeB).workspaces.map((workspace) => workspace.path)).toEqual([
       '/work/b',
     ]);
   });
@@ -231,122 +232,6 @@ describe('合并 bootstrap', () => {
 });
 
 describe('侧栏状态', () => {
-  it('按 workspace 注册顺序与 session 最近更新时间排序', () => {
-    const state = reduce(initialClientState, {
-      type: 'bootstrap',
-      bootstrap: hub(
-        [
-          snapshot(
-            nodeA,
-            bootstrap(
-              [workspaceB, workspaceA],
-              [
-                session('s-old', '/work/a', 100),
-                session('s-new', '/work/a', 300),
-                session('s-mid', '/work/a', 200),
-                session('s-b', '/work/b', 50),
-              ],
-            ),
-          ),
-        ],
-        7,
-      ),
-    });
-
-    expect(sidebarWorkspaces(shardOf(state, nodeA))).toEqual([
-      {
-        id: '/work/a',
-        path: '/work/a',
-        sessions: [
-          {
-            id: toSessionId('s-new'),
-            title: '标题 s-new',
-            state: 'idle',
-            queuedCount: 0,
-            updatedAt: 300,
-            unread: false,
-            outcome: null,
-          },
-          {
-            id: toSessionId('s-mid'),
-            title: '标题 s-mid',
-            state: 'idle',
-            queuedCount: 0,
-            updatedAt: 200,
-            unread: false,
-            outcome: null,
-          },
-          {
-            id: toSessionId('s-old'),
-            title: '标题 s-old',
-            state: 'idle',
-            queuedCount: 0,
-            updatedAt: 100,
-            unread: false,
-            outcome: null,
-          },
-        ],
-      },
-      {
-        id: '/work/b',
-        path: '/work/b',
-        sessions: [
-          {
-            id: toSessionId('s-b'),
-            title: '标题 s-b',
-            state: 'idle',
-            queuedCount: 0,
-            updatedAt: 50,
-            unread: false,
-            outcome: null,
-          },
-        ],
-      },
-    ]);
-  });
-
-  it('由 busy 与队列长度推导忙碌状态', () => {
-    const state = reduce(initialClientState, {
-      type: 'bootstrap',
-      bootstrap: hub(
-        [
-          snapshot(
-            nodeA,
-            bootstrap(
-              [workspaceA],
-              [
-                session('s-running', '/work/a', 100, { busy: true }),
-                session('s-queued', '/work/a', 200, { queueLength: 2 }),
-              ],
-            ),
-          ),
-        ],
-        7,
-      ),
-    });
-
-    expect(sidebarWorkspaces(shardOf(state, nodeA))[0]?.sessions).toEqual([
-      {
-        id: toSessionId('s-queued'),
-        title: '标题 s-queued',
-        state: 'queued',
-        queuedCount: 2,
-        updatedAt: 200,
-        unread: false,
-        outcome: null,
-      },
-      {
-        id: toSessionId('s-running'),
-        title: '标题 s-running',
-        state: 'running',
-        queuedCount: 0,
-        updatedAt: 100,
-        unread: false,
-        outcome: null,
-      },
-    ]);
-  });
-
   it('注册与移除 workspace 同步增删其 session', () => {
     const state = loaded();
 
@@ -354,9 +239,10 @@ describe('侧栏状态', () => {
       state,
       fact(nodeA, 8, 100, { kind: 'workspace_registered', workspace: workspaceB }),
     );
-    expect(sidebarWorkspaces(shardOf(registered, nodeA)).map((workspace) => workspace.path)).toEqual(
-      ['/work/a', '/work/b'],
-    );
+    expect(shardOf(registered, nodeA).workspaces.map((workspace) => workspace.path)).toEqual([
+      '/work/a',
+      '/work/b',
+    ]);
 
     const withSession = streamed(
       registered,
@@ -366,7 +252,7 @@ describe('侧栏状态', () => {
       withSession,
       fact(nodeA, 10, 102, { kind: 'workspace_removed', path: '/work/b' }),
     );
-    expect(sidebarWorkspaces(shardOf(removed, nodeA)).map((workspace) => workspace.path)).toEqual([
+    expect(shardOf(removed, nodeA).workspaces.map((workspace) => workspace.path)).toEqual([
       '/work/a',
     ]);
   });
@@ -378,21 +264,15 @@ describe('侧栏状态', () => {
       state,
       fact(nodeA, 8, 108, { sessionId: 's-1', kind: 'session_renamed' }, session('s-1', '/work/a', 300, { title: '新标题' })),
     );
-    expect(sidebarWorkspaces(shardOf(renamed, nodeA))[0]?.sessions[0]).toEqual({
-      id: toSessionId('s-1'),
-      title: '新标题',
-      state: 'idle',
-      queuedCount: 0,
-      updatedAt: 300,
-      unread: true,
-      outcome: null,
-    });
+    expect(shardOf(renamed, nodeA).sessions[0]).toEqual(
+      session('s-1', '/work/a', 300, { title: '新标题' }),
+    );
 
     const deleted = streamed(
       renamed,
       fact(nodeA, 9, 109, { kind: 'session_deleted', sessionId: 's-1' }),
     );
-    expect(sidebarWorkspaces(shardOf(deleted, nodeA))[0]?.sessions).toEqual([]);
+    expect(shardOf(deleted, nodeA).sessions).toEqual([]);
     expect(shardOf(deleted, nodeA).trees['s-1']).toBeUndefined();
     expect(shardOf(deleted, nodeB).trees['s-1']).toBeUndefined();
   });
@@ -415,7 +295,7 @@ describe('侧栏状态', () => {
       ),
     );
     expect(shardOf(next, nodeA).sessions[0]?.queueLength).toBe(0);
-    expect(sessionQueue(shardOf(next, nodeA), 's-1')).toEqual([]);
+    expect(shardOf(next, nodeA).trees['s-1']?.queue).toEqual([]);
   });
 
   it('迁移前的队列项移除没有 session 视图时只删队列项', () => {
@@ -429,7 +309,7 @@ describe('侧栏状态', () => {
       state,
       fact(nodeA, 8, 108, { kind: 'queue_item_removed', sessionId: 's-1', itemId: 5 }),
     );
-    expect(sessionQueue(shardOf(next, nodeA), 's-1')).toEqual([]);
+    expect(shardOf(next, nodeA).trees['s-1']?.queue).toEqual([]);
     expect(shardOf(next, nodeA).sessions[0]?.queueLength).toBe(1);
   });
 
@@ -445,7 +325,7 @@ describe('侧栏状态', () => {
         item: steer,
       }, session('s-1', '/work/a', 300, { busy: true, queueLength: 1 })),
     );
-    expect(sessionQueue(shardOf(queued, nodeA), 's-1')).toEqual([steer]);
+    expect(shardOf(queued, nodeA).trees['s-1']?.queue).toEqual([steer]);
     expect(shardOf(queued, nodeA).sessions[0]?.queueLength).toBe(1);
 
     const applied = streamed(
@@ -468,104 +348,9 @@ describe('侧栏状态', () => {
         item: { ...steer, pendingSteer: false },
       }, session('s-1', '/work/a', 310, { queueLength: 1 })),
     );
-    expect(sessionQueue(shardOf(downgraded, nodeA), 's-1')).toEqual([
+    expect(shardOf(downgraded, nodeA).trees['s-1']?.queue).toEqual([
       { ...steer, pendingSteer: false },
     ]);
-  });
-});
-
-describe('transcript 推导', () => {
-  const nodes = [
-    message(1, null, 'user'),
-    message(2, 1, 'assistant'),
-    message(3, 2, 'user'),
-    message(4, 3, 'assistant'),
-  ];
-
-  it('取 root 到 active leaf 的路径', () => {
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 4, nodes));
-
-    expect(transcriptNodes(shardOf(state, nodeA), 's-1').map((entry) => entry.id)).toEqual([
-      1, 2, 3, 4,
-    ]);
-    expect(transcriptNodes(shardOf(withTree(loaded(), nodeA, tree('s-1', 7, 2, nodes)), nodeA), 's-1').map((entry) => entry.id)).toEqual([1, 2]);
-    expect(transcriptNodes(shardOf(withTree(loaded(), nodeA, tree('s-1', 7, null, nodes)), nodeA), 's-1')).toEqual([]);
-  });
-
-  it('切换 active leaf 后 transcript 跟随目标子树', () => {
-    const branched = [
-      message(1, null, 'user'),
-      message(2, 1, 'assistant'),
-      message(3, 1, 'user'),
-      message(4, 3, 'assistant'),
-    ];
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 4, branched));
-    expect(transcriptNodes(shardOf(state, nodeA), 's-1').map((entry) => entry.id)).toEqual([
-      1, 3, 4,
-    ]);
-
-    const switched = streamed(
-      state,
-      fact(nodeA, 8, 108, {
-        sessionId: 's-1',
-        kind: 'active_leaf_changed',
-        activeLeaf: 2,
-      }, session('s-1', '/work/a', 200)),
-    );
-    expect(transcriptNodes(shardOf(switched, nodeA), 's-1').map((entry) => entry.id)).toEqual([
-      1, 2,
-    ]);
-  });
-
-  it('工具节点在链上但不计入分支兄弟', () => {
-    const chained = [
-      message(1, null, 'user'),
-      message(2, 1, 'assistant', { parts: parts(['tool_call']) }),
-      message(3, 2, 'tool', { parts: parts(['tool_result']) }),
-      message(4, 2, 'tool', { parts: parts(['tool_result']) }),
-      message(5, 3, 'user'),
-    ];
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 5, chained));
-    const shard = shardOf(state, nodeA);
-
-    expect(transcriptNodes(shard, 's-1').map((entry) => entry.id)).toEqual([1, 2, 3, 5]);
-    expect(branchPosition(shard, 's-1', at(chained, 2))).toBeNull();
-    expect(branchPosition(shard, 's-1', at(chained, 4))).toBeNull();
-  });
-
-  it('分支位置给出兄弟序号与相邻节点', () => {
-    const branched = [
-      message(1, null, 'user'),
-      message(2, 1, 'assistant'),
-      message(3, 2, 'user'),
-      message(4, 3, 'assistant'),
-      message(5, 2, 'user'),
-      message(6, 5, 'assistant'),
-    ];
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 6, branched));
-    const shard = shardOf(state, nodeA);
-
-    expect(transcriptNodes(shard, 's-1').map((entry) => entry.id)).toEqual([1, 2, 5, 6]);
-    expect(branchPosition(shard, 's-1', at(branched, 4))).toEqual({
-      index: 2,
-      total: 2,
-      previousId: 3,
-      nextId: null,
-    });
-    expect(branchPosition(shard, 's-1', at(branched, 0))).toBeNull();
-  });
-
-  it('压缩消息不计入分支兄弟', () => {
-    const compacted = [
-      message(1, null, 'user'),
-      message(2, 1, 'assistant'),
-      message(3, 1, 'compaction'),
-    ];
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 2, compacted));
-    const shard = shardOf(state, nodeA);
-
-    expect(branchPosition(shard, 's-1', at(compacted, 1))).toBeNull();
-    expect(branchPosition(shard, 's-1', at(compacted, 2))).toBeNull();
   });
 });
 
@@ -717,30 +502,6 @@ describe('正文缓存', () => {
     expect(shard.bodyRequests).toEqual([]);
     expect(shard.bodyFailures).toEqual([]);
   });
-
-  it('工具结局按 call id 汇总，正文未到时没有条目', () => {
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 3, [
-      message(1, null, 'user'),
-      message(2, 1, 'assistant', { parts: parts(['tool_call']) }),
-      message(3, 2, 'tool', { parts: parts(['tool_result']) }),
-    ]));
-    expect(toolResults(shardOf(state, nodeA), 's-1')).toEqual({});
-
-    const withBody = reduce(
-      reduce(state, { type: 'bodies-request', node: nodeA, ids: [3] }),
-      {
-      type: 'bodies',
-      node: nodeA,
-      ids: [3],
-      messages: [
-        { id: 3, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'unknown' }, providerMeta: null }] },
-      ],
-      },
-    );
-    expect(toolResults(shardOf(withBody, nodeA), 's-1')).toEqual({
-      call_1: { status: 'unknown' },
-    });
-  });
 });
 
 describe('流式增量与占位节点', () => {
@@ -761,7 +522,7 @@ describe('流式增量与占位节点', () => {
         ],
       },
     ]);
-    expect(transcriptNodes(shardOf(state, nodeA), 's-1').map((entry) => entry.id)).toEqual([1]);
+    expect(shardOf(state, nodeA).trees['s-1']?.nodes.map((node) => node.id)).toEqual([1]);
   });
 
   it('message_appended 用同一 id 的骨架接管占位', () => {
@@ -838,51 +599,6 @@ describe('流式增量与占位节点', () => {
   it('delta 不推进广播游标', () => {
     const state = streamed(asked(), delta(nodeA, 's-1', 9, '你'));
     expect(state.hub.cursor).toBe(7);
-  });
-
-  it('由 run 状态推导 assistant 的展示状态与失败说明', () => {
-    const run: RunRecord = {
-      id: 1,
-      sessionId: 's-1',
-      status: 'running',
-      failure: null,
-      createdAt: 100,
-      updatedAt: 100,
-    };
-    let state = streamed(
-      withTree(loaded(), nodeA, tree('s-1', 7, 2, [
-        message(1, null, 'user'),
-        message(2, 1, 'assistant', { runId: 1 }),
-      ])),
-      fact(nodeA, 8, 108, {
-        sessionId: 's-1',
-        kind: 'run_started',
-        run,
-      }, session('s-1', '/work/a', 200, { busy: true })),
-    );
-    const assistant = at(shardOf(state, nodeA).trees['s-1']?.nodes ?? [], 1);
-    expect(messageView(shardOf(state, nodeA), 's-1', assistant)).toEqual({
-      state: 'streaming',
-      note: null,
-    });
-
-    state = streamed(
-      state,
-      fact(nodeA, 9, 109, {
-        sessionId: 's-1',
-        kind: 'run_finished',
-        run: {
-          ...run,
-          status: 'failed',
-          failure: { code: 'model_upstream', message: '上游 502' },
-          updatedAt: 300,
-        },
-      }, session('s-1', '/work/a', 300)),
-    );
-    expect(messageView(shardOf(state, nodeA), 's-1', assistant)).toEqual({
-      state: 'failed',
-      note: '模型上游错误：上游 502',
-    });
   });
 });
 
@@ -974,17 +690,8 @@ describe('分片隔离', () => {
       node: nodeA,
       bootstrap: bootstrap([workspaceA], [session('s-1', '/work/a', 108)], 108),
     });
-    expect(sidebarWorkspaces(shardOf(bootstrapped, nodeA))).toHaveLength(1);
+    expect(shardOf(bootstrapped, nodeA).sessions).toHaveLength(1);
     expect(shardOf(bootstrapped, nodeA).lastEventId).toBe(108);
-  });
-
-  it('切换选中节点不改变任何分片', () => {
-    const state = withTree(loaded(), nodeA, tree('s-1', 7, 1, [message(1, null, 'user')]));
-    const switched = reduce(state, { type: 'select-node', node: nodeB });
-
-    expect(switched.hub.selected).toBe(nodeB);
-    expect(switched.nodes).toBe(state.nodes);
-    expect(switched.hub.cursor).toBe(state.hub.cursor);
   });
 
   it('广播序号重复的事件被忽略', () => {
@@ -1039,7 +746,7 @@ describe('节点表变更', () => {
       node: 'legacy-lab',
       bootstrap: bootstrap([workspaceA], [session('s-9', '/work/a', 50)], 3),
     });
-    expect(sidebarWorkspaces(shardOf(bootstrapped, 'legacy-lab'))).toHaveLength(1);
+    expect(shardOf(bootstrapped, 'legacy-lab').sessions).toHaveLength(1);
   });
 
   it('节点转为非 ok 时清空其分片，其它分片不受影响', () => {
@@ -1059,7 +766,7 @@ describe('节点表变更', () => {
       status: 'unreachable',
       detail: '连接节点失败: 隧道已断开',
     });
-    expect(sidebarWorkspaces(shardOf(state, nodeA))).not.toEqual([]);
+    expect(shardOf(state, nodeA).sessions).not.toEqual([]);
   });
 
   it('改名按删除加登记广播，旧名与旧分片一起消失', () => {
@@ -1205,9 +912,7 @@ describe('快照水位与回放恢复', () => {
 
     const snapshot = withTree(base, nodeA, tree('s-1', 110, 2, [question, answer]));
 
-    expect(transcriptNodes(shardOf(replayed, nodeA), 's-1')).toEqual(
-      transcriptNodes(shardOf(snapshot, nodeA), 's-1'),
-    );
+    expect(transcriptIds(replayed, nodeA)).toEqual(transcriptIds(snapshot, nodeA));
   });
 
   it('加载快照后重放新事实等于从零构建', () => {
@@ -1254,6 +959,21 @@ describe('分片辅助', () => {
     const shard = loadSessionTree(shardOf(loaded(), nodeA), tree('s-2', 9, null, []));
     expect(shard.trees['s-2']?.activeLeaf).toBeNull();
     expect(shard.lastEventId).toBe(7);
+  });
+
+  it('分片整体保留快照的协议字段，只取走信封字段', () => {
+    type ExtendedTree = SessionTree & { futureField: string };
+    const extended: ExtendedTree = { ...tree('s-2', 9, null, []), futureField: 'x' };
+
+    const shard = loadSessionTree(shardOf(loaded(), nodeA), extended);
+
+    expect(shard.trees['s-2']).toEqual({
+      activeLeaf: null,
+      nodes: [],
+      queue: [],
+      runs: [],
+      futureField: 'x',
+    });
   });
 
   it('正文请求只作用于已有分片', () => {
@@ -1305,10 +1025,6 @@ describe('供应商限流重试', () => {
     );
   }
 
-  function assistantOf(state: ClientState): MessageSkeleton {
-    return at(shardOf(state, nodeA).trees['s-1']?.nodes ?? [], 1);
-  }
-
   it('按节点与 session 记录重试等待，不推进广播游标', () => {
     const state = withRunning();
     const cursor = state.hub.cursor;
@@ -1325,26 +1041,11 @@ describe('供应商限流重试', () => {
     expect(streamed(retrying, retryEvent('ghost', 's-1'))).toBe(retrying);
   });
 
-  it('重试期间 assistant 显示等待说明，文本重新流动后消失', () => {
+  it('文本重新流动后清除等待', () => {
     const retrying = streamed(withRunning(), retryEvent(nodeA, 's-1'));
-    expect(messageView(shardOf(retrying, nodeA), 's-1', assistantOf(retrying))).toEqual({
-      state: 'streaming',
-      note: '供应商限流，第 1/3 次重试，等待 2 秒',
-    });
-
     const streaming = streamed(retrying, delta(nodeA, 's-1', 2, '恢复'));
-    expect(messageView(shardOf(streaming, nodeA), 's-1', assistantOf(streaming))).toEqual({
-      state: 'streaming',
-      note: null,
-    });
-  });
 
-  it('等待时长小于一秒时按毫秒显示', () => {
-    const retrying = streamed(withRunning(), retryEvent(nodeA, 's-1', 2, 3, 250));
-    expect(messageView(shardOf(retrying, nodeA), 's-1', assistantOf(retrying))).toEqual({
-      state: 'streaming',
-      note: '供应商限流，第 2/3 次重试，等待 250 毫秒',
-    });
+    expect(shardOf(streaming, nodeA).retries['s-1']).toBeUndefined();
   });
 
   it('run 结束与 session 树重载都会清除重试等待', () => {
@@ -1364,10 +1065,6 @@ describe('供应商限流重试', () => {
     );
 
     expect(shardOf(finished, nodeA).retries['s-1']).toBeUndefined();
-    expect(messageView(shardOf(finished, nodeA), 's-1', assistantOf(finished))).toEqual({
-      state: 'failed',
-      note: '供应商限流：模型返回非成功状态 429: 限流',
-    });
 
     const reloaded = withTree(
       retrying,

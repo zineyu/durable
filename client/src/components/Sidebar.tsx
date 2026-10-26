@@ -8,8 +8,7 @@ import styles from './Sidebar.module.css';
 import type { SessionItemView } from './SessionListItem';
 import type { NodeName } from '../api/generated/NodeName';
 import type { SessionId, WorkspacePath } from '../view/ids';
-import type { NodeRecord, WorkspaceSummary } from '../view/types';
-import type { RunningEntry } from '../view/activity';
+import type { NodeRecord, RunningEntry, WorkspaceSummary } from '../view/types';
 
 export type SessionEditing = {
   sessionId: SessionId;

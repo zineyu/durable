@@ -1,10 +1,7 @@
 import type { NodeName } from '../api/generated/NodeName';
-import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import { nodeStatusLabel } from './labels';
-import { toSessionId } from './ids';
 import type { SessionId } from './ids';
-import type { NodeState } from './node-state';
-import type { NodeRecord } from './types';
+import type { NodeRecord, PaletteSession, SessionSummary } from './types';
 
 /// 面板条目的执行语义。组件只按 `kind` 分派，不解析文本。
 export type PaletteAction =
@@ -26,25 +23,27 @@ export type PaletteEntry = {
 
 export type PaletteInput = {
   nodes: NodeRecord[];
-  shards: Record<NodeName, NodeState>;
+  /// 跨节点的 session 列表，由派生层给出。
+  sessions: PaletteSession[];
   selectedNode: NodeName | null;
-  selectedSessionId: SessionId | null;
+  /// 选中 session 的摘要；未选中 session 时为 `null`。
+  selectedSession: SessionSummary | null;
 };
 
 const groupOrder: PaletteGroup[] = ['session', 'action', 'node'];
 
 /// 组装面板条目：跨节点的 session、动作与节点。
 export function buildPalette(input: PaletteInput): PaletteEntry[] {
-  const sessions = allSessions(input.nodes, input.shards).sort(
-    (left, right) => right.session.updatedAt - left.session.updatedAt,
+  const sessions = [...input.sessions].sort(
+    (left, right) => right.updatedAt - left.updatedAt,
   );
   return [
-    ...sessions.map(({ node, session }) => ({
-      id: `session:${node}:${session.id}`,
+    ...sessions.map((session) => ({
+      id: `session:${session.node}:${session.sessionId}`,
       group: 'session' as const,
       label: session.title,
-      detail: `${node} · ${session.workspace}`,
-      action: { kind: 'session' as const, node, sessionId: toSessionId(session.id) },
+      detail: `${session.node} · ${session.workspace}`,
+      action: { kind: 'session' as const, node: session.node, sessionId: session.sessionId },
     })),
     ...actions(input),
     ...input.nodes.map((record) => ({
@@ -87,23 +86,6 @@ export function stepPaletteIndex(current: number, delta: number, total: number):
   return (current + delta + total) % total;
 }
 
-function allSessions(
-  nodes: NodeRecord[],
-  shards: Record<NodeName, NodeState>,
-): { node: NodeName; session: SessionMetadata }[] {
-  const sessions: { node: NodeName; session: SessionMetadata }[] = [];
-  for (const record of nodes) {
-    const shard = shards[record.name];
-    if (shard === undefined) {
-      continue;
-    }
-    for (const session of shard.sessions) {
-      sessions.push({ node: record.name, session });
-    }
-  }
-  return sessions;
-}
-
 function actions(input: PaletteInput): PaletteEntry[] {
   const entries: PaletteEntry[] = [
     {
@@ -129,18 +111,14 @@ function actions(input: PaletteInput): PaletteEntry[] {
     detail: `在 ${node} 上注册目录`,
     action: { kind: 'register-workspace' },
   });
-  const shard = input.shards[node];
-  const session =
-    shard === undefined || input.selectedSessionId === null
-      ? undefined
-      : shard.sessions.find((entry) => entry.id === input.selectedSessionId);
-  if (session?.busy === true) {
+  const session = input.selectedSession;
+  if (session?.state === 'running') {
     entries.push({
       id: `action:cancel-run:${node}:${session.id}`,
       group: 'action',
       label: '停止 run',
       detail: `${session.title} · ${node}`,
-      action: { kind: 'cancel-run', node, sessionId: toSessionId(session.id) },
+      action: { kind: 'cancel-run', node, sessionId: session.id },
     });
   }
   return entries;

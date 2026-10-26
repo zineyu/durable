@@ -1,15 +1,9 @@
+/// 本模块负责块正文缓存与未定型占位的状态迁移。读取这些状态给呈现层的是 `derived.ts`。
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { DeltaKind } from '../api/generated/DeltaKind';
 import type { MessageBody } from '../api/generated/MessageBody';
-import type { ToolResultState } from '../api/generated/ToolResultState';
 import type { NodeState } from './node-state';
-import { transcriptNodes } from './messages';
-
-/// 尚未定型的本地占位。`id` 是该步定型后将使用的消息 id。
-export type MessagePlaceholder = {
-  id: number;
-  parts: ContentPart[];
-};
+import type { MessagePlaceholder } from './types';
 
 /// 累加一次实时增量。定型前的输出不进树，因此这里只写本地占位。
 export function applyDelta(
@@ -114,48 +108,6 @@ export function forgetBodies(state: NodeState, ids: number[]): NodeState {
     bodyRequests: state.bodyRequests.filter((id) => !ids.includes(id)),
     bodyFailures: state.bodyFailures.filter((id) => !ids.includes(id)),
   };
-}
-
-/// 尚未取得正文、也没有在请求中的消息 id。调用方据此批量拉取。
-export function missingBodyIds(state: NodeState, sessionId: string): number[] {
-  return transcriptNodes(state, sessionId)
-    .map((node) => node.id)
-    .filter(
-      (id) =>
-        state.bodies[id] === undefined &&
-        !state.bodyRequests.includes(id) &&
-        !state.bodyFailures.includes(id),
-    );
-}
-
-/// 一条消息的块正文；尚未拉到时为 `null`。
-export function bodyOf(state: NodeState, messageId: number): ContentPart[] | null {
-  return state.bodies[messageId] ?? null;
-}
-
-/// 按 call id 汇总工具结局。正文未到时没有条目，调用方按「执行中」渲染。
-export function toolResults(state: NodeState, sessionId: string): Record<string, ToolResultState> {
-  const tree = state.trees[sessionId];
-  if (tree === undefined) {
-    return {};
-  }
-  const results: Record<string, ToolResultState> = {};
-  for (const node of tree.nodes) {
-    if (node.role !== 'tool') {
-      continue;
-    }
-    for (const part of state.bodies[node.id] ?? []) {
-      if (part.kind === 'tool_result') {
-        results[part.callId] = part.state;
-      }
-    }
-  }
-  return results;
-}
-
-/// 该 session 里尚未定型的占位，渲染顺序即产生顺序。
-export function placeholdersOf(state: NodeState, sessionId: string): MessagePlaceholder[] {
-  return state.placeholders[sessionId] ?? [];
 }
 
 /// 丢掉该消息的正文缓存并取消在途请求，使下一次渲染重新拉取。

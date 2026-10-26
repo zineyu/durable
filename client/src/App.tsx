@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ReactElement, ReactNode } from 'react';
+import type { ReactElement } from 'react';
 import { api } from './api/client';
-import type { ApiResult } from './api/client';
 import type { NodeName } from './api/generated/NodeName';
-import type { SubmitMode } from './api/generated/SubmitMode';
 import { AppShell } from './components/AppShell';
 import { CommandPalette } from './components/CommandPalette';
 import { Dialog } from './components/Dialog';
@@ -11,51 +9,43 @@ import {
   dialogConfirmDisabled,
   dialogConfirmLabel,
   dialogTitle,
-  isNodeDialog,
   renderDialogBody,
 } from './components/dialog-body';
-import type { DialogState } from './components/dialog-body';
-import { EmptyState } from './components/EmptyState';
 import { ErrorBanner } from './components/ErrorBanner';
-import { SessionPane } from './components/SessionPane';
+import { MainPane } from './components/MainPane';
 import { ShortcutHelp } from './components/ShortcutHelp';
 import { Sidebar } from './components/Sidebar';
-import type { SessionEditing } from './components/Sidebar';
 import { buildPalette, filterPalette, stepPaletteIndex } from './view/command-palette';
 import type { PaletteEntry } from './view/command-palette';
-import { emptyDraft, readDraft, readLastSession, writeDraft, writeLastSession } from './view/drafts';
-import type { Draft } from './view/drafts';
-import { runningEntries } from './view/activity';
-import { toSessionId } from './view/ids';
-import type { SessionId, WorkspacePath } from './view/ids';
-import { nodeStatusLabel, unavailableNotice } from './view/labels';
-import { sessionById } from './view/node-state';
-import { orderedSessions, sidebarWorkspaces } from './view/sidebar';
+import {
+  nodeSummary,
+  orderedSessions,
+  paletteSessions,
+  runningEntries,
+  sessionView,
+} from './view/derived';
+import { readLastSession, writeLastSession } from './view/drafts';
+import type { SessionId } from './view/ids';
+import { unavailableNotice } from './view/labels';
 import { readLocationFromHash, writeLocationToHash } from './view/session-hash';
 import { isEditableTarget, resolveShortcut } from './view/shortcuts';
-import type { Selection } from './view/use-client-state';
-import { useDocumentTitle } from './view/use-document-title';
 import { useClientState } from './view/use-client-state';
+import type { Selection } from './view/use-client-state';
+import { useCommands } from './view/use-commands';
+import { useDocumentTitle } from './view/use-document-title';
 
 const storage = window.localStorage;
 
-function initialSelection(): Selection {
+function readSelection(): Selection {
   const location = readLocationFromHash(window.location.hash);
   return { node: location?.node ?? null, sessionId: location?.sessionId ?? null };
 }
 
-function initialDraft(): Draft {
-  const location = readLocationFromHash(window.location.hash);
-  return readDraft(storage, location?.node ?? null, location?.sessionId ?? null);
-}
-
+/// 本模块负责会话选择位置、快捷键、命令面板与侧栏装配。写命令在 `view/use-commands.ts`，
+/// 主面板分支在 `components/MainPane.tsx`，派生视图在 `view/derived.ts`。
 export function App(): ReactElement {
-  const [selection, setSelection] = useState<Selection>(initialSelection);
+  const [selection, setSelection] = useState<Selection>(readSelection);
   const { state, dispatch, report, runCommand } = useClientState(selection);
-  const [editing, setEditing] = useState<SessionEditing | null>(null);
-  const [dialog, setDialog] = useState<DialogState | null>(null);
-  const [draft, setDraft] = useState<Draft>(initialDraft);
-  const [sendMode, setSendMode] = useState<SubmitMode>('queue');
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
   const [paletteIndex, setPaletteIndex] = useState(0);
@@ -67,17 +57,22 @@ export function App(): ReactElement {
       ? undefined
       : state.hub.nodes.find((entry) => entry.name === selectedNode);
   const shard = selectedNode === null ? undefined : state.nodes[selectedNode];
-  const session =
-    shard === undefined || selection.sessionId === null
-      ? undefined
-      : sessionById(shard, selection.sessionId);
-  const selectedSessionId = session?.id ?? null;
-  const selectedUpdatedAt = session?.updatedAt ?? 0;
+  const view = useMemo(
+    () =>
+      shard === undefined || selection.sessionId === null
+        ? null
+        : sessionView(shard, selection.sessionId),
+    [shard, selection.sessionId],
+  );
+  const summary = useMemo(() => (shard === undefined ? null : nodeSummary(shard)), [shard]);
   const nodeReady = record?.status === 'ok';
 
-  const navigate = useCallback((node: NodeName, sessionId: SessionId | null) => {
-    window.location.hash = writeLocationToHash(node, sessionId);
+  const navigate = useCallback((node: NodeName | null, sessionId: SessionId | null) => {
+    window.location.hash = node === null ? '' : writeLocationToHash(node, sessionId);
   }, []);
+
+  const commands = useCommands({ selection, view, dispatch, report, runCommand, navigate });
+  const { cancelRun, closeDialog, dialog, resetForLocation, setDialog } = commands;
 
   const selectNode = useCallback(
     (node: NodeName) => { navigate(node, null); },
@@ -95,32 +90,29 @@ export function App(): ReactElement {
 
   useEffect(() => {
     const apply = () => {
-      const next = readLocationFromHash(window.location.hash);
-      setSelection({ node: next?.node ?? null, sessionId: next?.sessionId ?? null });
-      setDraft(readDraft(storage, next?.node ?? null, next?.sessionId ?? null));
-      setDialog(null);
-      setEditing(null);
+      const next = readSelection();
+      setSelection(next);
+      resetForLocation(next);
       setPaletteOpen(false);
     };
     window.addEventListener('hashchange', apply);
     return () => { window.removeEventListener('hashchange', apply); };
-  }, []);
+  }, [resetForLocation]);
 
   useEffect(() => {
     if (selectedNode === null || selection.sessionId !== null) {
       return;
     }
     const current = state.hub.nodes.find((entry) => entry.name === selectedNode);
-    const currentShard = state.nodes[selectedNode];
-    if (current?.status !== 'ok' || currentShard === undefined) {
+    if (current?.status !== 'ok' || summary === null) {
       return;
     }
     const last = readLastSession(storage, selectedNode);
-    if (last === null || !currentShard.sessions.some((entry) => entry.id === last)) {
+    if (last === null || !orderedSessions(summary.workspaces).some((entry) => entry.id === last)) {
       return;
     }
-    window.location.hash = writeLocationToHash(selectedNode, last);
-  }, [selectedNode, selection.sessionId, state.hub.nodes, state.nodes]);
+    navigate(selectedNode, last);
+  }, [navigate, selectedNode, selection.sessionId, state.hub.nodes, summary]);
 
   useEffect(() => {
     if (selectedNode !== null && selection.sessionId !== null) {
@@ -129,125 +121,31 @@ export function App(): ReactElement {
   }, [selectedNode, selection.sessionId]);
 
   useEffect(() => {
-    if (selectedNode === null || selectedSessionId === null) {
+    if (selectedNode === null || view === null) {
       return;
     }
-    dispatch({ type: 'seen', node: selectedNode, sessionId: selectedSessionId, at: selectedUpdatedAt });
-  }, [dispatch, selectedNode, selectedSessionId, selectedUpdatedAt]);
+    dispatch({
+      type: 'seen',
+      node: selectedNode,
+      sessionId: view.summary.id,
+      at: view.summary.updatedAt,
+    });
+  }, [dispatch, selectedNode, view]);
 
-  useDocumentTitle(selectedNode, session, shard);
-
-  const changeDraft = useCallback(
-    (text: string, pastes: Record<string, string>) => {
-      const next: Draft = { text, pastes };
-      setDraft(next);
-      writeDraft(storage, selectedNode, selection.sessionId, next);
-    },
-    [selectedNode, selection.sessionId],
-  );
-
-  const handleCreateSession = useCallback(
-    (workspace: WorkspacePath) => {
-      if (selectedNode === null) {
-        return;
-      }
-      const node = selectedNode;
-      void (async () => {
-        const outcome = await api.createSession(node, workspace, null);
-        if (!outcome.ok) {
-          report(outcome.error);
-          return;
-        }
-        dispatch({ type: 'session', node, session: outcome.value });
-        navigate(node, toSessionId(outcome.value.id));
-      })();
-    },
-    [dispatch, navigate, report, selectedNode],
-  );
-
-  const handleRenameSubmit = useCallback(
-    (id: SessionId, title: string) => {
-      if (selectedNode === null) {
-        return;
-      }
-      const node = selectedNode;
-      void (async () => {
-        const outcome = await api.renameSession(node, id, title);
-        if (!outcome.ok) {
-          report(outcome.error);
-          return;
-        }
-        setEditing(null);
-      })();
-    },
-    [report, selectedNode],
-  );
-
-  const handleDeleteConfirm = useCallback(
-    (id: SessionId) => {
-      if (selectedNode === null) {
-        return;
-      }
-      const node = selectedNode;
-      void (async () => {
-        const outcome = await api.deleteSession(node, id);
-        if (!outcome.ok) {
-          report(outcome.error);
-          return;
-        }
-        setEditing(null);
-        if (id === selection.sessionId) {
-          navigate(node, null);
-        }
-      })();
-    },
-    [navigate, report, selectedNode, selection.sessionId],
-  );
-
-  const handleSend = useCallback(
-    (text: string) => {
-      if (selectedNode === null || session === undefined) {
-        return;
-      }
-      const trimmed = text.trim();
-      if (trimmed.length === 0) {
-        return;
-      }
-      const node = selectedNode;
-      const id = session.id;
-      const mode = session.busy ? sendMode : 'queue';
-      void (async () => {
-        const outcome = await api.submitMessage(node, id, trimmed, mode);
-        if (!outcome.ok) {
-          report(outcome.error);
-          return;
-        }
-        setDraft(emptyDraft);
-        writeDraft(storage, node, toSessionId(id), emptyDraft);
-      })();
-    },
-    [report, selectedNode, sendMode, session],
-  );
-
-  const handleCancelRun = useCallback(() => {
-    if (selectedNode === null || session?.busy !== true) {
-      return;
-    }
-    runCommand(api.cancelRun(selectedNode, session.id));
-  }, [runCommand, selectedNode, session]);
+  useDocumentTitle(selectedNode, view);
 
   const paletteEntries = useMemo(
     () =>
       filterPalette(
         buildPalette({
           nodes: state.hub.nodes,
-          shards: state.nodes,
+          sessions: paletteSessions(state.hub.nodes, state.nodes),
           selectedNode,
-          selectedSessionId: selection.sessionId,
+          selectedSession: view === null ? null : view.summary,
         }),
         paletteQuery,
       ),
-    [paletteQuery, selectedNode, selection.sessionId, state.hub.nodes, state.nodes],
+    [paletteQuery, selectedNode, state.hub.nodes, state.nodes, view],
   );
   const paletteCursor =
     paletteEntries.length === 0 ? 0 : Math.min(paletteIndex, paletteEntries.length - 1);
@@ -277,15 +175,15 @@ export function App(): ReactElement {
         }
       }
     },
-    [navigate, runCommand],
+    [navigate, runCommand, setDialog],
   );
 
   const cycleSession = useCallback(
     (delta: number) => {
-      if (selectedNode === null || shard === undefined) {
+      if (selectedNode === null || summary === null) {
         return;
       }
-      const ordered = orderedSessions(shard);
+      const ordered = orderedSessions(summary.workspaces);
       if (ordered.length === 0) {
         return;
       }
@@ -301,7 +199,7 @@ export function App(): ReactElement {
         navigate(selectedNode, target.id);
       }
     },
-    [navigate, selectedNode, selection.sessionId, shard],
+    [navigate, selectedNode, selection.sessionId, summary],
   );
 
   useEffect(() => {
@@ -331,10 +229,10 @@ export function App(): ReactElement {
           return;
         }
         if (dialog !== null) {
-          setDialog(null);
+          closeDialog();
           return;
         }
-        handleCancelRun();
+        cancelRun();
         return;
       }
       if (paletteOpen || helpOpen) {
@@ -364,158 +262,21 @@ export function App(): ReactElement {
     window.addEventListener('keydown', handle);
     return () => { window.removeEventListener('keydown', handle); };
   }, [
+    cancelRun,
+    closeDialog,
     cycleSession,
     dialog,
-    handleCancelRun,
     helpOpen,
     navigate,
     paletteOpen,
     state.hub.nodes,
   ]);
 
-  const handleDialogConfirm = useCallback(() => {
-    if (dialog === null) {
-      return;
-    }
-    const current = dialog;
-    const close = () => { setDialog(null); };
-
-    if (isNodeDialog(current)) {
-      void (async () => {
-        switch (current.kind) {
-          case 'register-node': {
-            const outcome = await api.registerNode(current.name.trim(), current.url.trim());
-            if (!outcome.ok) {
-              report(outcome.error);
-              return;
-            }
-            close();
-            navigate(outcome.value.name, null);
-            return;
-          }
-          case 'rename-node': {
-            const outcome = await api.renameNode(current.name, current.next.trim());
-            if (!outcome.ok) {
-              report(outcome.error);
-              return;
-            }
-            close();
-            if (selectedNode === current.name) {
-              navigate(outcome.value.name, selection.sessionId);
-            }
-            return;
-          }
-          case 'remove-node': {
-            const outcome = await api.removeNode(current.name);
-            if (!outcome.ok) {
-              report(outcome.error);
-              return;
-            }
-            close();
-            if (selectedNode === current.name) {
-              window.location.hash = '';
-            }
-            return;
-          }
-          default: {
-            const unhandled: never = current;
-            throw new Error(`未处理的节点对话框: ${JSON.stringify(unhandled)}`);
-          }
-        }
-      })();
-      return;
-    }
-
-    if (selectedNode === null) {
-      return;
-    }
-    const node = selectedNode;
-    void (async () => {
-      let outcome: ApiResult<unknown>;
-      switch (current.kind) {
-        case 'edit':
-          outcome = await api.editUserMessage(node, current.sessionId, current.messageId, current.text);
-          break;
-        case 'retry':
-          outcome = await api.retryAssistantMessage(node, current.sessionId, current.messageId);
-          break;
-        case 'register-workspace':
-          outcome = await api.registerWorkspace(node, current.path);
-          break;
-        case 'remove-workspace':
-          outcome = await api.removeWorkspace(node, current.path);
-          break;
-        default: {
-          const unhandled: never = current;
-          throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
-        }
-      }
-      if (!outcome.ok) {
-        report(outcome.error);
-        return;
-      }
-      close();
-    })();
-  }, [dialog, navigate, report, selectedNode, selection.sessionId]);
-
-  const renderMain = (): ReactNode => {
-    if (selectedNode === null) {
-      return (
-        <EmptyState title="选择一个节点" description="在左侧节点切换器中选择一台机器。" />
-      );
-    }
-    if (record === undefined) {
-      return (
-        <EmptyState
-          title="未知节点"
-          description={`节点 ${selectedNode} 不在节点表里。它可能已被删除或改名。`}
-        />
-      );
-    }
-    if (record.status !== 'ok') {
-      return (
-        <EmptyState title="节点不可用" description={record.detail ?? nodeStatusLabel[record.status]} />
-      );
-    }
-    if (shard === undefined || session === undefined) {
-      return (
-        <EmptyState
-          title="选择一个 session"
-          description="从左侧选择 session，或者注册新的 workspace 后创建 session。"
-          actionLabel="注册 workspace"
-          onAction={() => { setDialog({ kind: 'register-workspace', path: '' }); }}
-        />
-      );
-    }
-    return (
-      <SessionPane
-        key={session.id}
-        node={record.name}
-        record={record}
-        shard={shard}
-        session={session}
-        connection={state.connection}
-        draft={draft.text}
-        pastes={draft.pastes}
-        onDraftChange={changeDraft}
-        onSend={handleSend}
-        onCancelRun={handleCancelRun}
-        sendMode={sendMode}
-        onModeChange={setSendMode}
-        runCommand={runCommand}
-        onEditMessage={(messageId, text) => {
-          setDialog({ kind: 'edit', sessionId: session.id, messageId, text });
-        }}
-        onRetryMessage={(messageId) => {
-          setDialog({ kind: 'retry', sessionId: session.id, messageId });
-        }}
-      />
-    );
-  };
-
-  const workspaces = shard === undefined ? [] : sidebarWorkspaces(shard);
   const notice = unavailableNotice(selectedNode, record);
-  const running = runningEntries(state.hub.nodes, state.nodes);
+  const running = useMemo(
+    () => runningEntries(state.hub.nodes, state.nodes),
+    [state.hub.nodes, state.nodes],
+  );
 
   return (
     <>
@@ -525,27 +286,27 @@ export function App(): ReactElement {
             nodes={state.hub.nodes}
             selectedNode={selectedNode}
             onSelectNode={selectNode}
-            onRegisterNode={() => { setDialog({ kind: 'register-node', name: '', url: '' }); }}
-            onRenameNode={(name) => { setDialog({ kind: 'rename-node', name, next: name }); }}
-            onRemoveNode={(name) => { setDialog({ kind: 'remove-node', name }); }}
+            onRegisterNode={() => { commands.setDialog({ kind: 'register-node', name: '', url: '' }); }}
+            onRenameNode={(name) => { commands.setDialog({ kind: 'rename-node', name, next: name }); }}
+            onRemoveNode={(name) => { commands.setDialog({ kind: 'remove-node', name }); }}
             notice={notice}
             commandsDisabled={!nodeReady}
             running={running}
             onSelectRunning={(node, id) => { navigate(node, id); }}
             onCancelRunning={(node, id) => { runCommand(api.cancelRun(node, id)); }}
-            modelName={shard?.modelName ?? ''}
-            workspaces={workspaces}
+            modelName={summary?.modelName ?? ''}
+            workspaces={summary?.workspaces ?? []}
             selectedSessionId={selection.sessionId}
-            editing={editing}
+            editing={commands.editing}
             onSelectSession={selectSession}
-            onRenameRequest={(id) => { setEditing({ sessionId: id, view: 'renaming' }); }}
-            onRenameSubmit={handleRenameSubmit}
-            onDeleteRequest={(id) => { setEditing({ sessionId: id, view: 'deleting' }); }}
-            onDeleteConfirm={handleDeleteConfirm}
-            onEditCancel={() => { setEditing(null); }}
-            onCreateSession={handleCreateSession}
-            onAddWorkspace={() => { setDialog({ kind: 'register-workspace', path: '' }); }}
-            onRemoveWorkspace={(path) => { setDialog({ kind: 'remove-workspace', path }); }}
+            onRenameRequest={commands.requestRename}
+            onRenameSubmit={commands.renameSession}
+            onDeleteRequest={commands.requestDelete}
+            onDeleteConfirm={commands.deleteSession}
+            onEditCancel={commands.cancelEditing}
+            onCreateSession={commands.createSession}
+            onAddWorkspace={() => { commands.setDialog({ kind: 'register-workspace', path: '' }); }}
+            onRemoveWorkspace={(path) => { commands.setDialog({ kind: 'remove-workspace', path }); }}
           />
         }
       >
@@ -556,18 +317,47 @@ export function App(): ReactElement {
             onDismiss={() => { dispatch({ type: 'dismiss-error' }); }}
           />
         ) : null}
-        {renderMain()}
+        <MainPane
+          node={selectedNode}
+          record={record}
+          view={view}
+          connection={state.connection}
+          draft={commands.draft.text}
+          pastes={commands.draft.pastes}
+          onDraftChange={commands.changeDraft}
+          onSend={commands.send}
+          onCancelRun={cancelRun}
+          sendMode={commands.sendMode}
+          onModeChange={commands.changeMode}
+          runCommand={runCommand}
+          onEditMessage={(messageId, text) => {
+            if (view !== null) {
+              commands.setDialog({
+                kind: 'edit',
+                sessionId: view.session.id,
+                messageId,
+                text,
+              });
+            }
+          }}
+          onRetryMessage={(messageId) => {
+            if (view !== null) {
+              commands.setDialog({ kind: 'retry', sessionId: view.session.id, messageId });
+            }
+          }}
+          onRegisterWorkspace={() => { commands.setDialog({ kind: 'register-workspace', path: '' }); }}
+        />
       </AppShell>
-      {dialog !== null ? (
+      {commands.dialog !== null ? (
         <Dialog
-          title={dialogTitle(dialog)}
-          confirmLabel={dialogConfirmLabel(dialog)}
-          confirmDisabled={dialogConfirmDisabled(dialog)}
-          danger={dialog.kind === 'remove-node'}
-          onConfirm={handleDialogConfirm}
-          onCancel={() => { setDialog(null); }}
+          title={dialogTitle(commands.dialog)}
+          confirmLabel={dialogConfirmLabel(commands.dialog)}
+          confirmDisabled={dialogConfirmDisabled(commands.dialog)}
+          danger={commands.dialog.kind === 'remove-node'}
+          onConfirm={commands.confirmDialog}
+          onCancel={closeDialog}
         >
-          {renderDialogBody(dialog, setDialog)}
+          {renderDialogBody(commands.dialog, commands.setDialog)}
         </Dialog>
       ) : null}
       {paletteOpen ? (
