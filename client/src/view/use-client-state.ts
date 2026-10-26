@@ -5,7 +5,7 @@ import type { ApiFailure, ApiResult } from '../api/client';
 import { openEventStream } from '../api/events';
 import type { EventStream } from '../api/events';
 import type { HubBootstrap } from '../api/generated/HubBootstrap';
-import { missingShards } from './derived';
+import { hasSession, missingShards } from './derived';
 import { snapshotCursor } from './node-state';
 import { initialClientState, reduce } from './reducer';
 import type { ClientAction, ClientState } from './reducer';
@@ -165,10 +165,11 @@ export function useClientState(selection: Selection): ClientController {
     };
   }, [report]);
 
+  const shard = selection.node === null ? undefined : state.nodes[selection.node];
   const sessionExists =
-    selection.node !== null &&
+    shard !== undefined &&
     selection.sessionId !== null &&
-    state.nodes[selection.node]?.sessions.some((entry) => entry.id === selection.sessionId) === true;
+    hasSession(shard, selection.sessionId);
 
   useEffect(() => {
     if (selection.node === null || selection.sessionId === null || !sessionExists) {
@@ -193,7 +194,6 @@ export function useClientState(selection: Selection): ClientController {
     };
   }, [selection.node, selection.sessionId, sessionExists, report]);
 
-  const shard = selection.node === null ? undefined : state.nodes[selection.node];
   useMessageBodies({
     node: selection.node,
     sessionId: selection.sessionId,

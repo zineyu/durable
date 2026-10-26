@@ -28,7 +28,7 @@ ADR 0017 要求全部业务状态由纯 reducer 推导，组件只接收派生�
 
 **选中位置只有一处所有者。** `hub.selected` 只写不读，删除它；`ClientAction` 的 `select-node` 一并删除。URL 哈希是选中位置的唯一所有者，初始化与 `hashchange` 共用 `readSelection`，写哈希只经 `navigate`。
 
-**`App.tsx` 拆到规模预算以内。** 主面板分支与 `SessionPane` 组装进 `components/MainPane.tsx`；全部写命令处理器与对话框确认进 `view/use-commands.ts`。`App.tsx` 从 593 行降到 383 行，`scripts/source-budget.allow` 的登记行删除。
+**`App.tsx` 拆到规模预算以内。** 主面板分支与 `SessionPane` 组装进 `components/MainPane.tsx`；全部写命令处理器与对话框确认进 `view/use-commands.ts`。`App.tsx` 从 593 行降到 379 行，`scripts/source-budget.allow` 的登记行删除。
 
 ## 备选
 
