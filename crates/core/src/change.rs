@@ -120,6 +120,14 @@ impl Changeset {
         });
     }
 
+    /// 改写 run 的流式进度。不推进 run 的更新时间，也不影响 session 视图。
+    pub fn update_run_progress(&mut self, id: RunId, progress: Option<&str>) {
+        self.push(Change::UpdateRunProgress {
+            id,
+            progress: progress.map(ToOwned::to_owned),
+        });
+    }
+
     pub fn append_event(&mut self, event: FactEvent, created_at: i64) {
         self.push(Change::AppendEvent { event, created_at });
     }
@@ -180,6 +188,10 @@ pub(crate) enum Change {
         status: RunStatus,
         failure: Option<RunFailure>,
         updated_at: i64,
+    },
+    UpdateRunProgress {
+        id: RunId,
+        progress: Option<String>,
     },
     AppendEvent {
         event: FactEvent,

@@ -1,4 +1,4 @@
-//! run 的生命周期写入：开始、定型 assistant、工具节点三态与结束。
+//! run 的生命周期写入：开始、定型 assistant、工具节点三态、流式进度与结束。
 //! 调度与续跑点推导在 `crates/agent/src/engine`；队列项在此之前写入 `queue`。
 
 use super::{Store, append_node};
@@ -52,6 +52,7 @@ impl Store {
                 session_id: id.clone(),
                 status: RunStatus::Running,
                 failure: None,
+                progress: None,
                 created_at: now,
                 updated_at: now,
             };
@@ -83,7 +84,7 @@ impl Store {
             command.changes().append_event(
                 FactEvent::RunStarted {
                     session_id: id.clone(),
-                    run: run.clone(),
+                    run: Box::new(run.clone()),
                 },
                 now,
             );
@@ -110,6 +111,7 @@ impl Store {
                 id: self.storage.mint_message_id().await?,
                 parent_id: leaf,
                 role: MessageRole::User,
+                interrupted: false,
                 parts: vec![ContentPart::text(item.text.as_str())],
                 run_id: Some(run.id),
                 created_at: run.created_at,
@@ -249,11 +251,16 @@ impl Store {
                 id,
                 parent_id: command.session().active_leaf,
                 role,
+                interrupted: false,
                 parts,
                 run_id: Some(run_id),
                 created_at: now,
             };
             append_node(command, &node);
+            // 定型与清空进度同一事务：不存在「消息已入树、进度仍残留」的状态。
+            if role == MessageRole::Assistant {
+                command.changes().update_run_progress(run_id, None);
+            }
             Ok(node)
         })
         .await
@@ -306,7 +313,79 @@ impl Store {
         .await
     }
 
-    /// 结束 run：写终态并写入事实事件。
+    /// 写入 run 的流式进度。只存正文，不含推理与未完成的工具调用。
+    ///
+    /// 正文与已存值相同时不提交：不写行、不产生事实事件、不推进 session 的更新时间。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Invariant`：该 session 没有执行中的 run，或 run 不是给定的那条。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    pub async fn write_progress(
+        &self,
+        session: &SessionId,
+        run: RunId,
+        text: &str,
+    ) -> Result<(), StoreError> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.command(session, async |command| {
+            let running = self
+                .running_run(session)
+                .await?
+                .ok_or_else(|| not_running(run))?;
+            if running.id != run {
+                return Err(not_running(run));
+            }
+            if running.progress.as_deref() == Some(text) {
+                return Ok(());
+            }
+            command.changes().update_run_progress(run, Some(text));
+            Ok(())
+        })
+        .await
+    }
+
+    /// 把执行中的 run 的进度定型为一条已中断的 assistant 消息，并在同一事务里清空进度。
+    ///
+    /// 启动恢复与用户取消共用这个转换点。进度为空时什么也不写，因此恢复途中再次被杀
+    /// 也不会写出第二条消息。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - `StoreError::Database`：数据库读取或写入失败。
+    /// - `StoreError::Serialization`：事实事件序列化失败。
+    pub async fn materialize_progress(
+        &self,
+        session: &SessionId,
+    ) -> Result<Option<MessageNode>, StoreError> {
+        self.command(session, async |command| {
+            let Some(running) = self.running_run(session).await? else {
+                return Ok(None);
+            };
+            let Some(text) = running.progress.clone() else {
+                return Ok(None);
+            };
+            let node = MessageNode {
+                id: self.storage.mint_message_id().await?,
+                parent_id: command.session().active_leaf,
+                role: MessageRole::Assistant,
+                interrupted: true,
+                parts: vec![ContentPart::text(text)],
+                run_id: Some(running.id),
+                created_at: command.now(),
+            };
+            append_node(command, &node);
+            command.changes().update_run_progress(running.id, None);
+            Ok(Some(node))
+        })
+        .await
+    }
+
+    /// 结束 run：写终态并写入事实事件。终态与清空进度在同一事务里生效。
     ///
     /// # Errors
     ///
@@ -329,16 +408,18 @@ impl Store {
             let finished = RunRecord {
                 status,
                 failure,
+                progress: None,
                 updated_at: now,
                 ..run.clone()
             };
             command
                 .changes()
                 .update_run(run.id, status, finished.failure.clone(), now);
+            command.changes().update_run_progress(run.id, None);
             command.changes().append_event(
                 FactEvent::RunFinished {
                     session_id: session.clone(),
-                    run: finished,
+                    run: Box::new(finished),
                 },
                 now,
             );
@@ -356,4 +437,8 @@ impl Store {
     pub async fn running_run(&self, session: &SessionId) -> Result<Option<RunRecord>, StoreError> {
         self.storage.running_run(session).await
     }
+}
+
+fn not_running(run: RunId) -> StoreError {
+    StoreError::Invariant(format!("run {} 不在执行中", run.get()))
 }

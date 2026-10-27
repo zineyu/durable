@@ -73,6 +73,7 @@ async fn commit_failure_publishes_nothing() {
         session_id: session.clone(),
         status: RunStatus::Running,
         failure: None,
+        progress: None,
         created_at: 1,
         updated_at: 1,
     };

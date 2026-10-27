@@ -54,6 +54,7 @@ function message(
     id,
     parentId,
     role,
+    interrupted: false,
     runId: null,
     createdAt: id,
     parts: [],
@@ -556,6 +557,7 @@ describe('流式增量与占位节点', () => {
       sessionId: 's-1',
       status: 'running',
       failure: null,
+      progress: null,
       createdAt: 100,
       updatedAt: 100,
     };
@@ -991,6 +993,7 @@ describe('供应商限流重试', () => {
     sessionId: 's-1',
     status: 'running',
     failure: null,
+    progress: null,
     createdAt: 100,
     updatedAt: 100,
   };

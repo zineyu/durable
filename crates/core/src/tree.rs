@@ -146,6 +146,7 @@ mod tests {
             id: MessageId::parse(id).expect("合法消息 id"),
             parent_id: parent.map(|raw| MessageId::parse(raw).expect("合法父节点 id")),
             role,
+            interrupted: false,
             run_id: None,
             created_at: id,
             parts: Vec::new(),

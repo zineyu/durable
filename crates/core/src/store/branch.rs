@@ -44,6 +44,7 @@ impl Store {
                 id: self.storage.mint_message_id().await?,
                 parent_id: target_node.parent_id,
                 role: MessageRole::User,
+                interrupted: false,
                 parts: vec![ContentPart::text(text.as_str())],
                 run_id: None,
                 created_at: now,

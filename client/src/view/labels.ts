@@ -41,6 +41,7 @@ export const messageStateLabel: Record<MessageState, string> = {
   streaming: '生成中',
   cancelled: '已取消',
   failed: '失败',
+  interrupted: '已中断',
 };
 
 export const toolStateLabel: Record<ToolState, string> = {

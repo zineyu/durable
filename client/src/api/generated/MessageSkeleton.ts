@@ -5,4 +5,8 @@ import type { PartSkeleton } from "./PartSkeleton";
 /**
  * 消息骨架：事件与快照携带的结构描述，不含块正文。
  */
-export type MessageSkeleton = { id: number, parentId: number | null, role: MessageRole, runId: number | null, createdAt: number, parts: Array<PartSkeleton>, };
+export type MessageSkeleton = { id: number, parentId: number | null, role: MessageRole, 
+/**
+ * 该消息是流式中断后入树的部分输出。迁移 0010 之前的事件行与载荷没有这个字段。
+ */
+interrupted: boolean, runId: number | null, createdAt: number, parts: Array<PartSkeleton>, };

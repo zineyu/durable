@@ -6,4 +6,8 @@ import type { SessionId } from "./SessionId";
 /**
  * 单个 run 的持久状态。
  */
-export type RunRecord = { id: number, sessionId: SessionId, status: RunStatus, failure: RunFailure | null, createdAt: number, updatedAt: number, };
+export type RunRecord = { id: number, sessionId: SessionId, status: RunStatus, failure: RunFailure | null, 
+/**
+ * 流式生成中已经产生的正文。只在 run 为 `running` 时可能非空，结束或定型时清空。
+ */
+progress: string | null, createdAt: number, updatedAt: number, };

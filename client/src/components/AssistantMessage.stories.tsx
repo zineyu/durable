@@ -39,6 +39,14 @@ export const Cancelled: Story = {
   },
 };
 
+export const Interrupted: Story = {
+  args: {
+    state: 'interrupted',
+    children: <p>health 端点已经就位。类型从 Rust 定义导出，前端只消费</p>,
+    branch: { index: 1, total: 2 },
+  },
+};
+
 export const Failed: Story = {
   args: {
     state: 'failed',

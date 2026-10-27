@@ -1,14 +1,15 @@
-//! 一次模型调用：发起、流式累积、限流退避与实时增量。定型前不落库。
-//! 循环控制与定型写入在父模块。
+//! 一次模型调用：发起、流式累积、进度提交、限流退避与实时增量。
+//! 循环控制与定型写入在父模块；节流判定在 `progress`。
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use durable::{
-    ContentPart, MessageId, MessageNode, RunFailure, RunFailureCode, SessionId, StreamEvent,
+    ContentPart, MessageId, MessageNode, RunFailure, RunFailureCode, RunId, SessionId, StreamEvent,
 };
 use futures_util::StreamExt;
 
 use crate::cancel::Cancellation;
+use crate::engine::progress::ProgressThrottle;
 use crate::engine::{RunEngine, StepEnd, StreamOpen, ToolCallBuilder, storage_failure};
 use crate::provider::{ChatChunk, ChatMessage, ProviderError};
 
@@ -21,10 +22,12 @@ const MAX_RETRY_EXPONENT: usize = 5;
 impl RunEngine {
     /// 发起并读取一轮模型流：文本与推理累积在内存，工具调用片段累积到返回值。
     ///
-    /// 取消或上游失败时不写入任何东西：未定型的内容只经实时增量传输。
+    /// 正文按 `progress_interval` 节流写入 run 的进度，因此流中途崩溃或取消时已产生的
+    /// 部分输出不会丢失。推理与未完成的工具调用不写入。
     pub(super) async fn stream_step(
         &self,
         session: &SessionId,
+        run: RunId,
         transcript: &[MessageNode],
         cancellation: &Cancellation,
     ) -> StepEnd {
@@ -49,6 +52,7 @@ impl RunEngine {
         let mut reasoning = String::new();
         let mut text = String::new();
         let mut builders: Vec<ToolCallBuilder> = Vec::new();
+        let mut throttle = ProgressThrottle::new(self.config.progress_interval);
         loop {
             let next = tokio::select! {
                 biased;
@@ -67,6 +71,8 @@ impl RunEngine {
                     if !delta.is_empty() {
                         text.push_str(&delta);
                         self.publish_delta(session, id, DeltaKind::Text, delta);
+                        self.record_progress(session, run, &text, &mut throttle)
+                            .await;
                     }
                 }
                 Some(Ok(ChatChunk::Reasoning(delta))) => {
@@ -178,6 +184,28 @@ impl RunEngine {
             text,
             timestamp: now_millis(),
         });
+    }
+
+    /// 按节流间隔把累积正文写入 run 的进度。
+    ///
+    /// 写入失败只记录日志：进度是崩溃恢复的辅助信息，本步定型的写入会再次暴露存储错误。
+    async fn record_progress(
+        &self,
+        session: &SessionId,
+        run: RunId,
+        text: &str,
+        throttle: &mut ProgressThrottle,
+    ) {
+        let Some(due) = throttle.take(text, Instant::now()) else {
+            return;
+        };
+        if let Err(error) = self.store.write_progress(session, run, &due).await {
+            tracing::warn!(
+                session = %session.as_str(),
+                error = %error,
+                "写入流式进度失败"
+            );
+        }
     }
 }
 

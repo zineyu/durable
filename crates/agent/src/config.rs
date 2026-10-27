@@ -10,11 +10,14 @@ pub const MODEL_API_KEY: &str = "DURABLE_MODEL_API_KEY";
 pub const MODEL_NAME: &str = "DURABLE_MODEL_NAME";
 pub const CONTEXT_CHAR_LIMIT: &str = "DURABLE_CONTEXT_CHAR_LIMIT";
 pub const MAX_STEPS: &str = "DURABLE_MAX_STEPS";
+/// 流式进度提交的最小间隔，单位毫秒。
+pub(crate) const PROGRESS_INTERVAL_MS: &str = "DURABLE_PROGRESS_INTERVAL_MS";
 pub(crate) const MODEL_RETRY_LIMIT: &str = "DURABLE_MODEL_RETRY_LIMIT";
 pub(crate) const MODEL_RETRY_BACKOFF_MS: &str = "DURABLE_MODEL_RETRY_BACKOFF_MS";
 
 const DEFAULT_CONTEXT_CHAR_LIMIT: usize = 200_000;
 const DEFAULT_MAX_STEPS: usize = 50;
+const DEFAULT_PROGRESS_INTERVAL_MS: usize = 100;
 const DEFAULT_MODEL_RETRY_LIMIT: usize = 3;
 const DEFAULT_MODEL_RETRY_BACKOFF_MS: usize = 1_000;
 
@@ -30,6 +33,8 @@ pub struct ModelConfig {
 pub struct EngineConfig {
     pub context_char_limit: usize,
     pub max_steps: usize,
+    /// 流式正文提交进度的最小间隔。未到间隔时不写库，因此磁盘写放大受它约束。
+    pub progress_interval: Duration,
     /// 供应商限流时的重试次数上限。`0` 表示不重试。
     pub model_retry_limit: usize,
     /// 限流重试的退避底数，逐次翻倍。
@@ -41,6 +46,7 @@ impl Default for EngineConfig {
         Self {
             context_char_limit: DEFAULT_CONTEXT_CHAR_LIMIT,
             max_steps: DEFAULT_MAX_STEPS,
+            progress_interval: Duration::from_millis(DEFAULT_PROGRESS_INTERVAL_MS as u64),
             model_retry_limit: DEFAULT_MODEL_RETRY_LIMIT,
             model_retry_backoff: Duration::from_millis(DEFAULT_MODEL_RETRY_BACKOFF_MS as u64),
         }
@@ -108,6 +114,10 @@ pub fn engine_config_from_env() -> Result<EngineConfig, ConfigError> {
     Ok(EngineConfig {
         context_char_limit: read_positive(CONTEXT_CHAR_LIMIT, defaults.context_char_limit)?,
         max_steps: read_positive(MAX_STEPS, defaults.max_steps)?,
+        progress_interval: Duration::from_millis(read_positive(
+            PROGRESS_INTERVAL_MS,
+            defaults.progress_interval.as_millis() as usize,
+        )? as u64),
         model_retry_limit: read_count(MODEL_RETRY_LIMIT, defaults.model_retry_limit)?,
         model_retry_backoff: Duration::from_millis(read_positive(
             MODEL_RETRY_BACKOFF_MS,

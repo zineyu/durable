@@ -87,6 +87,8 @@ pub struct RunRecord {
     pub session_id: SessionId,
     pub status: RunStatus,
     pub failure: Option<RunFailure>,
+    /// 流式生成中已经产生的正文。只在 run 为 `running` 时可能非空，结束或定型时清空。
+    pub progress: Option<String>,
     #[ts(type = "number")]
     pub created_at: i64,
     #[ts(type = "number")]

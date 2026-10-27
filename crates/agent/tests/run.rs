@@ -79,6 +79,34 @@ async fn streams_assistant_text_and_finishes_run() {
     assert_eq!(assistant.run_id, Some(run.id));
 }
 
+/// ADR 0047 与规格「持久化」：进度按间隔提交，间隔内的后续增量合并到下一次。
+///
+/// 脚本化 provider 把一段文本拆成两个增量。间隔足够长时只有第一个增量落库。
+#[tokio::test]
+async fn holds_back_progress_within_the_configured_interval() {
+    let harness = Harness::start_with(
+        agent::EngineConfig {
+            progress_interval: Duration::from_secs(60),
+            ..agent::EngineConfig::default()
+        },
+        vec![Script::PartialThenHang("甲乙丙丁戊己庚辛".into())],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+    harness.submit_message(&session.id, "开始").await;
+
+    let tree = harness
+        .wait_for_tree(&session.id, |tree| {
+            tree.runs.iter().any(|run| run.progress.is_some())
+        })
+        .await;
+    assert_eq!(
+        tree.runs[0].progress.as_deref(),
+        Some("甲乙丙丁"),
+        "第一个增量立即提交，间隔内的第二个增量被推迟"
+    );
+}
+
 /// 规格「模型调用」：同一轮多个工具调用按序执行，结果作为独立 tool 节点入树后再请求下一轮。
 #[tokio::test]
 async fn executes_tool_calls_in_order_and_continues() {
@@ -274,9 +302,9 @@ async fn removes_pending_queue_item_before_execution() {
     assert_eq!(tree.runs[1].status, agent::RunStatus::Succeeded);
 }
 
-/// 规格 ADR 0037：取消丢弃未定型的 assistant 内容，队列继续。
+/// 规格 user story A-10 与 A-38：取消保留已产生的部分输出，入树为已中断消息，队列继续。
 #[tokio::test]
-async fn cancels_running_run_and_discards_partial_text() {
+async fn cancels_running_run_and_keeps_partial_text() {
     let harness = Harness::start_with(
         agent::EngineConfig::default(),
         vec![
@@ -317,9 +345,16 @@ async fn cancels_running_run_and_discards_partial_text() {
     assert_eq!(tree.runs[0].failure, None);
     assert_eq!(
         texts(&harness, &session.id, agent::MessageRole::Assistant).await,
-        vec!["下一项"],
-        "取消的步不入树"
+        vec!["部分输出", "下一项"],
+        "取消保留的部分输出排在续跑产出的消息之前"
     );
+    let assistants: Vec<&agent::MessageSkeleton> = tree
+        .nodes
+        .iter()
+        .filter(|node| node.role == agent::MessageRole::Assistant)
+        .collect();
+    assert!(assistants[0].interrupted, "部分输出标注已中断");
+    assert!(!assistants[1].interrupted, "续跑产出的是普通回答");
     assert_eq!(
         tree.nodes
             .iter()
@@ -437,7 +472,7 @@ async fn passes_tool_failure_to_model_and_continues() {
     );
 }
 
-/// 规格 ADR 0038：tool 节点在执行前入树，结局用 `message_updated` 广播。
+/// ADR 0038：tool 节点在执行前入树，结局用 `message_updated` 广播。
 #[tokio::test]
 async fn broadcasts_tool_node_before_and_after_execution() {
     let harness = Harness::start_with(

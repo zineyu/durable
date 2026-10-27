@@ -248,7 +248,7 @@ impl SqliteStorage {
         id: &SessionId,
     ) -> Result<Option<RunRecord>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, session_id, status, failure, created_at, updated_at FROM run
+            "SELECT id, session_id, status, failure, progress, created_at, updated_at FROM run
              WHERE session_id = ?1 AND status = 'running' ORDER BY id ASC LIMIT 1",
         )
         .bind(id.as_str())

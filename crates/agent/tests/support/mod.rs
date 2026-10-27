@@ -22,6 +22,7 @@ use reqwest::{Response, StatusCode};
 use tempfile::TempDir;
 
 pub(crate) mod db;
+pub(crate) mod process;
 pub(crate) mod provider;
 
 pub(crate) use db::{

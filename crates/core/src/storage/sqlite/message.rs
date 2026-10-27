@@ -45,7 +45,7 @@ impl SqliteStorage {
         .map(parse_queue_item)
         .collect::<Result<Vec<QueueItem>, _>>()?;
         let runs = sqlx::query(
-            "SELECT id, session_id, status, failure, created_at, updated_at FROM run
+            "SELECT id, session_id, status, failure, progress, created_at, updated_at FROM run
              WHERE session_id = ?1 ORDER BY id ASC",
         )
         .bind(id.as_str())
@@ -71,7 +71,7 @@ impl SqliteStorage {
         id: MessageId,
     ) -> Result<Option<Message>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, parent_id, role, run_id, created_at FROM message
+            "SELECT id, parent_id, role, interrupted, run_id, created_at FROM message
              WHERE session_id = ?1 AND id = ?2",
         )
         .bind(session.as_str())
@@ -149,7 +149,8 @@ async fn session_messages(
     session: &SessionId,
 ) -> Result<Vec<MessageSkeleton>, StoreError> {
     let rows = sqlx::query(
-        "SELECT m.id AS id, m.parent_id AS parent_id, m.role AS role, m.run_id AS run_id,
+        "SELECT m.id AS id, m.parent_id AS parent_id, m.role AS role,
+                m.interrupted AS interrupted, m.run_id AS run_id,
                 m.created_at AS created_at, p.seq AS seq, p.kind AS kind, p.state AS state,
                 length(p.body) AS size
          FROM message m LEFT JOIN message_part p ON p.message_id = m.id

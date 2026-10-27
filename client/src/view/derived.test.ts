@@ -65,7 +65,7 @@ function message(
   role: MessageSkeleton['role'],
   extra: Partial<MessageSkeleton> = {},
 ): MessageSkeleton {
-  return { id, parentId, role, runId: null, createdAt: id, parts: [], ...extra };
+  return { id, parentId, role, interrupted: false, runId: null, createdAt: id, parts: [], ...extra };
 }
 
 function run(
@@ -78,6 +78,7 @@ function run(
     sessionId: 's-1',
     status,
     failure: null,
+    progress: null,
     createdAt: id,
     updatedAt: id,
     ...extra,
@@ -317,6 +318,24 @@ describe('session 派生视图', () => {
     expect(entryOf(cancelled, 2)).toMatchObject({ state: 'cancelled', note: null });
     expect(entryOf(cancelled, 1)).toMatchObject({ state: 'complete', note: null });
     expect(cancelled.lastRun).toBe('cancelled');
+  });
+
+  it('已中断标记优先于 run 状态', () => {
+    const nodes = [
+      message(1, null, 'user'),
+      message(2, 1, 'assistant', { runId: 1, interrupted: true }),
+      message(3, 2, 'assistant', { runId: 1 }),
+    ];
+    const viewOfStatus = (status: RunRecord['status']) =>
+      viewOf(shard({ trees: { 's-1': tree(nodes, 3, { runs: [run(1, status)] }) } }));
+
+    expect(entryOf(viewOfStatus('running'), 2)).toMatchObject({
+      state: 'interrupted',
+      note: null,
+    });
+    const succeeded = viewOfStatus('succeeded');
+    expect(entryOf(succeeded, 2)).toMatchObject({ state: 'interrupted', note: null });
+    expect(entryOf(succeeded, 3).state).toBe('complete');
   });
 
   it('队列与占位随视图给出，空闲判定同时看 run 与队列', () => {

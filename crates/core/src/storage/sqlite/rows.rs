@@ -120,6 +120,7 @@ pub(super) fn parse_skeleton(row: &SqliteRow) -> Result<MessageSkeleton, StoreEr
             .map_err(|error| corrupted("message.parent_id", error))?,
         role: MessageRole::parse(&row.get::<String, _>("role"))
             .map_err(|error| corrupted("message.role", error))?,
+        interrupted: parse_interrupted(row)?,
         run_id: run_id
             .map(RunId::parse)
             .transpose()
@@ -127,6 +128,14 @@ pub(super) fn parse_skeleton(row: &SqliteRow) -> Result<MessageSkeleton, StoreEr
         created_at: row.get("created_at"),
         parts: Vec::new(),
     })
+}
+
+fn parse_interrupted(row: &SqliteRow) -> Result<bool, StoreError> {
+    match row.get::<i64, _>("interrupted") {
+        0 => Ok(false),
+        1 => Ok(true),
+        other => Err(corrupted("message.interrupted", other)),
+    }
 }
 
 /// 块骨架行。`size` 直接取存储中 `body` 的字节数，不读正文。
@@ -158,6 +167,7 @@ pub(super) fn parse_message(
             .map_err(|error| corrupted("message.parent_id", error))?,
         role: MessageRole::parse(&row.get::<String, _>("role"))
             .map_err(|error| corrupted("message.role", error))?,
+        interrupted: parse_interrupted(row)?,
         parts,
         run_id: run_id
             .map(RunId::parse)
@@ -181,6 +191,7 @@ pub(super) fn parse_run(row: &SqliteRow) -> Result<RunRecord, StoreError> {
                     .map_err(|error| corrupted("run.failure", error))
             })
             .transpose()?,
+        progress: row.get("progress"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

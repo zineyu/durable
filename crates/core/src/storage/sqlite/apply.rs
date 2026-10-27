@@ -70,6 +70,9 @@ pub(super) async fn apply_change(
             failure,
             updated_at,
         } => update_run(connection, *id, *status, failure.as_ref(), *updated_at).await,
+        Change::UpdateRunProgress { id, progress } => {
+            update_run_progress(connection, *id, progress.as_deref()).await
+        }
         Change::AppendEvent { event, created_at } => {
             append_event(connection, event, session, *created_at, committed).await
         }
@@ -208,13 +211,14 @@ async fn insert_message(
     message: &Message,
 ) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO message (id, session_id, parent_id, role, run_id, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO message (id, session_id, parent_id, role, interrupted, run_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )
     .bind(message.node.id.get())
     .bind(message.session.as_str())
     .bind(message.node.parent_id.map(MessageId::get))
     .bind(message.node.role.as_str())
+    .bind(message.node.interrupted)
     .bind(message.node.run_id.map(RunId::get))
     .bind(message.node.created_at)
     .execute(&mut *connection)
@@ -332,8 +336,8 @@ async fn delete_queue_item(
 
 async fn insert_run(connection: &mut SqliteConnection, run: &RunRecord) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO run (id, session_id, status, failure, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO run (id, session_id, status, failure, progress, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )
     .bind(run.id.get())
     .bind(run.session_id.as_str())
@@ -344,11 +348,25 @@ async fn insert_run(connection: &mut SqliteConnection, run: &RunRecord) -> Resul
             .map(serde_json::to_string)
             .transpose()?,
     )
+    .bind(run.progress.as_deref())
     .bind(run.created_at)
     .bind(run.updated_at)
     .execute(&mut *connection)
     .await?;
     Ok(())
+}
+
+async fn update_run_progress(
+    connection: &mut SqliteConnection,
+    id: RunId,
+    progress: Option<&str>,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("UPDATE run SET progress = ?2 WHERE id = ?1")
+        .bind(id.get())
+        .bind(progress)
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "更新 run 进度")
 }
 
 async fn update_run(

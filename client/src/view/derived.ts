@@ -298,11 +298,16 @@ function branchAt(
 }
 
 /// 消息的展示状态与说明。说明只在进行中或失败时给出。
+///
+/// 已中断标记优先于 run 状态：该消息是崩溃或取消留下的部分输出，后续 run 的结局不改它。
 function messageDisplay(
   runs: RunRecord[],
   retry: RetryState | undefined,
   message: MessageSkeleton,
 ): { state: MessageState; note: string | null } {
+  if (message.interrupted) {
+    return { state: 'interrupted', note: null };
+  }
   if (message.runId === null) {
     return { state: 'complete', note: null };
   }

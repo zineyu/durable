@@ -20,7 +20,7 @@ export type IconButtonTone = 'neutral' | 'danger' | 'primary';
 
 export type IconButtonSize = 'sm' | 'md' | 'lg';
 
-export type MessageState = 'complete' | 'streaming' | 'cancelled' | 'failed';
+export type MessageState = 'complete' | 'streaming' | 'cancelled' | 'failed' | 'interrupted';
 
 /// 限流重试的一次等待。仅实时：不落库，刷新后不存在。
 export type RetryState = {

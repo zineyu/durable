@@ -30,6 +30,7 @@ impl Store {
                 id,
                 parent_id: command.session().active_leaf,
                 role: MessageRole::Compaction,
+                interrupted: false,
                 parts,
                 run_id: None,
                 created_at: now,

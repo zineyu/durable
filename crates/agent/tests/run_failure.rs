@@ -209,7 +209,7 @@ async fn fails_run_on_model_upstream_error_and_continues_queue() {
     assert_eq!(harness.text(&session.id, last.id).await, "恢复");
 }
 
-/// 规格 ADR 0037：重启后从树尾继续仍是 running 的 run，不产生新的 run。
+/// 规格 user story A-24：重启后从树尾继续仍是 running 的 run，不产生新的 run。
 #[tokio::test]
 async fn resumes_running_run_after_restart() {
     let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
@@ -229,55 +229,6 @@ async fn resumes_running_run_after_restart() {
     let assistant = tree.nodes.last().expect("有 assistant 节点");
     assert_eq!(assistant.role, agent::MessageRole::Assistant);
     assert_eq!(harness.text(&session.id, assistant.id).await, "恢复");
-}
-
-/// 规格 ADR 0037：崩溃前未定型的 assistant 内容不落库，重启后该步重跑。
-#[tokio::test]
-async fn discards_unfinalized_text_after_restart() {
-    let harness = Harness::start_with(
-        agent::EngineConfig::default(),
-        vec![Script::PartialThenHang("半成品".into())],
-    )
-    .await;
-    let session = harness.session("workspace").await;
-    let cursor = harness.bootstrap().await.max_event_id;
-    let mut events = harness.subscribe(cursor).await;
-    harness.submit_message(&session.id, "开始").await;
-
-    let mut partial = String::new();
-    while partial.is_empty() {
-        let event = tokio::time::timeout(Duration::from_secs(10), events.next())
-            .await
-            .expect("等待 SSE 事件")
-            .expect("事件流未结束");
-        if let agent::StreamEvent::Delta { text, .. } = event {
-            partial.push_str(&text);
-        }
-    }
-    assert_eq!(partial, "半成品");
-
-    let running = harness.wait_busy(&session.id).await;
-    assert!(
-        running
-            .nodes
-            .iter()
-            .all(|node| node.role != agent::MessageRole::Assistant),
-        "未定型的 assistant 内容不入树"
-    );
-
-    harness.provider.push(Script::Text("重跑".into()));
-    let harness = harness.restart().await;
-    let tree = harness.wait_idle(&session.id).await;
-
-    assert_eq!(tree.runs.len(), 1, "崩溃不产生新的 run");
-    assert_eq!(tree.runs[0].status, agent::RunStatus::Succeeded);
-    let assistants: Vec<&agent::MessageSkeleton> = tree
-        .nodes
-        .iter()
-        .filter(|node| node.role == agent::MessageRole::Assistant)
-        .collect();
-    assert_eq!(assistants.len(), 1, "半成品不落库，只剩重跑的结果");
-    assert_eq!(harness.text(&session.id, assistants[0].id).await, "重跑");
 }
 
 /// 规格「协议」：单一全局 SSE 流同时输送 token 增量与事实事件。

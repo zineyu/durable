@@ -74,11 +74,13 @@ pub enum FactEvent {
     },
     RunStarted {
         session_id: SessionId,
-        run: RunRecord,
+        // 装箱：run 记录新增了流式进度字段，内联会放大整个广播枚举。
+        run: Box<RunRecord>,
     },
     RunFinished {
         session_id: SessionId,
-        run: RunRecord,
+        // 装箱：同 `RunStarted`。
+        run: Box<RunRecord>,
     },
 }
 

@@ -28,15 +28,17 @@ pub(super) struct PendingTool {
 
 /// 从 transcript 的树尾推导下一步。
 ///
-/// 末条是用户或压缩消息时发请求；末条是 assistant 且没有工具调用时收尾；
-/// 否则按最近一条 assistant 消息的调用列表找出尚未完成的工具：缺节点的补入树，
-/// 执行中的节点重跑。工具批次中途崩溃因此不会丢掉剩余调用。
+/// 末条是用户或压缩消息时发请求；末条是已中断的 assistant 消息时发请求，让模型接着
+/// 自己写过的部分继续；末条是 assistant 且没有工具调用时收尾；否则按最近一条 assistant
+/// 消息的调用列表找出尚未完成的工具：缺节点的补入树，执行中的节点重跑。
+/// 工具批次中途崩溃因此不会丢掉剩余调用。
 pub(super) fn resume_point(transcript: &[MessageNode]) -> ResumePoint {
     let Some(last) = transcript.last() else {
         return ResumePoint::Request;
     };
     let assistant = match last.role {
         MessageRole::User | MessageRole::Compaction => return ResumePoint::Request,
+        MessageRole::Assistant if last.interrupted => return ResumePoint::Request,
         MessageRole::Assistant => Some(last),
         MessageRole::Tool => transcript
             .iter()
@@ -100,6 +102,7 @@ mod tests {
             id: MessageId::parse(id).expect("合法消息 id"),
             parent_id: parent.map(|id| MessageId::parse(id).expect("合法消息 id")),
             role,
+            interrupted: false,
             parts,
             run_id: None,
             created_at: id,
@@ -148,6 +151,19 @@ mod tests {
     #[test]
     fn trailing_user_requests_a_step() {
         assert_eq!(resume_point(&[user(1)]), ResumePoint::Request);
+    }
+
+    #[test]
+    fn interrupted_assistant_requests_the_next_step() {
+        let mut interrupted = node(
+            2,
+            Some(1),
+            MessageRole::Assistant,
+            vec![ContentPart::text("已经写了一半")],
+        );
+        interrupted.interrupted = true;
+        let transcript = [user(1), interrupted];
+        assert_eq!(resume_point(&transcript), ResumePoint::Request);
     }
 
     #[test]

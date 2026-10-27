@@ -320,6 +320,8 @@ pub struct MessageNode {
     pub id: MessageId,
     pub parent_id: Option<MessageId>,
     pub role: MessageRole,
+    /// 该消息是流式中断后入树的部分输出，不是模型写完的完整回答。
+    pub interrupted: bool,
     pub parts: Vec<ContentPart>,
     pub run_id: Option<RunId>,
     pub created_at: i64,
@@ -333,6 +335,7 @@ impl MessageNode {
             id: self.id,
             parent_id: self.parent_id,
             role: self.role,
+            interrupted: self.interrupted,
             run_id: self.run_id,
             created_at: self.created_at,
             parts: self
@@ -370,6 +373,9 @@ pub struct MessageSkeleton {
     #[ts(type = "number | null")]
     pub parent_id: Option<MessageId>,
     pub role: MessageRole,
+    /// 该消息是流式中断后入树的部分输出。迁移 0010 之前的事件行与载荷没有这个字段。
+    #[serde(default)]
+    pub interrupted: bool,
     #[ts(type = "number | null")]
     pub run_id: Option<RunId>,
     #[ts(type = "number")]
@@ -385,6 +391,7 @@ impl MessageSkeleton {
             id: self.id,
             parent_id: self.parent_id,
             role: self.role,
+            interrupted: self.interrupted,
             parts,
             run_id: self.run_id,
             created_at: self.created_at,

@@ -62,6 +62,10 @@
   color: var(--color-danger-text);
 }
 
+.state[data-state='interrupted'] {
+  color: var(--color-warn-text);
+}
+
 .note {
   font-size: var(--text-2xs);
   line-height: var(--leading-2xs);

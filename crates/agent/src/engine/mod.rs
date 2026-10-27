@@ -1,8 +1,9 @@
 //! run 引擎的门面：执行循环、run 生命周期与续跑点驱动。
 //! 模型流在 `step`，工具循环在 `tools`，请求装配在 `prompt`，续跑推导在 `recover`，
-//! 上下文压缩在 `compact`。
+//! 上下文压缩在 `compact`，进度节流在 `progress`。
 
 mod compact;
+mod progress;
 mod prompt;
 mod recover;
 mod step;
@@ -60,7 +61,7 @@ enum StepEnd {
         id: MessageId,
         parts: Vec<durable::ContentPart>,
     },
-    /// 被取消；已生成的内容丢弃，该步重跑。
+    /// 被取消；已写入进度的部分输出保留，恢复时入树为已中断消息。
     Cancelled,
     /// 上游失败。
     Failure(RunFailure),
@@ -92,7 +93,8 @@ impl RunEngine {
         })
     }
 
-    /// 启动恢复：把中断的工具节点标成结局，并为需要执行的 session 启动驱动。
+    /// 启动恢复：把中断的工具节点标成结局，把流式进度入树为已中断消息，
+    /// 并为需要执行的 session 启动驱动。
     ///
     /// # Errors
     ///
@@ -103,8 +105,22 @@ impl RunEngine {
     pub async fn recover(self: &Arc<Self>) -> Result<(), StoreError> {
         for session in self.store.sessions_with_work().await? {
             self.resolve_interrupted_tools(&session).await?;
+            self.resolve_interrupted_progress(&session).await?;
             self.ensure_driver(session).await;
         }
+        Ok(())
+    }
+
+    /// 启动恢复时把流式进度入树为已中断消息。续跑推导随后从这条消息之后继续。
+    async fn resolve_interrupted_progress(&self, session: &SessionId) -> Result<(), StoreError> {
+        let Some(message) = self.store.materialize_progress(session).await? else {
+            return Ok(());
+        };
+        tracing::info!(
+            session = %session.as_str(),
+            message = message.id.get(),
+            "流式进度入树为已中断消息"
+        );
         Ok(())
     }
 
@@ -201,6 +217,11 @@ impl RunEngine {
             },
         );
         let outcome = self.drive_run(&start, &cancellation).await;
+        if matches!(outcome.status, RunStatus::Cancelled)
+            && let Err(error) = self.store.materialize_progress(&session).await
+        {
+            tracing::error!(session = %session.as_str(), run, error = %error, "取消时入树部分输出失败");
+        }
         if let Some(failure) = &outcome.failure {
             tracing::warn!(
                 session = %session.as_str(),
@@ -269,7 +290,10 @@ impl RunEngine {
                 ResumePoint::Finish => return succeeded(),
                 ResumePoint::Request => {
                     steps = Some(executed + 1);
-                    match self.stream_step(session, &transcript, cancellation).await {
+                    match self
+                        .stream_step(session, start.run.id, &transcript, cancellation)
+                        .await
+                    {
                         StepEnd::Completed { id, parts } => {
                             if let Err(error) = self
                                 .store

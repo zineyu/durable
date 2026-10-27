@@ -40,7 +40,7 @@
 | [0034](0034-spec-number-prefixes.md) | 规格编号加前缀并按目录归属校验 | 已接受。细化 ADR 0033 的契约一致性 | 两份规格分别用 A- 与 H- 前缀，引用按目录归属校验，非规格决定改引 ADR。 |
 | [0035](0035-message-content-blocks.md) | 消息历史存完整内容，节点正文为内容块数组 | 已接受。取代 ADR 0004 中节点正文的形状 | 节点是一条消息，正文为有序内容块；工具结果独立成节点；落库为 message 与 message_part 两表。 |
 | [0036](0036-compaction-message.md) | 压缩消息在链上，装配回溯到它为止 | 已接受 | 压缩是链上的 `compaction` 节点，装配从 active leaf 回溯到它即停，压缩不属于任何 run。 |
-| [0037](0037-crash-recovery.md) | 崩溃恢复的续跑点从树推导 | 已接受。取代 ADR 0014 的节流落库部分输出 | assistant 消息只在定型时入树，tool 节点先入树再执行，续跑点由树尾推导，非幂等工具崩后结局记为未知。 |
+| [0037](0037-crash-recovery.md) | 崩溃恢复的续跑点从树推导 | 已接受。取代 ADR 0014 的节流落库部分输出；「assistant 消息只在定型时入树」由 ADR 0047 取代 | tool 节点先入树再执行，续跑点由树尾推导，非幂等工具崩后结局记为未知。 |
 | [0038](0038-skeleton-events.md) | 事件与快照只带骨架，正文按需拉取 | 已接受。取代 ADR 0019 的 `tool_call_recorded` | 事实事件与快照只带节点骨架，正文按消息 id 批量拉取并缓存，进行中的内容挂在未来定型的消息 id 上。 |
 | [0039](0039-steer-at-step-boundary.md) | 插话在步骤边界接入当前 run | 已接受 | `mode=steer` 的插话在提交时入树，在模型请求与收尾前的步骤边界接入同一个 run；工具不打断；run 结束未消费则降级为排队。 |
 | [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已接受 | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |
@@ -50,3 +50,4 @@
 | [0044](0044-client-derived-view.md) | 客户端派生视图层 | 已接受。细化 ADR 0017 的「组件只接收派生后的 props」与 ADR 0024 的分片形状 | 新增纯函数派生层 `view/derived.ts`，摘要全算、完整视图按需算，按分片对象缓存；它是分片表的唯一常规读取者，组件只收 `SessionView`；`SessionTreeState` 由 `SessionTreeSnapshot` 派生；选中位置只由 URL 哈希持有。 |
 | [0045](0045-message-tree-module.md) | 消息树成为独立 module | 已接受。细化 ADR 0036 的压缩截断与 ADR 0038 的骨架读取 | 新增领域类型 `MessageTree`，一次建索引后只回答树的问题；存储只返回行，链上顺序、压缩截断与叶子选择由它回答；协议快照改名 `SessionTreeSnapshot`。 |
 | [0046](0046-store-test-seam.md) | 第三条测试 seam：`Store` | 已接受。补充 ADR 0007 的 seam 清单 | 新增内核层 seam：用临时 SQLite 打开真实 `Store`，直接断言快照、事件序列与错误变体；协议、SSE、进程与工具仍由 Seam 1 覆盖。 |
+| [0047](0047-stream-progress-persistence.md) | 流式进度落库与已中断消息 | 已接受。取代 ADR 0037 的「assistant 消息只在定型时入树」 | 流式正文按时间节流写入 run 的进度，崩溃恢复与取消时入树为标注已中断的 assistant 消息，续跑接着它继续。 |

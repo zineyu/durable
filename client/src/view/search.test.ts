@@ -18,7 +18,7 @@ const session: SessionMetadata = {
 };
 
 function message(id: number, parentId: number | null, role: MessageSkeleton['role']): MessageSkeleton {
-  return { id, parentId, role, runId: null, createdAt: id, parts: [] };
+  return { id, parentId, role, interrupted: false, runId: null, createdAt: id, parts: [] };
 }
 
 function text(value: string): ContentPart[] {

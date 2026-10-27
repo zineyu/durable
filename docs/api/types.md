@@ -181,7 +181,11 @@ export type MessageRole = "user" | "assistant" | "tool" | "compaction";
 /**
  * 消息骨架：事件与快照携带的结构描述，不含块正文。
  */
-export type MessageSkeleton = { id: number, parentId: number | null, role: MessageRole, runId: number | null, createdAt: number, parts: Array<PartSkeleton>, };
+export type MessageSkeleton = { id: number, parentId: number | null, role: MessageRole, 
+/**
+ * 该消息是流式中断后入树的部分输出。迁移 0010 之前的事件行与载荷没有这个字段。
+ */
+interrupted: boolean, runId: number | null, createdAt: number, parts: Array<PartSkeleton>, };
 ```
 
 ## MessageText
@@ -346,7 +350,11 @@ export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_
 /**
  * 单个 run 的持久状态。
  */
-export type RunRecord = { id: number, sessionId: SessionId, status: RunStatus, failure: RunFailure | null, createdAt: number, updatedAt: number, };
+export type RunRecord = { id: number, sessionId: SessionId, status: RunStatus, failure: RunFailure | null, 
+/**
+ * 流式生成中已经产生的正文。只在 run 为 `running` 时可能非空，结束或定型时清空。
+ */
+progress: string | null, createdAt: number, updatedAt: number, };
 ```
 
 ## RunStatus

@@ -16,28 +16,24 @@ const COMPACTION_PROMPT: &str = "把下面的对话压缩成一段摘要：保�
 
 fn build_messages(transcript: &[MessageNode]) -> Vec<ChatMessage> {
     let mut messages = vec![ChatMessage::text(ChatRole::System, SYSTEM_PROMPT)];
-    for node in transcript {
+    let mut index = 0;
+    while let Some(rest) = transcript.get(index..) {
+        let Some(node) = rest.first() else {
+            break;
+        };
         match node.role {
             MessageRole::User => {
                 messages.push(ChatMessage::text(ChatRole::User, node.text()));
+                index += 1;
             }
             MessageRole::Compaction => {
                 messages.push(ChatMessage::text(ChatRole::System, node.text()));
+                index += 1;
             }
             MessageRole::Assistant => {
-                messages.push(ChatMessage {
-                    role: ChatRole::Assistant,
-                    content: node.text(),
-                    tool_calls: node
-                        .tool_calls()
-                        .map(|(call_id, name, arguments)| ChatToolCall {
-                            id: call_id.to_owned(),
-                            name: name.to_owned(),
-                            arguments: arguments.to_owned(),
-                        })
-                        .collect(),
-                    tool_call_id: None,
-                });
+                let (merged, consumed) = merged_assistant(rest);
+                messages.push(merged);
+                index += consumed;
             }
             MessageRole::Tool => {
                 for (call_id, state) in node.tool_results() {
@@ -48,10 +44,44 @@ fn build_messages(transcript: &[MessageNode]) -> Vec<ChatMessage> {
                         tool_call_id: Some(call_id.to_owned()),
                     });
                 }
+                index += 1;
             }
         }
     }
     messages
+}
+
+/// 把从 `rest` 起相邻的 assistant 节点合并成一条 wire 消息，返回消息与被并入的节点数。
+///
+/// 中断前的部分输出与续跑产出在同一条回答里：文本直接拼接，不插入模型没有写过的分隔符。
+fn merged_assistant(rest: &[MessageNode]) -> (ChatMessage, usize) {
+    let mut content = String::new();
+    let mut tool_calls = Vec::new();
+    let mut consumed = 0;
+    for node in rest {
+        if node.role != MessageRole::Assistant {
+            break;
+        }
+        content.push_str(&node.text());
+        tool_calls.extend(
+            node.tool_calls()
+                .map(|(call_id, name, arguments)| ChatToolCall {
+                    id: call_id.to_owned(),
+                    name: name.to_owned(),
+                    arguments: arguments.to_owned(),
+                }),
+        );
+        consumed += 1;
+    }
+    (
+        ChatMessage {
+            role: ChatRole::Assistant,
+            content,
+            tool_calls,
+            tool_call_id: None,
+        },
+        consumed,
+    )
 }
 
 fn tool_result_content(state: &ToolResultState) -> String {
@@ -136,5 +166,81 @@ impl RunEngine {
             });
         }
         Ok(messages)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use durable::{ContentPart, MessageId};
+
+    fn node(id: i64, role: MessageRole, parts: Vec<ContentPart>) -> MessageNode {
+        MessageNode {
+            id: MessageId::parse(id).expect("合法消息 id"),
+            parent_id: None,
+            role,
+            interrupted: false,
+            parts,
+            run_id: None,
+            created_at: id,
+        }
+    }
+
+    fn assistant(id: i64, text: &str) -> MessageNode {
+        node(id, MessageRole::Assistant, vec![ContentPart::text(text)])
+    }
+
+    fn interrupted(id: i64, text: &str) -> MessageNode {
+        let mut message = assistant(id, text);
+        message.interrupted = true;
+        message
+    }
+
+    #[test]
+    fn adjacent_assistant_messages_merge_into_one() {
+        let transcript = [
+            node(1, MessageRole::User, vec![ContentPart::text("做点事")]),
+            interrupted(2, "已经写了一半"),
+            assistant(3, "，续写完成。"),
+        ];
+
+        let messages = build_messages(&transcript);
+
+        assert_eq!(
+            messages.len(),
+            3,
+            "系统提示、用户消息与合并后的一条 assistant"
+        );
+        assert_eq!(messages[2].role, ChatRole::Assistant);
+        assert_eq!(
+            messages[2].content, "已经写了一半，续写完成。",
+            "相邻的 assistant 文本直接拼接，不插入它没有写过的文字"
+        );
+    }
+
+    #[test]
+    fn tool_results_keep_assistant_messages_apart() {
+        let call = node(
+            2,
+            MessageRole::Assistant,
+            vec![ContentPart::tool_call("call_1", "read_file", "{}")],
+        );
+        let result = node(
+            3,
+            MessageRole::Tool,
+            vec![ContentPart::tool_result("call_1", ToolResultState::Unknown)],
+        );
+        let transcript = [
+            node(1, MessageRole::User, vec![ContentPart::text("做点事")]),
+            call,
+            result,
+            assistant(4, "读到了。"),
+        ];
+
+        let messages = build_messages(&transcript);
+
+        assert_eq!(messages.len(), 5, "工具结果两侧的 assistant 消息不合并");
+        assert_eq!(messages[3].role, ChatRole::Tool);
+        assert_eq!(messages[4].content, "读到了。");
     }
 }
