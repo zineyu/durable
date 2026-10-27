@@ -7,7 +7,7 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, Script, connect, error_code, recorded_facts};
+use support::{Harness, Script, connect, error_code};
 
 fn queue_texts(tree: &agent::SessionTreeSnapshot) -> Vec<&str> {
     tree.queue.iter().map(|item| item.text.as_str()).collect()
@@ -276,38 +276,6 @@ async fn starts_runs_across_sessions_simultaneously() {
         let tree = harness.tree(&session.id).await;
         assert!(tree.queue.is_empty(), "启动后队列项离开队列");
     }
-}
-
-/// 规格「事实事件」：入队写入 `message_queued`，携带队列项与更新后的 session 元数据。
-#[tokio::test]
-async fn records_message_queued_event() {
-    let harness = Harness::start_with(agent::EngineConfig::default(), vec![Script::Hang]).await;
-    let session = harness.session("workspace").await;
-    let item: agent::QueueItem = harness
-        .submit_message(&session.id, "记录事件")
-        .await
-        .json()
-        .await
-        .expect("解析队列项");
-
-    let fact = recorded_facts(&harness.database)
-        .await
-        .into_iter()
-        .find(|fact| matches!(fact.event, agent::FactEvent::MessageQueued { .. }))
-        .expect("记录了入队事件");
-    let agent::FactEvent::MessageQueued { item: queued, .. } = fact.event else {
-        panic!("事件是 message_queued");
-    };
-    let recorded = fact.session.expect("入队事件带 session 视图");
-    assert_eq!(queued, item);
-    assert_eq!(recorded.id, session.id);
-    assert_eq!(recorded.title.as_str(), "记录事件");
-    assert_eq!(recorded.updated_at, item.created_at);
-
-    harness.wait_busy(&session.id).await;
-    harness.wait_for_requests(1).await;
-    harness.cancel_run(&session.id).await;
-    harness.wait_idle(&session.id).await;
 }
 
 /// 队列项 id 与消息 id 共享全局分配语义：跨 session 单调递增。

@@ -255,48 +255,6 @@ async fn switches_active_leaf_to_subtree_leaf() {
     assert_eq!(transcript_ids(&tree), vec![new_user, new_assistant]);
 }
 
-/// 规格 user story A-18：目标子树有多个分支时选取创建最晚的叶子。
-#[tokio::test]
-async fn switches_to_most_recent_leaf_in_subtree() {
-    let harness = Harness::start_with(
-        agent::EngineConfig::default(),
-        vec![Script::Text("A".into()), Script::Text("B".into())],
-    )
-    .await;
-    let session = harness.session("workspace").await;
-    harness.submit_message(&session.id, "问题").await;
-    let tree = harness.wait_idle(&session.id).await;
-    let user = tree.nodes[0].id;
-    let first_assistant = tree.nodes[1].id;
-
-    harness.retry_message(&session.id, first_assistant).await;
-    let tree = harness.wait_idle(&session.id).await;
-    let second_assistant = tree
-        .nodes
-        .iter()
-        .find(|node| node.id != first_assistant && node.role == agent::MessageRole::Assistant)
-        .expect("重试的 assistant 节点")
-        .id;
-
-    harness.switch_active_leaf(&session.id, user).await;
-    let tree = harness.tree(&session.id).await;
-    assert_eq!(
-        tree.active_leaf,
-        Some(second_assistant),
-        "选取最近创建的叶子"
-    );
-
-    harness
-        .switch_active_leaf(&session.id, first_assistant)
-        .await;
-    let tree = harness.tree(&session.id).await;
-    assert_eq!(
-        tree.active_leaf,
-        Some(first_assistant),
-        "目标是叶子时即为 active leaf"
-    );
-}
-
 /// 规格「事实事件」：分支切换写入 `active_leaf_changed` 并持久化。
 #[tokio::test]
 async fn records_active_leaf_change_and_survives_restart() {

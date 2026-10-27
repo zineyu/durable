@@ -79,35 +79,6 @@ async fn streams_assistant_text_and_finishes_run() {
     assert_eq!(assistant.run_id, Some(run.id));
 }
 
-/// 规格「事实事件」：run 开始与结束的事实事件顺序稳定。
-#[tokio::test]
-async fn records_run_lifecycle_events_in_order() {
-    let harness = Harness::start_with(
-        agent::EngineConfig::default(),
-        vec![Script::Text("完成".into())],
-    )
-    .await;
-    let session = harness.session("workspace").await;
-    harness.submit_message(&session.id, "执行").await;
-    harness.wait_idle(&session.id).await;
-
-    assert_eq!(
-        support::recorded_event_kinds(&harness.database).await,
-        vec![
-            "workspace_registered",
-            "session_created",
-            "message_queued",
-            "message_appended",
-            "active_leaf_changed",
-            "queue_item_removed",
-            "run_started",
-            "message_appended",
-            "active_leaf_changed",
-            "run_finished",
-        ]
-    );
-}
-
 /// 规格「模型调用」：同一轮多个工具调用按序执行，结果作为独立 tool 节点入树后再请求下一轮。
 #[tokio::test]
 async fn executes_tool_calls_in_order_and_continues() {

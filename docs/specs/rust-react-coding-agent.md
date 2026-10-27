@@ -209,7 +209,7 @@ stateDiagram-v2
 
 ## 测试决策
 
-测试 seam 共四个：本文档定义 Seam 1、Seam 2 与 Seam 4，多节点规格定义 Seam 3。所有 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`hub` 的合并协议与总线由多节点规格新增的 Seam 3 覆盖。
+测试 seam 共五个：本文档定义 Seam 1、Seam 2 与 Seam 4，多节点规格定义 Seam 3，ADR 0046 定义 Seam 5（`Store` 内核）。所有 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`hub` 的合并协议与总线由多节点规格新增的 Seam 3 覆盖。
 
 ### Seam 1：`agent` 的 HTTP API
 

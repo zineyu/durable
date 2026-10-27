@@ -10,7 +10,7 @@
 | [0004](0004-message-tree.md) | 消息树与分支历史 | 已接受 | session 消息组织为树并保存 active leaf，分支切换只移动 active leaf。 |
 | [0005](0005-no-approval-tools.md) | 无审批、限定 workspace 根的工具执行 | 已接受 | 四个工具全自动执行，不设审批，路径限定在 workspace 根内。 |
 | [0006](0006-openai-provider.md) | 单一 OpenAI 兼容 provider 与显式上下文失败 | 已接受 | 只实现 OpenAI 兼容流式 provider，超上下文上限时 run 以明确错误结束。 |
-| [0007](0007-test-seams.md) | 两个测试 seam：agent HTTP API 与 client 纯 reducer | 已接受 | 设两个测试 seam：真实 agent HTTP API 与 client 纯 reducer。 |
+| [0007](0007-test-seams.md) | 测试 seam：agent HTTP API 与 client 纯 reducer | 已接受。seam 清单由 ADR 0046 增加 seam 五 | 设两个测试 seam：真实 agent HTTP API 与 client 纯 reducer。 |
 | [0008](0008-typegen-ci.md) | 生成式协议类型与 CI 门禁 | 已接受 | 用 ts-rs 生成 TS 类型并提交，CI 重新生成后 diff 必须为空。 |
 | [0009](0009-design-tokens.md) | 设计 token 采用 DeepSeek Harness 的两层体系 | 已接受 | 设计 token 分原始色阶与语义别名两层，组件只引用语义 token。 |
 | [0010](0010-client-style-verification.md) | 前端样式不变量用确定性检查覆盖 | 已接受 | 样式不变量由确定性测试与截图脚本断言覆盖，不依赖 Chromatic。 |
@@ -49,3 +49,4 @@
 | [0043](0043-store-error-classification.md) | 错误分类归内核 | 已接受。细化 ADR 0014 的失败类别、ADR 0028 的状态码选型与 ADR 0031 的类别约定 | `StoreError` 给出无载荷的分类与结局类别，状态码只由结局类别决定，两个 seam 穷尽映射协议码并把节点码统一为 `node_not_found`；新增 `storage_failed` 失败类别，协议版本升到 6。 |
 | [0044](0044-client-derived-view.md) | 客户端派生视图层 | 已接受。细化 ADR 0017 的「组件只接收派生后的 props」与 ADR 0024 的分片形状 | 新增纯函数派生层 `view/derived.ts`，摘要全算、完整视图按需算，按分片对象缓存；它是分片表的唯一常规读取者，组件只收 `SessionView`；`SessionTreeState` 由 `SessionTreeSnapshot` 派生；选中位置只由 URL 哈希持有。 |
 | [0045](0045-message-tree-module.md) | 消息树成为独立 module | 已接受。细化 ADR 0036 的压缩截断与 ADR 0038 的骨架读取 | 新增领域类型 `MessageTree`，一次建索引后只回答树的问题；存储只返回行，链上顺序、压缩截断与叶子选择由它回答；协议快照改名 `SessionTreeSnapshot`。 |
+| [0046](0046-store-test-seam.md) | 第三条测试 seam：`Store` | 已接受。补充 ADR 0007 的 seam 清单 | 新增内核层 seam：用临时 SQLite 打开真实 `Store`，直接断言快照、事件序列与错误变体；协议、SSE、进程与工具仍由 Seam 1 覆盖。 |

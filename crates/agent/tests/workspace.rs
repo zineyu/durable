@@ -4,7 +4,7 @@ use reqwest::StatusCode;
 
 mod support;
 
-use support::{Harness, error_code, recorded_event_ids, recorded_events};
+use support::{Harness, error_code};
 
 #[tokio::test]
 async fn rejects_workspace_paths_that_are_not_directories() {
@@ -168,40 +168,6 @@ async fn treats_workspace_identity_as_canonical_path() {
     assert_eq!(
         bootstrap.workspaces[0].path.as_str(),
         canonical.to_string_lossy()
-    );
-}
-
-/// 规格「协议」：「事实事件持久化：…workspace 注册/移除」。
-#[tokio::test]
-async fn records_workspace_removal_as_fact_event() {
-    let harness = Harness::start().await;
-    let (_, workspace) = harness.registered_workspace("workspace").await;
-
-    assert_eq!(
-        harness.remove(workspace.path.as_str()).await.status(),
-        StatusCode::NO_CONTENT
-    );
-
-    assert_eq!(
-        recorded_events(&harness.database).await,
-        vec![
-            agent::FactEvent::WorkspaceRegistered {
-                workspace: workspace.clone(),
-            },
-            agent::FactEvent::WorkspaceRemoved {
-                path: workspace.path.clone(),
-            },
-        ]
-    );
-    let bootstrap = harness.bootstrap().await;
-    assert!(bootstrap.workspaces.is_empty());
-    assert_eq!(
-        bootstrap.max_event_id,
-        *recorded_event_ids(&harness.database)
-            .await
-            .last()
-            .expect("有事件"),
-        "bootstrap 的最大事件 id 等于事件表最大值"
     );
 }
 
