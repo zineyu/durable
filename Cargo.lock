@@ -13,7 +13,6 @@ dependencies = [
  "durable",
  "futures-util",
  "jiff",
- "libc",
  "reqwest",
  "runtime",
  "serde",
@@ -687,6 +686,20 @@ checksum = "5a23add41df1562121a9393cb065eab5146a1242410f23a644851e90cfd669d2"
 dependencies = [
  "parking",
  "pin-project-lite",
+]
+
+[[package]]
+name = "executor"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "durable",
+ "libc",
+ "serde",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

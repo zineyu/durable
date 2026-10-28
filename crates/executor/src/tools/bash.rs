@@ -1,4 +1,5 @@
 //! `bash` 工具：进程组执行、输出截断与超时或取消处理。
+//! 工具定义在 `durable::tool`，路径边界在 `paths`。
 
 use std::fmt::Write;
 use std::os::unix::process::ExitStatusExt;
@@ -6,17 +7,13 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
-use durable::ToolErrorCode;
+use durable::{Cancellation, ToolErrorCode, ToolFailure, ToolLimits, parse_arguments};
 use serde::Deserialize;
-use serde_json::json;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 
 use super::paths::Workspace;
-use super::{ToolCall, ToolContext, ToolDefinition, ToolFailure, ToolLimits, parse_arguments};
-
-use crate::cancel::Cancellation;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -24,23 +21,6 @@ pub(crate) struct Arguments {
     pub command: String,
     #[serde(default)]
     pub cwd: Option<String>,
-}
-
-pub(crate) fn definition() -> ToolDefinition {
-    ToolDefinition {
-        idempotent: false,
-        name: "bash",
-        description: "在 workspace 根内以 sh -c 执行命令。stdin 关闭，stdout 与 stderr 合并返回，返回退出码与耗时。",
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "command": { "type": "string", "description": "交给 sh -c 的命令" },
-                "cwd": { "type": "string", "description": "相对 workspace 根的工作目录，默认根" },
-            },
-            "required": ["command"],
-            "additionalProperties": false,
-        }),
-    }
 }
 
 enum Interruption {
@@ -53,18 +33,19 @@ enum Interruption {
 /// 失败：路径越界、cwd 不存在或不是目录、命令无法启动、超时、取消。
 /// 副作用：运行子进程；超时或取消时杀掉整个进程组。
 pub(crate) async fn run(
-    call: &ToolCall,
-    context: &ToolContext,
+    workspace: &str,
+    arguments: &str,
+    cancellation: &Cancellation,
     limits: &ToolLimits,
 ) -> Result<String, ToolFailure> {
-    let arguments: Arguments = parse_arguments(call)?;
+    let arguments: Arguments = parse_arguments("bash", arguments)?;
     if arguments.command.trim().is_empty() {
         return Err(ToolFailure::new(
             ToolErrorCode::InvalidArguments,
             "command 不能为空",
         ));
     }
-    let directory = resolve_directory(&arguments, context)?;
+    let directory = resolve_directory(&arguments, workspace)?;
     let started = Instant::now();
     let mut child = spawn(&arguments, &directory)?;
     let mut group = ProcessGroup::new(child.id());
@@ -73,14 +54,14 @@ pub(crate) async fn run(
     let limit = limits.bash_output_bytes;
     let stdout_task = tokio::spawn(drain(stdout, limit));
     let stderr_task = tokio::spawn(drain(stderr, limit));
-    let status = wait(&mut child, &mut group, &context.cancellation, limits).await?;
+    let status = wait(&mut child, &mut group, cancellation, limits).await?;
     let (output, total) = collect(stdout_task, stderr_task, limit).await?;
     render(status, started.elapsed(), &output, total, limit)
 }
 
 /// 把可选的 `cwd` 解析到 workspace 根内，缺省为根。
-fn resolve_directory(arguments: &Arguments, context: &ToolContext) -> Result<PathBuf, ToolFailure> {
-    let workspace = Workspace::new(context.workspace.as_str());
+fn resolve_directory(arguments: &Arguments, workspace: &str) -> Result<PathBuf, ToolFailure> {
+    let workspace = Workspace::new(workspace);
     let Some(raw) = &arguments.cwd else {
         return Ok(workspace.root().to_path_buf());
     };

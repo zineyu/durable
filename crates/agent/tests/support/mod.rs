@@ -45,6 +45,20 @@ pub(crate) fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_agent"))
 }
 
+/// 与 agent 二进制同目录的 executor 二进制：测试内的传输一律是本地子进程。
+pub(crate) fn executor_binary() -> PathBuf {
+    let path = binary()
+        .parent()
+        .expect("agent 二进制有父目录")
+        .join("executor");
+    assert!(
+        path.is_file(),
+        "找不到 executor 二进制: {}；先运行 cargo build -p executor，或运行 workspace 级测试。",
+        path.display()
+    );
+    path
+}
+
 /// 运行 agent 二进制的命令：指定 SQLite 与日志路径并带上模型配置。
 pub(crate) fn command(database: &Path) -> std::process::Command {
     let mut command = command_without_paths();
@@ -189,7 +203,9 @@ impl Harness {
             model_name: "test-model".to_owned(),
         };
         let runtime = Arc::new(agent::OpenAiProvider::new(&model));
-        let tools = Arc::new(agent::ToolRegistry::new(limits));
+        let link = agent::LinkHandle::spawn_local(&executor_binary(), limits)
+            .expect("启动 executor 子进程");
+        let tools = Arc::new(agent::RemoteTools::new(link));
         let agent = TestAgent::start(&database, "test-model", runtime, tools, config).await;
         Harness {
             directory,

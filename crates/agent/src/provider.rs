@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use futures_util::{StreamExt, stream::BoxStream};
 
 use crate::config::ModelConfig;
-use crate::tools::ToolDefinition;
+use durable::ToolDefinition;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]

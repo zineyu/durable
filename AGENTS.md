@@ -14,6 +14,7 @@
 | `crates/core` | 领域与持久化内核（包名 `durable`）；领域类型、`ts-rs` 派生、单一写入线与 SQLite 存储 |
 | `crates/runtime` | 进程级支撑（包名 `runtime`）；平台标准目录解析与日志初始化 |
 | `crates/agent` | agent 二进制；HTTP/SSE 协议与 `ts-rs` 导出入口 |
+| `crates/executor` | host 上的工具执行端；经 link 帧执行四个工具，不持有数据库 |
 | `crates/hub` | hub 二进制；编译期内嵌 `client/dist` |
 | `client` | React + Vite + TypeScript 客户端 |
 | `docs` | 规格、ADR（索引见 `docs/adr/README.md`）、术语表 |
@@ -30,7 +31,8 @@
 | `session.rs` | session 元数据、`SessionTreeSnapshot` 快照与自动标题 |
 | `queue.rs` | 待执行队列项与锚点 |
 | `run.rs` | 运行实体、状态与失败码 |
-| `tool.rs` | 工具调用记录、结果与错误码 |
+| `tool.rs` | 工具定义（名称、说明、JSON Schema、幂等标记）、字节上限、失败原因与错误码；两侧共用同一份 |
+| `link.rs`、`cancel.rs` | link 帧类型与读写；两侧共享的取消信号 |
 | `workspace.rs` | workspace 元数据 |
 | `tree.rs` | 消息树的问题：transcript、子树叶子与祖先；存储只返回行，链上顺序由它回答 |
 | `node.rs` | 节点名与节点元数据 |
@@ -49,10 +51,12 @@
 | `api.rs` | HTTP 路由与处理器 |
 | `engine/` | run 引擎：`mod.rs` 执行循环与收尾、`step.rs` 模型流与重试、`tools.rs` 工具循环、`prompt.rs` 请求装配、`compact.rs` 上下文压缩、`recover.rs` 续跑推导 |
 | `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
-| `tools/` | 工具注册表与四个工具；`paths.rs` 管 workspace 边界 |
+| `link/` | 工具的 agent 侧：`mod.rs` 管 executor 子进程与按 id 复用的帧，`tools.rs` 是 `ToolBox` 与 `RemoteTools` |
 | `sse.rs` | 单一全局事件流：回放、实时与 resync |
 | `protocol.rs` | 对外协议 DTO 与协议版本 |
-| `config.rs`、`error.rs`、`cancel.rs` | 配置解析、HTTP 错误信封、取消信号 |
+| `config.rs`、`error.rs` | 配置解析、HTTP 错误信封 |
+
+`executor`：`main.rs` 读帧、派发请求与请求生命周期；`tools/` 四个工具，`paths.rs` 管 workspace 边界。
 
 `hub`：`lib.rs` 路由、节点作用域转发与静态资源；`nodes.rs` 节点表命令与节点快照；`bus/` 广播序号、回放窗口、节点视图、进程内计数与上游 watcher；`sse.rs` 合并事件流；`node_probe.rs` 上游探测；`protocol.rs` 与 `error.rs`。
 
@@ -69,7 +73,8 @@
 | agent 的 HTTP 接口 | `crates/agent/src/api.rs` 的路由表与处理器，DTO 在 `protocol.rs` |
 | SSE 事件载荷 | `crates/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
 | 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `change.rs` |
-| 新的 LLM 工具 | `crates/agent/src/tools/` 新文件，并在 `tools/mod.rs` 的 `ToolBox` 实现里登记 `definitions()` 与 `execute()` |
+| 新的 LLM 工具 | `crates/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
+| link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `crates/agent/src/link/mod.rs`，executor 侧在 `crates/executor/src/main.rs` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
 | hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus/watch.rs` |
 | 节点表命令或节点快照 | `crates/hub/src/nodes.rs`，路由在 `lib.rs` |

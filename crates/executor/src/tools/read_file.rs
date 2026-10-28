@@ -1,13 +1,12 @@
 //! `read_file` 工具：带行号的文本读取与可选行区间。
+//! 工具定义在 `durable::tool`，路径边界在 `paths`。
 
 use std::fmt::Write;
 
-use durable::ToolErrorCode;
+use durable::{ToolErrorCode, ToolFailure, parse_arguments};
 use serde::Deserialize;
-use serde_json::json;
 
 use super::paths::Workspace;
-use super::{ToolCall, ToolContext, ToolDefinition, ToolFailure, parse_arguments};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -19,34 +18,12 @@ pub(crate) struct Arguments {
     pub end_line: Option<usize>,
 }
 
-pub(crate) fn definition() -> ToolDefinition {
-    ToolDefinition {
-        idempotent: true,
-        name: "read_file",
-        description: "读取 workspace 根内的 UTF-8 文本文件。可选起止行（1 起，含两端）。输出每行带行号。",
-        parameters: json!({
-            "type": "object",
-            "properties": {
-                "path": { "type": "string", "description": "相对 workspace 根的路径" },
-                "start_line": { "type": "integer", "minimum": 1, "description": "起始行号，含" },
-                "end_line": { "type": "integer", "minimum": 1, "description": "结束行号，含" },
-            },
-            "required": ["path"],
-            "additionalProperties": false,
-        }),
-    }
-}
-
 /// 读取文件并按行编号输出。
 ///
 /// 失败：路径越界、文件不存在、非 UTF-8、超过字节上限、行区间非法。
-pub(crate) fn read(
-    call: &ToolCall,
-    context: &ToolContext,
-    limit: usize,
-) -> Result<String, ToolFailure> {
-    let arguments: Arguments = parse_arguments(call)?;
-    let workspace = Workspace::new(context.workspace.as_str());
+pub(crate) fn read(workspace: &str, arguments: &str, limit: usize) -> Result<String, ToolFailure> {
+    let arguments: Arguments = parse_arguments("read_file", arguments)?;
+    let workspace = Workspace::new(workspace);
     let path = workspace.resolve_existing(&arguments.path)?;
     let metadata =
         std::fs::metadata(&path).map_err(|error| ToolFailure::io("读取文件属性", &error))?;

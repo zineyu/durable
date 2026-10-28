@@ -4,10 +4,10 @@
 use durable::{ContentPart, MessageNode, RunFailure, RunFailureCode, SessionId};
 use futures_util::StreamExt;
 
-use crate::cancel::Cancellation;
 use crate::engine::prompt;
 use crate::engine::{RunEngine, StreamOpen, storage_failure};
 use crate::provider::ChatChunk;
+use durable::Cancellation;
 
 impl RunEngine {
     /// 压缩当前 transcript：用一段摘要替代历史前缀，并把摘要作为新消息入树。

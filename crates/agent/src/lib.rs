@@ -1,5 +1,5 @@
 //! agent 二进制库：路由装配、监听地址与类型导出入口。
-//! run 执行在 `engine`，工具在 `tools`，进程启动在 `main`。
+//! run 执行在 `engine`，link 与工具契约在 `link`，进程启动在 `main`。
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -10,31 +10,30 @@ use ts_rs::TS;
 pub mod protocol;
 
 mod api;
-mod cancel;
 mod config;
 mod engine;
 mod error;
+mod link;
 mod provider;
 mod sse;
-mod tools;
 
 pub use api::{AgentState, router, serve};
-pub use cancel::Cancellation;
 pub use config::{
     CONTEXT_CHAR_LIMIT, ConfigError, EngineConfig, MAX_STEPS, MODEL_API_KEY, MODEL_BASE_URL,
     MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
 };
 pub use durable::{
-    ContentKind, ContentPart, DEFAULT_SESSION_TITLE, DeltaKind, FactEvent, MessageBody, MessageId,
-    MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, MessageTree,
-    PartSkeleton, PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode,
-    RunId, RunRecord, RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle,
-    SessionTitleError, SessionTreeSnapshot, Store, StoreError, StreamEvent, SubmitMode,
-    ToolErrorCode, ToolOutcome, ToolResultState, WorkspaceMetadata, WorkspacePath,
-    WorkspacePathError,
+    Cancellation, ContentKind, ContentPart, DEFAULT_SESSION_TITLE, DeltaKind, FactEvent,
+    MessageBody, MessageId, MessageNode, MessageRole, MessageSkeleton, MessageText,
+    MessageTextError, MessageTree, PartSkeleton, PartState, ProviderMeta, QueueItem, QueueItemId,
+    RunFailure, RunFailureCode, RunId, RunRecord, RunStatus, SessionId, SessionIdError,
+    SessionMetadata, SessionTitle, SessionTitleError, SessionTreeSnapshot, Store, StoreError,
+    StreamEvent, SubmitMode, ToolDefinition, ToolErrorCode, ToolFailure, ToolLimits, ToolOutcome,
+    ToolResultState, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
+pub use link::{LinkHandle, NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,
     HealthResponse, HealthStatus, MessageBodiesRequest, MessageBodiesResponse, PROTOCOL_VERSION,
@@ -44,9 +43,6 @@ pub use protocol::{
 pub use provider::{
     ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,
     ProviderError,
-};
-pub use tools::{
-    NoTools, ToolBox, ToolCall, ToolContext, ToolDefinition, ToolLimits, ToolRegistry,
 };
 
 pub const DEFAULT_LISTEN: &str = "127.0.0.1:8081";

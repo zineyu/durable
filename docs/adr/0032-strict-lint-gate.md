@@ -50,7 +50,7 @@
 | `agent/src/main.rs` `report_listen_address` | `print_stdout` | 监听地址是启动协议，启动测试与浏览器端到端测试从标准输出读取。 |
 | `hub/src/main.rs` `startup_failure` | `print_stderr` | 启动路径上日志尚未可用。 |
 | `hub/src/main.rs` `run` | `print_stdout` | 同上，就绪信号写标准输出。 |
-| `agent/src/tools/bash.rs` `ProcessGroup::kill` | `unsafe_code` | 标准库没有杀进程组的接口，只能调 `libc::kill`；块上有 `// SAFETY:` 说明前提。 |
+| `executor/src/tools/bash.rs` `ProcessGroup::kill` | `unsafe_code` | 标准库没有杀进程组的接口，只能调 `libc::kill`；块上有 `// SAFETY:` 说明前提。 |
 | `hub/src/bus/watch.rs` `jitter` | `cast_precision_loss` | 取模 1001 后小于 1001，`f64` 可精确表示。 |
 
 测试脚手架是另一类。集成测试的共享模块不是 `#[test]` 函数，`clippy` 不把它算作测试代码。这些模块在文件头用一条 `#![expect(...)]` 覆盖 `expect_used`、`panic`、`indexing_slicing` 与 `let_underscore_must_use`，并写明理由：夹具失败必须立刻可见。禁止逐行散放抑制。

@@ -1,11 +1,9 @@
 //! workspace 边界：把工具路径解析到根内，拒绝绝对路径、点段与符号链接逃逸。
-//! 各工具的参数校验在自己的模块。
+//! 各工具的参数校验在自己的模块，工具定义在 `durable::tool`。
 
 use std::path::{Component, Path, PathBuf};
 
-use durable::ToolErrorCode;
-
-use super::ToolFailure;
+use durable::{ToolErrorCode, ToolFailure};
 
 /// workspace 根内的路径解析。根是已规范化的绝对路径，来自 session 的 workspace。
 pub(crate) struct Workspace {

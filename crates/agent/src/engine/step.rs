@@ -8,10 +8,10 @@ use durable::{
 };
 use futures_util::StreamExt;
 
-use crate::cancel::Cancellation;
 use crate::engine::progress::ProgressThrottle;
 use crate::engine::{RunEngine, StepEnd, StreamOpen, ToolCallBuilder, storage_failure};
 use crate::provider::{ChatChunk, ChatMessage, ProviderError};
+use durable::Cancellation;
 
 /// 限流退避的上限。供应商不给建议时单次等待不超过它。
 const MAX_RETRY_BACKOFF: Duration = Duration::from_secs(30);

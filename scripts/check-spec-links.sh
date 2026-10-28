@@ -51,9 +51,9 @@ git grep -nE '规格 user story' -- crates client |
       crates/executor/*) prefix=R ;;
       *) prefix=AR ;;
     esac
-    found=$(printf '%s\n' "$rest" | sed 's/.*规格 user story//' | grep -oE '[AH]-[0-9]+' || true)
+    found=$(printf '%s\n' "$rest" | sed 's/.*规格 user story//' | grep -oE '[AHR]-[0-9]+' || true)
     if [ -z "$found" ]; then
-      printf '%s:%s 写了「规格 user story」，但后面没有 A-N 或 H-N 编号\n' "$file" "$line" >> "$work/problems.txt"
+      printf '%s:%s 写了「规格 user story」，但后面没有 A-N、H-N 或 R-N 编号\n' "$file" "$line" >> "$work/problems.txt"
       continue
     fi
     for id in $found; do

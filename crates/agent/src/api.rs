@@ -18,6 +18,7 @@ use serde::de::DeserializeOwned;
 use crate::config::EngineConfig;
 use crate::engine::RunEngine;
 use crate::error::ApiError;
+use crate::link::ToolBox;
 use crate::protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, HealthResponse, HealthStatus,
     MessageBodiesRequest, MessageBodiesResponse, PROTOCOL_VERSION, RegisterWorkspaceRequest,
@@ -25,7 +26,6 @@ use crate::protocol::{
 };
 use crate::provider::ModelProvider;
 use crate::sse;
-use crate::tools::ToolBox;
 
 /// 请求体；反序列化失败时返回协议错误信封而非纯文本。
 struct JsonBody<T>(T);

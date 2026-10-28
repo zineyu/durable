@@ -1,5 +1,5 @@
-//! 取消信号：请求与工具共享的一次性通知。
-//! 杀进程组在 `tools/bash`。
+//! 取消信号：请求、工具执行与 link 两侧共享的一次性通知。
+//! 杀子进程组在 `crates/executor/src/tools/bash`；跨 link 的取消帧在 `link`。
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

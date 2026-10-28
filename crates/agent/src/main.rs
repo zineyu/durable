@@ -1,5 +1,5 @@
-//! agent 进程入口：解析参数、准备目录与日志、启动 HTTP 服务。
-//! 路由与状态装配在 `lib`。
+//! agent 进程入口：解析参数、准备目录与日志、拉起 executor 的 link、启动 HTTP 服务。
+//! 路由与状态装配在 `lib`，帧与工具调用在 `lib::link`。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -9,6 +9,12 @@ use clap::Parser;
 use runtime::dirs;
 use runtime::logging::{LogConfig, init};
 use tracing::info;
+
+/// 覆盖 executor 二进制位置的环境变量。
+const EXECUTOR_ENV: &str = "DURABLE_EXECUTOR";
+
+/// executor 与 agent 同目录发布时的文件名。
+const EXECUTOR_FILE: &str = "executor";
 
 #[derive(Debug, Parser)]
 struct Arguments {
@@ -99,15 +105,18 @@ async fn run(arguments: Arguments, prepared: Prepared) -> Result<(), Box<dyn std
     store.register_initial_workspaces(&workspaces).await?;
     let provider = std::sync::Arc::new(agent::OpenAiProvider::new(&model));
     let model_name = model.model_name.clone();
+    let executor = executor_binary()?;
+    let link = agent::LinkHandle::spawn_local(&executor, agent::ToolLimits::default())?;
     let state = agent::AgentState::start(
         store,
         model_name,
         provider,
-        std::sync::Arc::new(agent::ToolRegistry::default()),
+        std::sync::Arc::new(agent::RemoteTools::new(link)),
         engine,
     )
     .await?;
     info!(
+        executor = %executor.display(),
         database = %prepared.database.display(),
         log_directory = %prepared.log.directory.display(),
         log_filter = %prepared.log.filter,
@@ -121,6 +130,29 @@ async fn run(arguments: Arguments, prepared: Prepared) -> Result<(), Box<dyn std
     info!(listen = %bound, "agent 开始监听");
     agent::serve(listener, state).await?;
     Ok(())
+}
+
+/// 定位 executor 二进制：`DURABLE_EXECUTOR` 优先，否则取与 agent 同目录的同名文件。
+///
+/// 失败：环境变量缺失且自身路径没有父目录，或该文件不存在。
+fn executor_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let path = if let Some(value) = std::env::var_os(EXECUTOR_ENV) {
+        PathBuf::from(value)
+    } else {
+        let current = std::env::current_exe()?;
+        let directory = current.parent().ok_or_else(|| {
+            std::io::Error::other(format!("无法确定 agent 所在目录: {}", current.display()))
+        })?;
+        directory.join(EXECUTOR_FILE)
+    };
+    if !path.is_file() {
+        return Err(format!(
+            "找不到 executor 二进制: {}。它与 agent 同目录发布；也可用 {EXECUTOR_ENV} 指定路径。",
+            path.display()
+        )
+        .into());
+    }
+    Ok(path)
 }
 
 /// 把启动参数中的 workspace 路径解析为规范化身份。

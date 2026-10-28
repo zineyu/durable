@@ -19,10 +19,10 @@ use durable::{
 use tokio::sync::{Mutex, Notify};
 
 use self::recover::ResumePoint;
-use crate::cancel::Cancellation;
 use crate::config::EngineConfig;
+use crate::link::ToolBox;
 use crate::provider::ModelProvider;
-use crate::tools::ToolBox;
+use durable::Cancellation;
 
 /// run 引擎：session 内串行、session 间并发、流式生成、工具循环与续跑。
 pub struct RunEngine {

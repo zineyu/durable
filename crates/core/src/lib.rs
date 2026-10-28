@@ -1,10 +1,12 @@
 //! 领域内核：领域类型、唯一写入线与 SQLite 存储。
 //! 进程启动、HTTP 协议与客户端在 `crates/agent`、`crates/hub` 与 `client`。
 
+mod cancel;
 mod change;
 mod error;
 mod event;
 mod id;
+pub mod link;
 mod message;
 mod node;
 mod queue;
@@ -17,6 +19,7 @@ mod tool;
 mod tree;
 mod workspace;
 
+pub use cancel::Cancellation;
 pub use change::Changeset;
 pub use error::{StoreError, StoreErrorClass, StoreErrorKind};
 pub use event::{CommittedEvent, FactEvent};
@@ -37,6 +40,10 @@ pub use session::{SessionMetadata, SessionRecord, SessionTreeSnapshot};
 pub use storage::Snapshot;
 pub use store::{Command, RunStart, SessionCommand, Store};
 pub use stream::{DeltaKind, EventBus, ResyncReason, StreamEvent};
-pub use tool::{ToolErrorCode, ToolOutcome, ToolResultState};
+pub use tool::{
+    DEFAULT_BASH_OUTPUT_BYTES, DEFAULT_BASH_TIMEOUT, DEFAULT_READ_BYTES, ToolDefinition,
+    ToolErrorCode, ToolFailure, ToolLimits, ToolOutcome, ToolResultState, parse_arguments,
+    tool_definition, tool_definitions,
+};
 pub use tree::MessageTree;
 pub use workspace::WorkspaceMetadata;
