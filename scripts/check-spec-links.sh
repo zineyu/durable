@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 规格追溯：代码里引用的 user story 编号必须在 docs/specs 里存在，
-# 且前缀与所在目录匹配：crates/hub 引用 H-，其余引用 A-。
+# 且前缀与所在目录匹配：crates/hub 引用 H-，crates/executor 引用 R-，
+# 其余 crate 允许 A- 与 R-。
 # 未被任何代码引用的编号只打印清单，不阻断。
 set -euo pipefail
 
@@ -13,10 +14,11 @@ spec_of() {
   case "$1" in
     A) printf 'docs/specs/rust-react-coding-agent.md' ;;
     H) printf 'docs/specs/multi-node-hub.md' ;;
+    R) printf 'docs/specs/remote-ssh-process-model.md' ;;
   esac
 }
 
-for prefix in A H; do
+for prefix in A H R; do
   spec=$(spec_of "$prefix")
   if [ ! -f "$spec" ]; then
     printf '规格追溯：找不到 %s（前缀 %s）。\n' "$spec" "$prefix" >&2
@@ -31,7 +33,7 @@ done
 
 for spec in docs/specs/*.md; do
   case "$spec" in
-    docs/specs/rust-react-coding-agent.md | docs/specs/multi-node-hub.md) ;;
+    docs/specs/rust-react-coding-agent.md | docs/specs/multi-node-hub.md | docs/specs/remote-ssh-process-model.md) ;;
     *)
       printf '规格追溯：%s 未分配前缀。在 scripts/check-spec-links.sh 的 spec_of 里为它指定 A- 或 H-。\n' "$spec" >&2
       exit 1
@@ -46,7 +48,8 @@ git grep -nE '规格 user story' -- crates client |
   while IFS=: read -r file line rest; do
     case "$file" in
       crates/hub/*) prefix=H ;;
-      *) prefix=A ;;
+      crates/executor/*) prefix=R ;;
+      *) prefix=AR ;;
     esac
     found=$(printf '%s\n' "$rest" | sed 's/.*规格 user story//' | grep -oE '[AH]-[0-9]+' || true)
     if [ -z "$found" ]; then
@@ -58,11 +61,17 @@ git grep -nE '规格 user story' -- crates client |
     done
   done
 
-while read -r where expected id; do
-  if [ "${id%%-*}" != "$expected" ]; then
-    printf '%s: 引用 %s，但这里只允许 %s- 前缀的编号\n' "$where" "$id" "$expected" >> "$work/problems.txt"
-  elif ! grep -qx "$id" "$work/defined-${expected}.txt"; then
-    printf '%s: 引用 user story %s，但 %s 里没有该编号\n' "$where" "$id" "$(spec_of "$expected")" >> "$work/problems.txt"
+while read -r where allowed id; do
+  prefix=${id%%-*}
+  case "$allowed" in
+    *"$prefix"*) ;;
+    *)
+      printf '%s: 引用 %s，但这里只允许 %s 前缀的编号\n' "$where" "$id" "$allowed" >> "$work/problems.txt"
+      continue
+      ;;
+  esac
+  if ! grep -qx "$id" "$work/defined-${prefix}.txt"; then
+    printf '%s: 引用 user story %s，但 %s 里没有该编号\n' "$where" "$id" "$(spec_of "$prefix")" >> "$work/problems.txt"
   fi
 done < "$work/refs.txt"
 
@@ -73,7 +82,7 @@ fi
 
 awk '{ print $3 }' "$work/refs.txt" | sort -u > "$work/referenced.txt"
 
-for prefix in A H; do
+for prefix in A H R; do
   unreferenced=$(comm -23 "$work/defined-${prefix}.txt" "$work/referenced.txt" | sort -t- -k2,2n | tr '\n' ' ')
   if [ -n "$unreferenced" ]; then
     printf '%s 未被引用的编号：%s\n' "$(spec_of "$prefix")" "$unreferenced"
