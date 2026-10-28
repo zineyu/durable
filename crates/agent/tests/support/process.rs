@@ -1,12 +1,26 @@
 //! 进程级测试脚手架：启动真实 agent 二进制、经 HTTP 驱动它，并在用例结束时杀掉。
 //! 进程内的 `Harness` 在父模块，脚本化 provider 在 `provider`。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use super::{ScriptedProvider, read_address, serving_command};
+use super::{ScriptedProvider, binary, read_address, serving_command};
+
+/// 与 agent 二进制同目录的 executor 二进制：测试内的传输一律是本地子进程。
+pub(crate) fn executor_binary() -> PathBuf {
+    let path = binary()
+        .parent()
+        .expect("agent 二进制有父目录")
+        .join("executor");
+    assert!(
+        path.is_file(),
+        "找不到 executor 二进制: {}；先运行 cargo build -p executor，或运行 workspace 级测试。",
+        path.display()
+    );
+    path
+}
 
 /// 真实 agent 进程与它的监听地址。
 pub(crate) struct Process {

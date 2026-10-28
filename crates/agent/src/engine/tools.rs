@@ -3,7 +3,8 @@
 //! 工具经 link 交给 executor；契约在 `crate::link`，续跑点推导在 `recover`。
 
 use durable::{
-    Cancellation, MessageId, RunFailure, RunId, RunStart, SessionId, StoreError, ToolResultState,
+    Cancellation, MessageId, RunFailure, RunFailureCode, RunId, RunStart, SessionId, StoreError,
+    ToolResultState,
 };
 
 use crate::engine::recover::PendingTool;
@@ -37,7 +38,29 @@ impl RunEngine {
                 arguments: tool.arguments,
             };
             tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
-            let state = ToolResultState::from(self.tools.execute(&call, &context).await);
+            let outcome = match self.tools.execute(&call, &context).await {
+                Ok(outcome) => outcome,
+                Err(closed) => {
+                    tracing::warn!(
+                        session = %session.as_str(),
+                        tool = %call.name,
+                        error = %closed,
+                        "link 已断开，本次调用结局未知"
+                    );
+                    self.store
+                        .finish_tool(session, message_id, &call.id, ToolResultState::Unknown)
+                        .await
+                        .map_err(|error| storage_failure(&error))?;
+                    self.abandon_tools(session, start.run.id, remaining.collect())
+                        .await
+                        .map_err(|error| storage_failure(&error))?;
+                    return Err(RunFailure {
+                        code: RunFailureCode::HostUnreachable,
+                        message: closed.to_string(),
+                    });
+                }
+            };
+            let state = ToolResultState::from(outcome);
             log_outcome(session, &call.name, &state);
             self.store
                 .finish_tool(session, message_id, &call.id, state)

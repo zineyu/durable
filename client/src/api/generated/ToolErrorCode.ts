@@ -3,4 +3,4 @@
 /**
  * 工具失败的稳定类别。
  */
-export type ToolErrorCode = "unknown_tool" | "invalid_arguments" | "path_escape" | "file_not_found" | "not_utf8" | "read_limit_exceeded" | "invalid_line_range" | "parent_not_found" | "edit_not_found" | "edit_not_unique" | "bash_timeout" | "io_error" | "cancelled";
+export type ToolErrorCode = "unknown_tool" | "invalid_arguments" | "path_escape" | "file_not_found" | "not_utf8" | "read_limit_exceeded" | "invalid_line_range" | "parent_not_found" | "edit_not_found" | "edit_not_unique" | "bash_timeout" | "io_error" | "link_closed" | "cancelled";

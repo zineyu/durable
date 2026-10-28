@@ -33,7 +33,7 @@ pub use durable::{
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
-pub use link::{LinkHandle, NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
+pub use link::{LinkClosed, LinkHandle, NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,
     HealthResponse, HealthStatus, MessageBodiesRequest, MessageBodiesResponse, PROTOCOL_VERSION,

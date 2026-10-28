@@ -341,7 +341,7 @@ export type RunFailure = { code: RunFailureCode, message: string, };
 /**
  * run 失败的稳定类别。
  */
-export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_limit_exceeded" | "step_limit_exceeded" | "storage_failed" | "interrupted";
+export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_limit_exceeded" | "step_limit_exceeded" | "host_unreachable" | "storage_failed" | "interrupted";
 ```
 
 ## RunRecord
@@ -468,7 +468,7 @@ export type SwitchActiveLeafRequest = { messageId: number, };
 /**
  * 工具失败的稳定类别。
  */
-export type ToolErrorCode = "unknown_tool" | "invalid_arguments" | "path_escape" | "file_not_found" | "not_utf8" | "read_limit_exceeded" | "invalid_line_range" | "parent_not_found" | "edit_not_found" | "edit_not_unique" | "bash_timeout" | "io_error" | "cancelled";
+export type ToolErrorCode = "unknown_tool" | "invalid_arguments" | "path_escape" | "file_not_found" | "not_utf8" | "read_limit_exceeded" | "invalid_line_range" | "parent_not_found" | "edit_not_found" | "edit_not_unique" | "bash_timeout" | "io_error" | "link_closed" | "cancelled";
 ```
 
 ## ToolOutcome

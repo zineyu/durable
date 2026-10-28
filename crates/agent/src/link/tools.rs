@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use durable::{Cancellation, ToolDefinition, ToolErrorCode, ToolOutcome, WorkspacePath};
 
-use super::LinkHandle;
+use super::{LinkClosed, LinkHandle};
 
 /// 一次工具调用的请求。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,13 +21,17 @@ pub struct ToolContext {
     pub cancellation: Cancellation,
 }
 
-/// 执行工具调用。失败以结构化结果返回，不作为错误传播。
+/// 执行工具调用。工具失败以结构化结局返回；link 断开是运维失败，作为错误传播。
 #[async_trait]
 pub trait ToolBox: Send + Sync {
     /// 每轮模型请求携带的工具定义。
     fn definitions(&self) -> Vec<ToolDefinition>;
 
-    async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolOutcome;
+    async fn execute(
+        &self,
+        call: &ToolCall,
+        context: &ToolContext,
+    ) -> Result<ToolOutcome, LinkClosed>;
 
     /// 该工具是否幂等。未登记的工具按非幂等处理。
     fn idempotent(&self, name: &str) -> bool {
@@ -46,11 +50,15 @@ impl ToolBox for NoTools {
         Vec::new()
     }
 
-    async fn execute(&self, call: &ToolCall, _context: &ToolContext) -> ToolOutcome {
-        ToolOutcome::Failed {
+    async fn execute(
+        &self,
+        call: &ToolCall,
+        _context: &ToolContext,
+    ) -> Result<ToolOutcome, LinkClosed> {
+        Ok(ToolOutcome::Failed {
             code: ToolErrorCode::UnknownTool,
             message: format!("未知工具: {}", call.name),
-        }
+        })
     }
 }
 
@@ -72,7 +80,11 @@ impl ToolBox for RemoteTools {
         durable::tool_definitions()
     }
 
-    async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolOutcome {
+    async fn execute(
+        &self,
+        call: &ToolCall,
+        context: &ToolContext,
+    ) -> Result<ToolOutcome, LinkClosed> {
         self.link
             .request(
                 context.workspace.as_str(),

@@ -3,4 +3,4 @@
 /**
  * run 失败的稳定类别。
  */
-export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_limit_exceeded" | "step_limit_exceeded" | "storage_failed" | "interrupted";
+export type RunFailureCode = "model_upstream" | "model_rate_limited" | "context_limit_exceeded" | "step_limit_exceeded" | "host_unreachable" | "storage_failed" | "interrupted";

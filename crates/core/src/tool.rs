@@ -24,6 +24,9 @@ pub enum ToolErrorCode {
     EditNotUnique,
     BashTimeout,
     IoError,
+    /// 等待结果时 link 断开。只由 agent 的 link 层产生，工具实现从不返回它；
+    /// 引擎把这种调用记为「结果未知」并让 run 以 `host_unreachable` 结束。
+    LinkClosed,
     Cancelled,
 }
 

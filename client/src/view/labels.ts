@@ -57,6 +57,7 @@ export const runFailureLabel: Record<RunFailureCode, string> = {
   context_limit_exceeded: '上下文超限',
   step_limit_exceeded: '步数超限',
   storage_failed: '本地存储失败',
+  host_unreachable: '主机不可达',
   interrupted: '进程中断',
 };
 

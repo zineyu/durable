@@ -45,20 +45,6 @@ pub(crate) fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_agent"))
 }
 
-/// 与 agent 二进制同目录的 executor 二进制：测试内的传输一律是本地子进程。
-pub(crate) fn executor_binary() -> PathBuf {
-    let path = binary()
-        .parent()
-        .expect("agent 二进制有父目录")
-        .join("executor");
-    assert!(
-        path.is_file(),
-        "找不到 executor 二进制: {}；先运行 cargo build -p executor，或运行 workspace 级测试。",
-        path.display()
-    );
-    path
-}
-
 /// 运行 agent 二进制的命令：指定 SQLite 与日志路径并带上模型配置。
 pub(crate) fn command(database: &Path) -> std::process::Command {
     let mut command = command_without_paths();
@@ -166,6 +152,7 @@ pub(crate) struct Harness {
     pub provider: ScriptedProvider,
     pub config: agent::EngineConfig,
     pub limits: agent::ToolLimits,
+    executor_pid: u32,
     agent: TestAgent,
     pub client: reqwest::Client,
 }
@@ -203,8 +190,9 @@ impl Harness {
             model_name: "test-model".to_owned(),
         };
         let runtime = Arc::new(agent::OpenAiProvider::new(&model));
-        let link = agent::LinkHandle::spawn_local(&executor_binary(), limits)
+        let link = agent::LinkHandle::spawn_local(&process::executor_binary(), limits)
             .expect("启动 executor 子进程");
+        let executor_pid = link.pid().expect("executor 子进程有 pid");
         let tools = Arc::new(agent::RemoteTools::new(link));
         let agent = TestAgent::start(&database, "test-model", runtime, tools, config).await;
         Harness {
@@ -213,6 +201,7 @@ impl Harness {
             provider,
             config,
             limits,
+            executor_pid,
             agent,
             client: reqwest::Client::new(),
         }
@@ -234,6 +223,11 @@ impl Harness {
 
     pub(crate) fn url(&self, path: &str) -> String {
         self.agent.url(path)
+    }
+
+    /// 本 harness 的 executor 子进程 pid：断链用例直接杀掉它。
+    pub(crate) fn executor_pid(&self) -> u32 {
+        self.executor_pid
     }
 
     pub(crate) fn workspace_path(&self, name: &str) -> PathBuf {

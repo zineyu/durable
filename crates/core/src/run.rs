@@ -63,6 +63,8 @@ pub enum RunFailureCode {
     ModelRateLimited,
     ContextLimitExceeded,
     StepLimitExceeded,
+    /// link 断开：host 不可达，在途工具调用的结局未知。见 ADR 0048。
+    HostUnreachable,
     /// 本地存储失败：引擎内任意 `durable::StoreError` 都记为此类别，典型原因是数据库、
     /// 不变量与序列化。见 ADR 0043。
     StorageFailed,

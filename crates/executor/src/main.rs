@@ -1,7 +1,7 @@
 //! executor 进程入口：读 link 帧、执行工具、把结果写回标准输出。
 //! 工具实现在 `tools`，帧定义在 `durable::link`，链路驱动在 `crates/agent/src/link`。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -25,6 +25,9 @@ const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// 待写帧队列容量。写侧只有一个任务，容量只用于吸收突发。
 const FRAME_QUEUE: usize = 64;
+
+/// 退出日志里保留的最近帧数。
+const RECENT_FRAMES: usize = 8;
 
 #[derive(Debug, Parser)]
 struct Arguments {
@@ -89,59 +92,91 @@ async fn serve(limits: ToolLimits) {
     let active: Arc<Mutex<HashMap<String, Cancellation>>> = Arc::new(Mutex::new(HashMap::new()));
     let mut tasks: JoinSet<()> = JoinSet::new();
     let mut input = BufReader::new(tokio::io::stdin());
-    loop {
+    let mut recent: VecDeque<String> = VecDeque::new();
+    let reason = loop {
         match read_frame(&mut input).await {
-            Ok(Some(Frame::Request {
-                id,
-                workspace,
-                tool,
-                arguments,
-            })) => {
-                let cancellation = Cancellation::new();
-                active.lock().await.insert(id.clone(), cancellation.clone());
-                let sender = sender.clone();
-                let active = Arc::clone(&active);
-                tasks.spawn(async move {
-                    let outcome =
-                        tools::execute(&tool, &workspace, &arguments, &cancellation, &limits).await;
-                    active.lock().await.remove(&id);
-                    if sender.send(Frame::Result { id, outcome }).await.is_err() {
-                        tracing::warn!("link 写侧已关闭，工具结果被丢弃");
+            Ok(Some(frame)) => {
+                remember(&mut recent, describe(&frame));
+                match frame {
+                    Frame::Request {
+                        id,
+                        workspace,
+                        tool,
+                        arguments,
+                    } => {
+                        let cancellation = Cancellation::new();
+                        active.lock().await.insert(id.clone(), cancellation.clone());
+                        let sender = sender.clone();
+                        let active = Arc::clone(&active);
+                        tasks.spawn(async move {
+                            let outcome = tools::execute(
+                                &tool,
+                                &workspace,
+                                &arguments,
+                                &cancellation,
+                                &limits,
+                            )
+                            .await;
+                            active.lock().await.remove(&id);
+                            if sender.send(Frame::Result { id, outcome }).await.is_err() {
+                                tracing::warn!("link 写侧已关闭，工具结果被丢弃");
+                            }
+                        });
                     }
-                });
-            }
-            Ok(Some(Frame::Cancel { id })) => {
-                let cancellation = active.lock().await.get(&id).cloned();
-                if let Some(cancellation) = cancellation {
-                    cancellation.cancel();
-                } else {
-                    tracing::debug!(id = %id, "取消没有匹配的在途请求");
+                    Frame::Cancel { id } => {
+                        let cancellation = active.lock().await.get(&id).cloned();
+                        if let Some(cancellation) = cancellation {
+                            cancellation.cancel();
+                        } else {
+                            tracing::debug!(id = %id, "取消没有匹配的在途请求");
+                        }
+                    }
+                    Frame::Ping { seq } => {
+                        if sender.send(Frame::Pong { seq }).await.is_err() {
+                            tracing::warn!("link 写侧已关闭，心跳应答被丢弃");
+                        }
+                    }
+                    Frame::Result { .. } | Frame::Pong { .. } => {
+                        tracing::debug!("收到不属于 executor 的帧，忽略");
+                    }
                 }
             }
-            Ok(Some(Frame::Ping { seq })) => {
-                if sender.send(Frame::Pong { seq }).await.is_err() {
-                    tracing::warn!("link 写侧已关闭，心跳应答被丢弃");
-                }
-            }
-            Ok(Some(Frame::Result { .. } | Frame::Pong { .. })) => {
-                tracing::debug!("收到不属于 executor 的帧，忽略");
-            }
-            Ok(None) => {
-                tracing::info!("link 读侧结束");
-                break;
-            }
-            Err(error) => {
-                tracing::error!("读取 link 帧失败: {error}");
-                break;
-            }
+            Ok(None) => break "标准输入 EOF".to_owned(),
+            Err(error) => break format!("读取 link 帧失败: {error}"),
         }
-    }
+    };
+    let active_count = active.lock().await.len();
+    tracing::info!(
+        reason = %reason,
+        active = active_count,
+        recent = ?recent,
+        "link 读侧结束，取消在途请求后退出"
+    );
     cancel_all(&active).await;
     drop(sender);
     drain(&mut tasks).await;
     if let Err(error) = writer.await {
         tracing::warn!("写侧任务结束异常: {error}");
     }
+}
+
+/// 一帧的简短描述，用于退出日志。不打印参数正文，避免日志被工具输入撑大。
+fn describe(frame: &Frame) -> String {
+    match frame {
+        Frame::Request { id, tool, .. } => format!("request {id} {tool}"),
+        Frame::Result { id, .. } => format!("result {id}"),
+        Frame::Cancel { id } => format!("cancel {id}"),
+        Frame::Ping { seq } => format!("ping {seq}"),
+        Frame::Pong { seq } => format!("pong {seq}"),
+    }
+}
+
+/// 保留最近 [`RECENT_FRAMES`] 帧。
+fn remember(recent: &mut VecDeque<String>, line: String) {
+    if recent.len() == RECENT_FRAMES {
+        drop(recent.pop_front());
+    }
+    recent.push_back(line);
 }
 
 /// 读侧结束后取消全部在途请求，并限时等待它们回帧。
