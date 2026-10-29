@@ -49,7 +49,9 @@
 | `api.rs` | HTTP 路由与处理器 |
 | `engine/` | run 引擎：`mod.rs` 执行循环与收尾、`step.rs` 模型流与重试、`tools.rs` 工具循环、`prompt.rs` 请求装配、`compact.rs` 上下文压缩、`recover.rs` 续跑推导 |
 | `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
-| `link/` | 工具的 agent 侧：`mod.rs` 管 executor 子进程与按 id 复用的帧，`tools.rs` 是 `ToolBox` 与 `RemoteTools` |
+| `link/` | link 的 agent 侧：`mod.rs` 按请求 id 复用帧、管子进程，`closed.rs` 是断链说明，`transport.rs` 组装本地与 SSH 两种传输，`ssh.rs` 探测远端平台并推送执行端，`tools.rs` 是 `ToolBox` 与 `RemoteTools` |
+| `hosts/` | host 注册表：host 状态、说明、心跳延迟、连接任务与退避重连；`ssh.rs` 是 ssh host 的后台连接任务 |
+| `assets.rs` | 编译期内嵌的 `client/dist`：MIME、SPA 回落与 `/api` 的 404 |
 | `sse.rs` | 单一全局事件流：回放、实时与 resync |
 | `protocol.rs` | 对外协议 DTO 与协议版本 |
 | `config.rs`、`error.rs` | 配置解析、HTTP 错误信封 |
@@ -70,7 +72,7 @@
 | SSE 事件载荷 | `crates/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
 | 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `change.rs` |
 | 新的 LLM 工具 | `crates/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
-| link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `crates/agent/src/link/mod.rs`，executor 侧在 `crates/executor/src/main.rs` |
+| link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `crates/agent/src/link/mod.rs`，传输在 `link/transport.rs`、`link/ssh.rs`，executor 侧在 `crates/executor/src/main.rs` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
 | host 表命令或 host 快照 | `crates/agent/src/hosts/`，路由在 `api.rs` |
 | 协议类型与 TS 生成 | `crates/agent/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
@@ -113,6 +115,17 @@
 - TS 侧 `reportUnusedDisableDirectives` 为错误；新代码不应需要 `eslint-disable`。
 
 `durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 agent 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
+
+## 手工验证：SSH 传输
+
+自动化测试只用本机传输。改动触及 SSH 传输、安装或 host 连接任务时，按下面的清单在本机走一遍并记录结果：
+
+1. `ssh localhost true` 免交互通过（`~/.ssh/config` 与 ssh-agent 就绪）。
+2. 启动 `agent`，用 `POST /api/hosts` 注册 `{"name":"localhost","kind":"ssh","target":"localhost"}`。
+3. 轮询 `/api/bootstrap` 到状态 `ok`；远端标准数据目录出现 `executor-<build>`，且 host 行的 `installed_build` 等于当前构建。
+4. 在该 host 上注册 workspace、建 session、发一条触发 `bash` 的消息，确认文件副作用出现在远端目录。
+5. 杀掉 ssh 链路：host 变 `unreachable` 并带 stderr 原文，在途 run 以 `host_unreachable` 结束，退避后自动回到 `ok`。
+6. 停用 host：`ps` 里没有 `ssh` 与 `executor` 残留；重新启用后回到 `ok`。
 
 ## 规模与依赖预算
 

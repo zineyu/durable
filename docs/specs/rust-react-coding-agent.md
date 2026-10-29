@@ -1,6 +1,7 @@
 > 主 issue: #1
 >
-> 多节点 hub 的增补与修订见 `docs/specs/multi-node-hub.md`。
+> 进程模型（`agent`、`host`、`executor`、`link`）见 ADR 0048 与
+> `docs/specs/remote-ssh-process-model.md` 的 R-* 故事。
 
 # 规格：Rust + React 的最小 C/S 架构 coding agent
 
@@ -12,7 +13,7 @@
 
 ## 目标
 
-- 本机单用户运行；`agent` 与 `hub` 两个二进制可独立启动与重启。
+- 本机单用户运行；`agent` 与 `executor` 两个二进制可独立启动与重启。
 - 多 workspace 注册；多 session 并发；session 内持久 FIFO 队列。
 - 工具：`read_file`、`write_file`、`edit_file`、`bash`。工具自动执行，路径限定在 session 所属 workspace 根内。
 - 流式输出经单一 SSE 流送达所有标签页；断线按游标续传。
@@ -23,7 +24,7 @@
 
 ## 非目标
 
-- 多用户与用户身份、鉴权、TLS 终止。跨机器访问由多节点 hub 承载，见 `docs/specs/multi-node-hub.md`。
+- 多用户与用户身份、鉴权、TLS 终止。跨机器访问由 host 与 SSH 提供，见 ADR 0048。
 - 容器或沙箱隔离、命令白名单、网络限制、工具审批。
 - `list_dir` 工具；目录探查由 `bash` 完成。
 - diff 渲染、语法高亮、图片或文件附件、语音输入。
@@ -85,7 +86,7 @@
 
 ### 前端与工程
 
-- **A-31** 作为开发者，我在单页界面中完成全部操作：侧栏管理 workspace/session，右侧查看 transcript、队列、取消、连接状态与错误横幅；session 记录在 URL hash 中。
+- **A-31** 作为开发者，我在单页界面中完成全部操作：侧栏管理 host、workspace 与 session，右侧查看 transcript、队列、取消、连接状态与错误横幅；session 记录在 URL hash（`#/s/<session_id>`）中。
 - **A-32** 作为开发者，assistant 消息渲染 markdown 与代码块，不做语法高亮与 diff；工具卡片可折叠；不使用 `any`。
 - **A-33** 作为开发者，每个纯展示组件与页面组合都有 Storybook stories，使用静态 fixture 覆盖空会话、流式中、工具调用、错误、多 session 并发、分支切换、长文本溢出。
 - **A-34** 作为开发者，我在本地运行 Storybook 查看全部状态；CI 发布 Chromatic 并阻止含未接受视觉变更的合并。
@@ -100,11 +101,11 @@
 
 ### 进程与部署
 
-- 两个 Rust 二进制：`agent` 与 `hub`（原 `ui`）。两者默认只监听 `127.0.0.1`。
-- `agent` 只提供 HTTP API，不托管前端资源。启动参数包含监听地址、可选的 SQLite 路径、可选的日志目录、可重复的初始 workspace 路径。模型配置经环境变量提供。
-- `hub` 内嵌构建后的 React 静态资源并托管，持有节点表，把全部 node 的协议合并成单一 `/api/*` 与单一事件流。启动参数包含监听地址、可选的 `hub` 数据库路径与可选的日志目录。细节见 `docs/specs/multi-node-hub.md`。
-- 省略数据库路径时使用平台标准数据目录下的 `agent.sqlite` 或 `hub.sqlite`；省略日志目录时使用平台标准日志目录。两个二进制同时把日志写到标准错误与标准日志目录下的每日 JSON Lines 文件，`DURABLE_LOG` 控制过滤。见 `docs/adr/0026-logging-and-default-paths.md`。
-- 浏览器始终同源访问 `hub`，不需要 CORS。鉴权、TLS、公网监听不在本规格内。
+- 两个 Rust 二进制：`agent` 与 `executor`。`agent` 默认只监听 `127.0.0.1`；`executor` 不监听端口，只经 link 的帧通信。
+- `agent` 是唯一权威：agent 循环、provider 调用、消息树、队列、事件、SQLite，以及内嵌的客户端静态资源都由它提供。启动参数包含监听地址、可选的 SQLite 路径、可选的日志目录、可重复的 `--host <name>=<ssh-target>` 与可重复的 `--workspace <host>:<path>`。模型配置经环境变量提供。
+- `executor` 在 host 上执行工具：读取帧、校验路径、执行四个工具、写回结果。它不持有数据库，不读模型配置，日志只写标准错误并由 `agent` 并入。参见 ADR 0048。
+- 省略数据库路径时使用平台标准数据目录下的 `agent.sqlite`；省略日志目录时使用平台标准日志目录。两个二进制都把日志写到标准错误与标准日志目录下的每日 JSON Lines 文件，`DURABLE_LOG` 控制过滤。见 `docs/adr/0026-logging-and-default-paths.md`。
+- 浏览器始终同源访问 `agent`，不需要 CORS。鉴权、TLS、公网监听不在本规格内。
 - `agent` 缺少必需配置时启动失败，错误信息指出缺失项。
 
 ### 协议
@@ -169,6 +170,7 @@ stateDiagram-v2
 
 ### 工具
 
+- 工具调用跨进程：`agent` 把调用放进 link 的请求帧，`executor` 执行并回一帧结果。工具定义与参数类型在共用的内核 crate，`agent` 只透传 JSON 参数。取消走独立的取消帧，`executor` 杀掉进程组后仍回一帧结果。
 - 执行器在调用前把路径解析到 workspace 根内：拒绝绝对路径、`..` 逃逸、规范化后位于根外的符号链接目标。
 - `read_file`：UTF-8；可选起止行；输出带行号；默认字节上限 256 KiB，超限报错。
 - `write_file`：覆盖写入；父目录必须存在；返回写入字节数。
@@ -178,7 +180,7 @@ stateDiagram-v2
 
 ### 持久化
 
-- SQLite 存储 workspace、session、消息节点、事实事件、队列项、run 状态。
+- SQLite 存储 host、workspace、session、消息节点、事实事件、队列项、run 状态。workspace 的身份是 `(host, 规范化绝对路径)`。
 - 迁移随二进制内嵌，启动时自动应用。
 - 事件 id 由数据库自增序列产生；bootstrap 返回当前最大值；`after` 回放按 id 升序。
 - 流式正文按时间节流写入 run 的进度，默认间隔 100 毫秒，用 `DURABLE_PROGRESS_INTERVAL_MS` 配置；内容未变时不提交。进度写入不登记事实事件，不改 session 视图与 `updated_at`。定型、结束、恢复与取消各自在同一事务里写入消息并清空进度。见 `docs/adr/0047-stream-progress-persistence.md`。
@@ -191,7 +193,7 @@ stateDiagram-v2
 - 页面采用响应式布局，整体占据一个 viewport：`body` 不产生页面级滚动，侧栏列表与 transcript 各自内部滚动，队列与输入区始终可见。
 - 侧栏宽度用 `clamp` 随视口收缩；窄视口隐藏标题与状态等次要文字，仅保留主信息。
 - 短视口下输入区与队列降低内边距并限制高度，队列超出时内部滚动。
-- 单页应用，无路由；选中的 session id 写入 URL hash，刷新后恢复。
+- 单页应用，无路由；选中的 session id 写入 URL hash（`#/s/<session_id>`），刷新后恢复。host 由该 session 所属 workspace 推导。
 - 左侧栏：workspace 列表、session 列表、创建与重命名与删除、注册 workspace；显示当前模型名。
 - 右侧：当前 session 的 transcript、队列列表、输入框、取消按钮、SSE 连接状态、错误横幅。
 - transcript 由客户端根据消息树与 active leaf 计算；分支切换器显示在存在兄弟的节点上。
@@ -204,14 +206,14 @@ stateDiagram-v2
 ### 工程编排
 
 - `devenv.nix` 提供 Rust（stable + clippy + rustfmt）与 Node + npm，并提供构建 agent、构建 client、运行测试、生成类型、启动 Storybook 的命令入口。
-- Cargo workspace 包含 `agent` 与 `hub` 两个 crate；协议类型与 `ts-rs` 导出位于 agent。
+- Cargo workspace 包含 `core`（包名 `durable`）、`runtime`、`agent` 与 `executor`；协议类型与 `ts-rs` 导出位于 agent。
 - 前端使用 npm + Vite + React + TypeScript + Storybook + Chromatic + Vitest。
 - Storybook：每个纯展示组件与页面组合提供 stories，数据来自静态 fixture。
-- 生成物：前端固定目录下的 TS 协议类型；`hub` 内嵌的 client 构建产物。
+- 生成物：前端固定目录下的 TS 协议类型；`agent` 内嵌的 client 构建产物。
 
 ## 测试决策
 
-测试 seam 共五个：本文档定义 Seam 1、Seam 2 与 Seam 4，多节点规格定义 Seam 3，ADR 0046 定义 Seam 5（`Store` 内核）。所有 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`hub` 的合并协议与总线由多节点规格新增的 Seam 3 覆盖。
+测试 seam 共四个：本文档定义 Seam 1、Seam 2 与 Seam 4，ADR 0046 定义 Seam 5（`Store` 内核）。所有 seam 都位于公开边界；不使用 mock 替换被测代码。脚本化 provider 是运行在本地的真实 HTTP 服务，模拟外部模型供应商。`executor` 不新增 seam：它的每条路径都能经 `agent` 的 HTTP 与真实文件副作用触发，传输一律用本机子进程。SSH 传输与安装只有手工验证清单，见 ADR 0048。
 
 ### Seam 1：`agent` 的 HTTP API
 
@@ -219,7 +221,7 @@ stateDiagram-v2
 
 **防止**：协议契约漂移；agent 循环与工具调度回归；队列与并发调度错误；分支与 active leaf 状态错误；持久化与恢复错误；取消与失败语义错误；路径边界绕过。
 
-**漏掉**：真实供应商的行为差异与限流；真实模型输出质量；浏览器渲染与网络行为；多节点合并与广播（由 `docs/specs/multi-node-hub.md` 的 Seam 3 覆盖）。
+**漏掉**：真实供应商的行为差异与限流；真实模型输出质量；浏览器渲染与网络行为；SSH 传输与安装（手工验证）。
 
 **覆盖模块**：协议序列化、调度器、run 引擎、provider HTTP 客户端、工具执行器、消息树与事件存储、SQLite 迁移与恢复、bootstrap 与回放。
 
@@ -243,7 +245,7 @@ stateDiagram-v2
 
 **漏掉**：真实 SSE 传输与重连计时；浏览器渲染与视觉状态（由 Storybook 与 Chromatic 覆盖）。
 
-**覆盖模块**：事件归约、消息树到 transcript 的路径计算、队列与 run 状态映射、active leaf 切换、bootstrap 合并。多节点下 reducer 按节点分片调用，分片之间互不影响。
+**覆盖模块**：事件归约、消息树到 transcript 的路径计算、队列与 run 状态映射、active leaf 切换、bootstrap 合并。客户端只有一份状态与一个游标；host 表与 host 事实也在同一份状态里归约。
 
 不设置 provider trait 级契约 seam：provider 的 HTTP 客户端由 seam 1 经脚本化服务真实覆盖。
 
@@ -256,18 +258,18 @@ stateDiagram-v2
 
 ### Seam 4：浏览器端到端
 
-**形态**：Playwright 启动真实 `agent` 与 `hub` 进程，各自使用临时 SQLite 与临时 workspace，并指向脚本化 OpenAI 兼容 SSE 服务；Chromium 加载 `hub` 托管的客户端，用可访问名称驱动完整用户流程。用例位于 `client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。
+**形态**：Playwright 启动真实 `agent` 进程（它自带 `executor` 子进程），使用临时 SQLite 与临时 workspace，并指向脚本化 OpenAI 兼容 SSE 服务；Chromium 加载 `agent` 托管的客户端，用可访问名称驱动完整用户流程。用例位于 `client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。
 
-**防止**：浏览器渲染与事件流接线错误；断线重连与 `hub` 重启；客户端与真实协议之间的字段错位。决策见 `docs/adr/0025-browser-e2e.md`。
+**防止**：浏览器渲染与事件流接线错误；断线重连与 `agent` 重启；客户端与真实协议之间的字段错位。决策见 `docs/adr/0025-browser-e2e.md`。
 
-**漏掉**：真实供应商的行为差异；多节点拓扑；视觉回归。
+**漏掉**：真实供应商的行为差异；SSH 传输；视觉回归。
 
 **验收标准**：
 - 经界面注册 workspace、创建 session、提交消息后，回答流式出现并在刷新后保留。
 - 运行中提交的消息进入队列，可移除；取消运行中的 run 后部分回答保留且队列继续。
 - 工具调用渲染为可折叠卡片，入参与结果可见。
 - 编辑用户消息与重试 assistant 消息产生兄弟分支，切换分支改变 transcript。
-- `hub` 重启后连接状态显示重连中，随后自动回到已连接，新消息仍可执行。
+- `agent` 重启后连接状态显示重连中，随后自动回到已连接，新消息仍可执行。
 
 ### 渲染与视觉
 
@@ -298,7 +300,7 @@ stateDiagram-v2
 
 ### 安全与信任边界
 
-- 只绑定 `127.0.0.1`；单用户；无鉴权。任何能访问该端口的本机进程都能操作 workspace。跨机器访问的信任边界由用户自建隧道提供，见 `docs/specs/multi-node-hub.md`。
+- 只绑定 `127.0.0.1`；单用户；无鉴权。任何能访问该端口的本机进程都能操作 workspace。远端 host 的信任边界由 SSH 提供：`agent` 只以 ssh 目标身份执行 `executor`，不开放远端端口。见 ADR 0048。
 - 工具自动执行且 `bash` 无沙箱与网络限制。安全边界只有 workspace root containment 与用户对本机环境的信任。
 - agent 进程被强制杀死时，已启动的 bash 子进程可能残留；本规格只保证正常运行期与取消路径下杀掉进程组。
 - 模型输出视为不可信输入，但工具执行不对其做内容审查；路径约束是唯一强制限制。

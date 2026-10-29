@@ -30,10 +30,10 @@
 | [0024](0024-client-node-shards.md) | 客户端分片状态与广播游标 | 已取代。见 ADR 0048 | 客户端状态按节点分片，广播游标与分片水位分开，快照在分片内补尾部。 |
 | [0025](0025-browser-e2e.md) | 浏览器端到端测试 | 已接受 | 新增 Seam 4 浏览器端到端测试，用真实进程栈加 Playwright 驱动。 |
 | [0026](0026-logging-and-default-paths.md) | 日志与默认路径 | 已接受 | 数据库与日志目录均可省略，日志同时输出标准错误与按天轮转文件。 |
-| [0027](0027-upstream-subscription-starts-at-node-watermark.md) | 上游订阅起点取节点快照水位 | 已接受。细化 ADR 0021 | 上游订阅起点取该节点快照水位，不持久化上游游标。 |
-| [0028](0028-forwarding-timeouts-and-status-ownership.md) | 节点作用域转发的超时与状态归属 | 已接受。管理视图写入由 ADR 0041 细化 | 转发失败不改节点状态，超时按响应类型分档而不按路径判定。 |
-| [0029](0029-bootstrap-watermark-before-node-requests.md) | 合并 bootstrap 的广播水位在任何节点请求之前取 | 已接受。细化 ADR 0018 的水位定义与 ADR 0021 的合并 bootstrap | 合并 bootstrap 在任何节点请求前取广播水位，各节点请求并发发起。 |
-| [0030](0030-upstream-resync-is-reconnect-not-failure.md) | 上游 resync 只触发重连，不写节点状态 | 已接受。细化 ADR 0018 的 resync 语义与 ADR 0021 的节点状态机 | 上游 Resync 只结束订阅并按原游标重连，不写节点状态。 |
+| [0027](0027-upstream-subscription-starts-at-node-watermark.md) | 上游订阅起点取节点快照水位 | 已取代。见 ADR 0048 | 上游订阅起点取该节点快照水位，不持久化上游游标。 |
+| [0028](0028-forwarding-timeouts-and-status-ownership.md) | 节点作用域转发的超时与状态归属 | 已取代。见 ADR 0048 | 转发失败不改节点状态，超时按响应类型分档而不按路径判定。 |
+| [0029](0029-bootstrap-watermark-before-node-requests.md) | 合并 bootstrap 的广播水位在任何节点请求之前取 | 已取代。见 ADR 0048 | 合并 bootstrap 在任何节点请求前取广播水位，各节点请求并发发起。 |
+| [0030](0030-upstream-resync-is-reconnect-not-failure.md) | 上游 resync 只触发重连，不写节点状态 | 已取代。见 ADR 0048 | 上游 Resync 只结束订阅并按原游标重连，不写节点状态。 |
 | [0031](0031-provider-rate-limit-retry.md) | 供应商限流用独立失败类别并有限重试 | 已接受。细化 ADR 0014 的失败类别与 ADR 0018 的实时事件 | 新增 model_rate_limited 类别，在单次模型调用内有限重试，只发实时提示。 |
 | [0032](0032-strict-lint-gate.md) | 严格 lint 门禁 | 已接受 | durable-lint 统一跑十类检查，抑制须带理由且失效即报错。 |
 | [0033](0033-gate-second-layer-and-navigation.md) | 门禁第二层：规模、依赖、PR 自锁与仓库导航 | 已接受 | 门禁进版本库并分快慢两 lane，加规模与依赖预算、PR 自锁提醒和文档一致性检查。 |
@@ -43,8 +43,8 @@
 | [0037](0037-crash-recovery.md) | 崩溃恢复的续跑点从树推导 | 已接受。取代 ADR 0014 的节流落库部分输出；「assistant 消息只在定型时入树」由 ADR 0047 取代 | tool 节点先入树再执行，续跑点由树尾推导，非幂等工具崩后结局记为未知。 |
 | [0038](0038-skeleton-events.md) | 事件与快照只带骨架，正文按需拉取 | 已接受。取代 ADR 0019 的 `tool_call_recorded` | 事实事件与快照只带节点骨架，正文按消息 id 批量拉取并缓存，进行中的内容挂在未来定型的消息 id 上。 |
 | [0039](0039-steer-at-step-boundary.md) | 插话在步骤边界接入当前 run | 已接受 | `mode=steer` 的插话在提交时入树，在模型请求与收尾前的步骤边界接入同一个 run；工具不打断；run 结束未消费则降级为排队。 |
-| [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已接受 | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |
-| [0041](0041-node-table-commands-write-node-view.md) | 节点表命令可以写节点视图 | 已接受。细化 ADR 0028 的状态归属 | 探测结果只由 watcher 写，停用与等待连接的管理状态由节点表命令写，共用同一条 node_status_changed。 |
+| [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已取代。见 ADR 0048（客户端改为单游标、单状态） | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |
+| [0041](0041-node-table-commands-write-node-view.md) | 节点表命令可以写节点视图 | 已取代。见 ADR 0048 | 探测结果只由 watcher 写，停用与等待连接的管理状态由节点表命令写，共用同一条 node_status_changed。 |
 | [0042](0042-fact-envelope-carries-session-view.md) | 事实信封携带 session 视图 | 已接受。取代 ADR 0013 的队列长度递减约定，细化 ADR 0012 的单一写入线 | 事实载荷只留身份，session 视图由命令入口推导并落在事件信封上，`event` 表新增 `session` 列，协议版本升到 5。 |
 | [0043](0043-store-error-classification.md) | 错误分类归内核 | 已接受。细化 ADR 0014 的失败类别、ADR 0028 的状态码选型与 ADR 0031 的类别约定 | `StoreError` 给出无载荷的分类与结局类别，状态码只由结局类别决定，两个 seam 穷尽映射协议码并把节点码统一为 `node_not_found`；新增 `storage_failed` 失败类别，协议版本升到 6。 |
 | [0044](0044-client-derived-view.md) | 客户端派生视图层 | 已接受。细化 ADR 0017 的「组件只接收派生后的 props」与 ADR 0024 的分片形状 | 新增纯函数派生层 `view/derived.ts`，摘要全算、完整视图按需算，按分片对象缓存；它是分片表的唯一常规读取者，组件只收 `SessionView`；`SessionTreeState` 由 `SessionTreeSnapshot` 派生；选中位置只由 URL 哈希持有。 |
