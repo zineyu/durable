@@ -44,7 +44,7 @@ export type Commands = {
   cancelEditing: () => void;
   changeDraft: (text: string, pastes: Record<string, string>) => void;
   changeMode: (mode: SubmitMode) => void;
-  createSession: (workspace: WorkspacePath) => void;
+  createSession: (host: string, workspace: WorkspacePath) => void;
   renameSession: (id: SessionId, title: string) => void;
   deleteSession: (id: SessionId) => void;
   send: (text: string) => void;
@@ -100,13 +100,13 @@ export function useCommands({
   }, []);
 
   const createSession = useCallback(
-    (workspace: WorkspacePath) => {
+    (host: string, workspace: WorkspacePath) => {
       if (selectedNode === null) {
         return;
       }
       const node = selectedNode;
       void (async () => {
-        const outcome = await api.createSession(node, workspace, null);
+        const outcome = await api.createSession(node, host, workspace, null);
         if (!outcome.ok) {
           report(outcome.error);
           return;
@@ -261,10 +261,10 @@ export function useCommands({
           outcome = await api.retryAssistantMessage(node, current.sessionId, current.messageId);
           break;
         case 'register-workspace':
-          outcome = await api.registerWorkspace(node, current.path);
+          outcome = await api.registerWorkspace(node, current.host, current.path);
           break;
         case 'remove-workspace':
-          outcome = await api.removeWorkspace(node, current.path);
+          outcome = await api.removeWorkspace(node, current.host, current.path);
           break;
         default: {
           const unhandled: never = current;

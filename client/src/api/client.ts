@@ -100,20 +100,25 @@ export const api = {
   sessionTree(node: NodeName, id: string): Promise<ApiResult<SessionTreeSnapshot>> {
     return request('GET', `${sessionPath(node, id)}/tree`);
   },
-  registerWorkspace(node: NodeName, path: string): Promise<ApiResult<WorkspaceMetadata>> {
-    const body: RegisterWorkspaceRequest = { path };
+  registerWorkspace(
+    node: NodeName,
+    host: string,
+    path: string,
+  ): Promise<ApiResult<WorkspaceMetadata>> {
+    const body: RegisterWorkspaceRequest = { host, path };
     return request('POST', nodePath(node, 'workspaces'), body);
   },
-  removeWorkspace(node: NodeName, path: string): Promise<ApiResult<void>> {
-    const body: RemoveWorkspaceRequest = { path };
+  removeWorkspace(node: NodeName, host: string, path: string): Promise<ApiResult<void>> {
+    const body: RemoveWorkspaceRequest = { host, path };
     return request('POST', nodePath(node, 'workspaces/remove'), body);
   },
   createSession(
     node: NodeName,
+    host: string,
     workspace: string,
     title: string | null,
   ): Promise<ApiResult<SessionMetadata>> {
-    const body: CreateSessionRequest = { workspace, title };
+    const body: CreateSessionRequest = { host, workspace, title };
     return request('POST', nodePath(node, 'sessions'), body);
   },
   renameSession(node: NodeName, id: string, title: string): Promise<ApiResult<SessionMetadata>> {

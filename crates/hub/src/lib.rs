@@ -14,7 +14,8 @@ use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, delete, get, post};
 use axum::{Json, Router};
-use durable::{NodeMetadata, NodeName, Store};
+
+use crate::node::{NodeMetadata, NodeName, NodeTable};
 use futures_util::future::join_all;
 use futures_util::{Stream, StreamExt, TryStreamExt};
 use rust_embed::Embed;
@@ -22,6 +23,7 @@ use ts_rs::TS;
 
 mod bus;
 mod error;
+mod node;
 mod node_probe;
 mod nodes;
 mod protocol;
@@ -29,6 +31,7 @@ mod sse;
 
 pub use bus::{Bus, NodeView};
 pub use error::ApiError;
+pub use node::{NodeNameError, NodeTableError, NodeUpdate};
 pub use protocol::{
     HUB_PROTOCOL_VERSION, HubBootstrap, HubErrorCode, HubErrorResponse, HubHealth, HubStatus,
     HubStreamEvent, NodeMetrics, NodeSnapshot, NodeStatus, REQUIRED_AGENT_PROTOCOL_VERSION,
@@ -84,7 +87,8 @@ impl Default for HubOptions {
 
 #[derive(Clone)]
 pub struct HubState {
-    pub store: Arc<Store>,
+    /// 节点表。hub 只写它，其余领域状态在 agent 里。
+    pub nodes: Arc<NodeTable>,
     pub bus: Arc<Bus>,
     client: reqwest::Client,
     options: HubOptions,
@@ -97,20 +101,23 @@ impl HubState {
     /// # Errors
     ///
     /// - [`std::io::Error`]：HTTP client 无法建立、节点表读取失败，或 watcher 表的状态锁已被毒化。
-    pub async fn start(store: Arc<Store>, options: HubOptions) -> std::io::Result<Self> {
+    pub async fn start(database: &Path, options: HubOptions) -> std::io::Result<Self> {
         let bus = Arc::new(Bus::new(options.broadcast_capacity, options.replay_window));
         let client = reqwest::Client::builder()
             .connect_timeout(options.connect_timeout)
             .build()
             .map_err(std::io::Error::other)?;
+        let nodes = NodeTable::open(database)
+            .await
+            .map_err(std::io::Error::other)?;
         let state = Self {
-            store,
+            nodes: Arc::new(nodes),
             bus,
             client,
             options,
             watchers: Arc::new(Mutex::new(HashMap::new())),
         };
-        let nodes = match state.store.nodes().await {
+        let nodes = match state.nodes.nodes().await {
             Ok(nodes) => nodes,
             Err(error) => {
                 return Err(std::io::Error::other(error.to_string()));
@@ -221,13 +228,28 @@ pub fn router(state: HubState) -> Router {
         .with_state(state)
 }
 
+/// 建立或升级 hub 的数据库文件，返回后即可对外声明就绪。
+///
+/// # Errors
+///
+/// - [`std::io::Error`]：连接或建表失败。
+pub async fn ensure_database(database: &Path) -> std::io::Result<()> {
+    if let Some(parent) = database.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    NodeTable::open(database)
+        .await
+        .map(|_| ())
+        .map_err(std::io::Error::other)
+}
+
 /// 用默认参数启动 hub 并开始监听。
 ///
 /// # Errors
 ///
 /// - [`std::io::Error`]：状态初始化失败，或监听或服务过程出错。
-pub async fn serve(listener: tokio::net::TcpListener, store: Arc<Store>) -> std::io::Result<()> {
-    serve_with(listener, store, HubOptions::default()).await
+pub async fn serve(listener: tokio::net::TcpListener, database: &Path) -> std::io::Result<()> {
+    serve_with(listener, database, HubOptions::default()).await
 }
 
 /// 用给定参数启动 hub 并开始监听。
@@ -237,10 +259,10 @@ pub async fn serve(listener: tokio::net::TcpListener, store: Arc<Store>) -> std:
 /// - [`std::io::Error`]：状态初始化失败，或监听或服务过程出错。
 pub async fn serve_with(
     listener: tokio::net::TcpListener,
-    store: Arc<Store>,
+    database: &Path,
     options: HubOptions,
 ) -> std::io::Result<()> {
-    let state = HubState::start(store, options).await?;
+    let state = HubState::start(database, options).await?;
     axum::serve(listener, router(state)).await
 }
 
@@ -277,7 +299,7 @@ async fn health() -> Json<HubHealth> {
 
 async fn bootstrap(State(state): State<HubState>) -> Result<Json<HubBootstrap>, ApiError> {
     let max_hub_seq = state.bus.max_seq()?;
-    let nodes = state.store.nodes().await?;
+    let nodes = state.nodes.nodes().await?;
     let snapshots = join_all(
         nodes
             .into_iter()

@@ -22,7 +22,7 @@ async fn streams_node_events_without_buffering() {
     let path = laptop.directory.path().to_str().expect("临时路径是 UTF-8");
     reqwest::Client::new()
         .post(harness.url("/api/n/laptop/workspaces"))
-        .json(&serde_json::json!({ "path": path }))
+        .json(&serde_json::json!({ "host": "local", "path": path }))
         .send()
         .await
         .expect("注册 workspace 以产生事实事件");

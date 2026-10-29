@@ -12,7 +12,7 @@ async fn creates_missing_database_directory() {
 
     let store = Store::open(&path).await.expect("打开嵌套路径的数据库");
     assert!(path.exists(), "数据库文件应被建立");
-    assert_eq!(store.nodes().await.expect("读取节点表").len(), 0);
+    assert_eq!(store.hosts().await.expect("读取 host 表").len(), 0);
 
     drop(store);
     Store::open(&path).await.expect("再次打开已存在的数据库");

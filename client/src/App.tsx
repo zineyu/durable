@@ -160,7 +160,7 @@ export function App(): ReactElement {
           setDialog({ kind: 'register-node', name: '', url: '' });
           return;
         case 'register-workspace':
-          setDialog({ kind: 'register-workspace', path: '' });
+          setDialog({ kind: 'register-workspace', host: 'local', path: '' });
           return;
         case 'cancel-run':
           runCommand(api.cancelRun(entry.action.node, entry.action.sessionId));
@@ -301,8 +301,8 @@ export function App(): ReactElement {
             onDeleteConfirm={commands.deleteSession}
             onEditCancel={commands.cancelEditing}
             onCreateSession={commands.createSession}
-            onAddWorkspace={() => { commands.setDialog({ kind: 'register-workspace', path: '' }); }}
-            onRemoveWorkspace={(path) => { commands.setDialog({ kind: 'remove-workspace', path }); }}
+            onAddWorkspace={() => { commands.setDialog({ kind: 'register-workspace', host: 'local', path: '' }); }}
+            onRemoveWorkspace={(host, path) => { commands.setDialog({ kind: 'remove-workspace', host, path }); }}
           />
         }
       >
@@ -341,7 +341,7 @@ export function App(): ReactElement {
               commands.setDialog({ kind: 'retry', sessionId: view.session.id, messageId });
             }
           }}
-          onRegisterWorkspace={() => { commands.setDialog({ kind: 'register-workspace', path: '' }); }}
+          onRegisterWorkspace={() => { commands.setDialog({ kind: 'register-workspace', host: 'local', path: '' }); }}
         />
       </AppShell>
       {commands.dialog !== null ? (

@@ -18,6 +18,7 @@ const durable = workspaces[0];
 
 export const Open: Story = {
   args: {
+    host: 'studio',
     path: toWorkspacePath('/Users/zine/space/project/durable'),
     sessionCount: 3,
     children: (
@@ -32,6 +33,7 @@ export const Open: Story = {
 
 export const Empty: Story = {
   args: {
+    host: 'studio',
     path: toWorkspacePath('/Users/zine/space/project/empty-lab'),
     sessionCount: 0,
     children: <p>暂无 session</p>,
@@ -40,6 +42,7 @@ export const Empty: Story = {
 
 export const Collapsed: Story = {
   args: {
+    host: 'studio',
     path: toWorkspacePath('/Users/zine/space/project/agent-lab'),
     sessionCount: 1,
     defaultOpen: false,
@@ -49,6 +52,7 @@ export const Collapsed: Story = {
 
 export const LongPath: Story = {
   args: {
+    host: 'studio',
     path: toWorkspacePath('/Users/zine/space/project/clients/acme/platform/services/edge-gateway'),
     sessionCount: 2,
     children: null,

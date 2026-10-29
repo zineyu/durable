@@ -5,7 +5,11 @@
 ## BootstrapResponse
 
 ```ts
-export type BootstrapResponse = { model: string, maxEventId: number, workspaces: Array<WorkspaceMetadata>, sessions: Array<SessionMetadata>, };
+export type BootstrapResponse = { model: string, maxEventId: number, 
+/**
+ * host 表与每个 host 的运行状态。状态是进程状态，不落库。
+ */
+hosts: Array<HostSnapshot>, workspaces: Array<WorkspaceMetadata>, sessions: Array<SessionMetadata>, };
 ```
 
 ## ContentKind
@@ -29,7 +33,11 @@ export type ContentPart = { "kind": "text", text: string, providerMeta: Provider
 ## CreateSessionRequest
 
 ```ts
-export type CreateSessionRequest = { workspace: string, title: string | null, };
+export type CreateSessionRequest = { 
+/**
+ * session 继承 workspace 的 host：创建时必须写明是哪台 host 上的哪个目录。
+ */
+host: HostName, workspace: string, title: string | null, };
 ```
 
 ## DeltaKind
@@ -50,7 +58,7 @@ export type EditMessageRequest = { text: string, };
 ## ErrorCode
 
 ```ts
-export type ErrorCode = "workspace_path_invalid" | "workspace_duplicate" | "workspace_not_found" | "workspace_not_empty" | "session_not_found" | "queue_item_not_found" | "message_not_found" | "message_role_mismatch" | "run_in_progress" | "queue_not_empty" | "node_name_taken" | "node_not_found" | "invalid_title" | "invalid_message" | "invalid_request" | "internal";
+export type ErrorCode = "workspace_path_invalid" | "workspace_duplicate" | "workspace_not_found" | "workspace_not_empty" | "session_not_found" | "queue_item_not_found" | "message_not_found" | "message_role_mismatch" | "run_in_progress" | "queue_not_empty" | "host_not_found" | "host_name_taken" | "host_name_invalid" | "host_invalid_target" | "host_unavailable" | "host_in_use" | "invalid_title" | "invalid_message" | "invalid_request" | "internal";
 ```
 
 ## ErrorResponse
@@ -68,7 +76,7 @@ export type ErrorResponse = { code: ErrorCode, message: string, };
  * 载荷只带事实身份与事实本体；事实提交后的 session 视图在事件信封上（见
  * [`CommittedEvent`]），不在载荷里。同一变体因此不因元数据变化而改变。
  */
-export type FactEvent = { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", path: WorkspacePath, } | { "kind": "session_created", sessionId: SessionId, } | { "kind": "session_renamed", sessionId: SessionId, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "message_updated", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "active_leaf_changed", sessionId: SessionId, activeLeaf: number | null, } | { "kind": "message_queued", sessionId: SessionId, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", sessionId: SessionId, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", sessionId: SessionId, item: QueueItem, } | { "kind": "run_started", sessionId: SessionId, run: RunRecord, } | { "kind": "run_finished", sessionId: SessionId, run: RunRecord, };
+export type FactEvent = { "kind": "host_registered", host: HostMetadata, } | { "kind": "host_removed", host: HostName, } | { "kind": "host_updated", host: HostMetadata, } | { "kind": "host_status_changed", host: HostName, status: HostStatus, detail: string | null, } | { "kind": "workspace_registered", workspace: WorkspaceMetadata, } | { "kind": "workspace_removed", host: HostName, path: WorkspacePath, } | { "kind": "session_created", sessionId: SessionId, } | { "kind": "session_renamed", sessionId: SessionId, } | { "kind": "session_deleted", sessionId: SessionId, } | { "kind": "message_appended", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "message_updated", sessionId: SessionId, message: MessageSkeleton, } | { "kind": "active_leaf_changed", sessionId: SessionId, activeLeaf: number | null, } | { "kind": "message_queued", sessionId: SessionId, item: QueueItem, } | { "kind": "queue_item_removed", sessionId: SessionId, itemId: number, } | { "kind": "steer_applied", sessionId: SessionId, runId: number, itemId: number, messageId: number, } | { "kind": "steer_downgraded", sessionId: SessionId, item: QueueItem, } | { "kind": "run_started", sessionId: SessionId, run: RunRecord, } | { "kind": "run_finished", sessionId: SessionId, run: RunRecord, };
 ```
 
 ## HealthResponse
@@ -81,6 +89,71 @@ export type HealthResponse = { status: HealthStatus, version: string, protocolVe
 
 ```ts
 export type HealthStatus = "ok";
+```
+
+## HostKind
+
+```ts
+/**
+ * host 的传输种类。本机 host 直接拉起子进程，ssh host 经 `ssh` 子进程。
+ */
+export type HostKind = "local" | "ssh";
+```
+
+## HostMetadata
+
+```ts
+/**
+ * host 表中的一行。`target` 只有 `ssh` 种类才有。
+ */
+export type HostMetadata = { name: HostName, kind: HostKind, 
+/**
+ * SSH 目标字符串，交给 `~/.ssh/config` 与 ssh-agent 解析。
+ */
+target: string | null, 
+/**
+ * 停用的 host 不再重连，命令一律返回不可用。
+ */
+enabled: boolean, createdAt: number, updatedAt: number, };
+```
+
+## HostName
+
+```ts
+/**
+ * host 名。名称即身份，也是 URL 路径段，因此限制为路径安全字符。
+ */
+export type HostName = string;
+```
+
+## HostSnapshot
+
+```ts
+/**
+ * 侧栏看到的单个 host：落库的元数据加上进程内的运行状态。
+ */
+export type HostSnapshot = { name: HostName, kind: HostKind, target: string | null, 
+/**
+ * 停用的 host 不再重连，命令一律返回不可用。
+ */
+enabled: boolean, status: HostStatus, 
+/**
+ * 状态的具体说明；`ok` 时为 `None`。
+ */
+detail: string | null, 
+/**
+ * 最近一次心跳的往返毫秒数。还没收到过应答时为 `None`。不落库。
+ */
+latencyMs: number | null, };
+```
+
+## HostStatus
+
+```ts
+/**
+ * host 的运行状态。它是进程状态，只经事实事件与 bootstrap 传递，不落库。
+ */
+export type HostStatus = "ok" | "unreachable" | "incompatible";
 ```
 
 ## HubBootstrap
@@ -293,6 +366,15 @@ export type ProviderMeta = unknown;
 export type QueueItem = { id: number, text: MessageText, anchor: number | null, createdAt: number, pendingSteer: boolean, };
 ```
 
+## RegisterHostRequest
+
+```ts
+/**
+ * 注册 host。`kind` 为 `ssh` 时 `target` 必填。
+ */
+export type RegisterHostRequest = { name: string, kind: HostKind, target: string | null, };
+```
+
 ## RegisterNodeRequest
 
 ```ts
@@ -302,13 +384,21 @@ export type RegisterNodeRequest = { name: string, url: string, };
 ## RegisterWorkspaceRequest
 
 ```ts
-export type RegisterWorkspaceRequest = { path: string, };
+export type RegisterWorkspaceRequest = { 
+/**
+ * workspace 所属的 host。路径校验在这台 host 上完成。
+ */
+host: HostName, path: string, };
 ```
 
 ## RemoveWorkspaceRequest
 
 ```ts
-export type RemoveWorkspaceRequest = { path: string, };
+export type RemoveWorkspaceRequest = { 
+/**
+ * workspace 身份是 host 与路径这一对。
+ */
+host: HostName, path: string, };
 ```
 
 ## RenameSessionRequest
@@ -381,7 +471,11 @@ export type SessionId = string;
 /**
  * 对外暴露的 session 元数据。
  */
-export type SessionMetadata = { id: SessionId, workspace: WorkspacePath, title: SessionTitle, busy: boolean, queueLength: number, updatedAt: number, };
+export type SessionMetadata = { id: SessionId, 
+/**
+ * session 所属 workspace 的 host。工具调用固定走它的 link。
+ */
+host: HostName, workspace: WorkspacePath, title: SessionTitle, busy: boolean, queueLength: number, updatedAt: number, };
 ```
 
 ## SessionTitle
@@ -492,6 +586,15 @@ export type ToolOutcome = { "status": "succeeded", content: string, } | { "statu
 export type ToolResultState = { "status": "running" } | { "status": "finished", outcome: ToolOutcome, } | { "status": "unknown" };
 ```
 
+## UpdateHostRequest
+
+```ts
+/**
+ * 局部更新 host。`None` 表示保留原值；`name` 是改名后的 host 名。
+ */
+export type UpdateHostRequest = { name: string | null, target: string | null, enabled: boolean | null, };
+```
+
 ## UpdateNodeRequest
 
 ```ts
@@ -513,7 +616,11 @@ enabled: boolean | null, };
 ## WorkspaceMetadata
 
 ```ts
-export type WorkspaceMetadata = { path: WorkspacePath, registeredAt: number, };
+export type WorkspaceMetadata = { 
+/**
+ * workspace 所属的 host。工具调用固定走它的 link。
+ */
+host: HostName, path: WorkspacePath, registeredAt: number, };
 ```
 
 ## WorkspacePath

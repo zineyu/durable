@@ -9,19 +9,33 @@
 )]
 
 use durable::{
-    FactEvent, MessageText, QueueItem, SessionId, SessionTitle, SessionTreeSnapshot, Store,
-    SubmitMode, WorkspacePath,
+    FactEvent, HostKind, HostName, MessageText, QueueItem, SessionId, SessionTitle,
+    SessionTreeSnapshot, Store, SubmitMode, WorkspacePath,
 };
 use tempfile::TempDir;
 
-/// 打开临时库并注册 `/work`。
+/// `local` host 的名字。夹具里的 workspace 都登记在它名下。
+pub(crate) fn local_host() -> HostName {
+    HostName::parse("local").expect("合法 host 名")
+}
+
+/// 夹具里的 workspace 路径。
+pub(crate) fn work_path() -> WorkspacePath {
+    WorkspacePath::parse("/work").expect("合法 workspace 路径")
+}
+
+/// 打开临时库，注册 `local` host 与它名下的 `/work`。
 pub(crate) async fn open_store() -> (TempDir, Store) {
     let directory = tempfile::tempdir().expect("创建临时目录");
     let store = Store::open(&directory.path().join("store.sqlite"))
         .await
         .expect("打开数据库");
     store
-        .register_workspace(&WorkspacePath::parse("/work").expect("合法 workspace 路径"))
+        .register_host(local_host(), HostKind::Local, None)
+        .await
+        .expect("注册 host");
+    store
+        .register_workspace(&local_host(), &work_path())
         .await
         .expect("注册 workspace");
     (directory, store)
@@ -37,10 +51,7 @@ pub(crate) async fn store_with_session() -> (TempDir, Store, SessionId) {
 /// 在 `/work` 下新建一个标题为「初始标题」的 session。
 pub(crate) async fn add_session(store: &Store) -> SessionId {
     store
-        .create_session(
-            &WorkspacePath::parse("/work").expect("合法 workspace 路径"),
-            title("初始标题"),
-        )
+        .create_session(&local_host(), &work_path(), title("初始标题"))
         .await
         .expect("创建 session")
         .id

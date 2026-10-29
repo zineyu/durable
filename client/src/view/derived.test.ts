@@ -24,8 +24,8 @@ import type { NodeRecord, SessionView, TranscriptEntry } from './types';
 
 /// 派生层用例直接构造分片，不经过 reducer。
 
-const workspaceA: WorkspaceMetadata = { path: '/work/a', registeredAt: 10 };
-const workspaceB: WorkspaceMetadata = { path: '/work/b', registeredAt: 20 };
+const workspaceA: WorkspaceMetadata = { host: 'local', path: '/work/a', registeredAt: 10 };
+const workspaceB: WorkspaceMetadata = { host: 'local', path: '/work/b', registeredAt: 20 };
 
 const nodeA: NodeRecord = {
   name: 'macbook-air-01',
@@ -50,6 +50,7 @@ function session(
 ): SessionMetadata {
   return {
     id,
+    host: 'local',
     workspace,
     title: `标题 ${id}`,
     busy: false,

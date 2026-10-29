@@ -40,15 +40,13 @@ impl Harness {
     }
 
     pub(crate) async fn start_options(directory: TempDir, options: hub::HubOptions) -> Self {
-        let store = durable::Store::open(&database_path(&directory))
-            .await
-            .expect("打开 hub 数据库");
+        let database = database_path(&directory);
         let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
             .await
             .expect("绑定 hub 端口");
         let address = listener.local_addr().expect("读取 hub 地址");
         let task = tokio::spawn(async move {
-            hub::serve_with(listener, Arc::new(store), options)
+            hub::serve_with(listener, &database, options)
                 .await
                 .expect("hub 服务运行");
         });
@@ -172,6 +170,16 @@ impl Harness {
     }
 }
 
+/// 与 hub 测试二进制同目录的 executor 二进制：本机 host 的传输是本地子进程。
+fn executor_binary() -> PathBuf {
+    std::env::current_exe()
+        .expect("测试二进制有路径")
+        .parent()
+        .and_then(|deps| deps.parent())
+        .expect("测试二进制有父目录")
+        .join("executor")
+}
+
 fn database_path(directory: &TempDir) -> PathBuf {
     directory.path().join("hub.sqlite")
 }
@@ -185,20 +193,31 @@ pub(crate) struct AgentHandle {
 impl AgentHandle {
     pub(crate) async fn start() -> Self {
         let directory = tempfile::tempdir().expect("创建临时目录");
-        let store = agent::Store::open(&directory.path().join("agent.sqlite"))
-            .await
-            .expect("打开 agent 数据库");
+        let store = Arc::new(
+            agent::Store::open(&directory.path().join("agent.sqlite"))
+                .await
+                .expect("打开 agent 数据库"),
+        );
+        let hosts = agent::HostRegistry::start(
+            Arc::clone(&store),
+            executor_binary(),
+            agent::ToolLimits::default(),
+        )
+        .await
+        .expect("启动 host registry");
         let model = agent::ModelConfig {
             base_url: "http://127.0.0.1:9/v1".to_owned(),
             api_key: "test-key".to_owned(),
             model_name: "test-model".to_owned(),
         };
         let provider = Arc::new(agent::OpenAiProvider::new(&model));
+        let tools = Arc::new(agent::RemoteTools::new(Arc::clone(&hosts)));
         let state = agent::AgentState::start(
             store,
+            hosts,
             "test-model".to_owned(),
             provider,
-            Arc::new(agent::NoTools),
+            tools,
             agent::EngineConfig::default(),
         )
         .await
@@ -220,7 +239,7 @@ impl AgentHandle {
     pub(crate) async fn register_workspace(&self, path: &str) -> reqwest::Response {
         reqwest::Client::new()
             .post(format!("{}/api/workspaces", self.url))
-            .json(&serde_json::json!({ "path": path }))
+            .json(&serde_json::json!({ "host": "local", "path": path }))
             .send()
             .await
             .expect("请求注册 workspace")

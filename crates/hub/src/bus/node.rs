@@ -1,7 +1,7 @@
 //! 节点条目：一个节点的视图、进程内计数与视图纪元，以及它们的写入规则。
 //! 节点表变更与状态变化的广播也在此。上游探测如何决定状态在 `watch`，广播序号与回放窗口在 `window`。
 
-use durable::{NodeMetadata, NodeName};
+use crate::node::{NodeMetadata, NodeName};
 
 use super::Bus;
 use crate::ApiError;

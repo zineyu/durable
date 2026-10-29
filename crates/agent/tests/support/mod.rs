@@ -22,6 +22,12 @@ use reqwest::{Response, StatusCode};
 use tempfile::TempDir;
 
 pub(crate) mod db;
+mod event_stream;
+mod hosts;
+mod test_agent;
+
+pub(crate) use event_stream::{EventStream, error_code, error_envelope};
+pub(crate) use test_agent::TestAgent;
 pub(crate) mod process;
 pub(crate) mod provider;
 
@@ -104,47 +110,6 @@ pub(crate) async fn read_address(child: &mut tokio::process::Child) -> String {
         .to_owned()
 }
 
-/// 进程内的 agent 实例，监听随机回环端口。
-pub(crate) struct TestAgent {
-    base_url: String,
-    handle: tokio::task::JoinHandle<()>,
-}
-
-impl TestAgent {
-    pub(crate) async fn start(
-        database: &Path,
-        model: &str,
-        provider: Arc<dyn agent::ModelProvider>,
-        tools: Arc<dyn agent::ToolBox>,
-        config: agent::EngineConfig,
-    ) -> TestAgent {
-        let store = agent::Store::open(database).await.expect("打开 SQLite");
-        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, 0)))
-            .await
-            .expect("绑定回环端口");
-        let address = listener.local_addr().expect("读取本地地址");
-        let state = agent::AgentState::start(store, model.to_owned(), provider, tools, config)
-            .await
-            .expect("启动 agent 状态");
-        let handle = tokio::spawn(async move {
-            agent::serve(listener, state).await.expect("agent 服务运行");
-        });
-        TestAgent {
-            base_url: format!("http://{address}"),
-            handle,
-        }
-    }
-
-    pub(crate) fn url(&self, path: &str) -> String {
-        format!("{}{}", self.base_url, path)
-    }
-
-    pub(crate) async fn shutdown(self) {
-        self.handle.abort();
-        let _ = self.handle.await;
-    }
-}
-
 /// 临时目录中的 agent、脚本化 provider 与可复用的 HTTP 客户端。
 pub(crate) struct Harness {
     pub directory: TempDir,
@@ -152,7 +117,9 @@ pub(crate) struct Harness {
     pub provider: ScriptedProvider,
     pub config: agent::EngineConfig,
     pub limits: agent::ToolLimits,
-    executor_pid: u32,
+    executor: PathBuf,
+    heartbeat: Duration,
+    executor_pid: Option<u32>,
     agent: TestAgent,
     pub client: reqwest::Client,
 }
@@ -171,10 +138,39 @@ impl Harness {
         scripts: Vec<Script>,
         limits: agent::ToolLimits,
     ) -> Harness {
+        Harness::start_configured(options::Options {
+            config,
+            scripts,
+            limits,
+            ..options::Options::default()
+        })
+        .await
+    }
+
+    /// 用给定的 executor 路径与心跳间隔启动：host 生命周期用例据此注入替身与快心跳。
+    pub(crate) async fn start_with_executor(executor: PathBuf, heartbeat: Duration) -> Harness {
+        Harness::start_configured(options::Options {
+            executor,
+            heartbeat,
+            ..options::Options::default()
+        })
+        .await
+    }
+
+    async fn start_configured(options: options::Options) -> Harness {
         let directory = tempfile::tempdir().expect("创建临时目录");
         let database = directory.path().join("agent.sqlite");
-        let provider = ScriptedProvider::start(scripts).await;
-        Harness::open(directory, database, provider, config, limits).await
+        let provider = ScriptedProvider::start(options.scripts).await;
+        Harness::open(
+            directory,
+            database,
+            provider,
+            options.config,
+            options.limits,
+            options.executor,
+            options.heartbeat,
+        )
+        .await
     }
 
     async fn open(
@@ -183,6 +179,8 @@ impl Harness {
         provider: ScriptedProvider,
         config: agent::EngineConfig,
         limits: agent::ToolLimits,
+        executor: PathBuf,
+        heartbeat: Duration,
     ) -> Harness {
         let model = agent::ModelConfig {
             base_url: provider.base_url(),
@@ -190,17 +188,25 @@ impl Harness {
             model_name: "test-model".to_owned(),
         };
         let runtime = Arc::new(agent::OpenAiProvider::new(&model));
-        let link = agent::LinkHandle::spawn_local(&process::executor_binary(), limits)
-            .expect("启动 executor 子进程");
-        let executor_pid = link.pid().expect("executor 子进程有 pid");
-        let tools = Arc::new(agent::RemoteTools::new(link));
-        let agent = TestAgent::start(&database, "test-model", runtime, tools, config).await;
+        let (agent, hosts) = TestAgent::start(
+            &database,
+            &executor,
+            limits,
+            heartbeat,
+            "test-model",
+            runtime,
+            config,
+        )
+        .await;
+        let executor_pid = local_executor_pid(&hosts).await;
         Harness {
             directory,
             database,
             provider,
             config,
             limits,
+            executor,
+            heartbeat,
             executor_pid,
             agent,
             client: reqwest::Client::new(),
@@ -214,11 +220,16 @@ impl Harness {
             provider,
             config,
             limits,
+            executor,
+            heartbeat,
             agent,
             ..
         } = self;
         agent.shutdown().await;
-        Harness::open(directory, database, provider, config, limits).await
+        Harness::open(
+            directory, database, provider, config, limits, executor, heartbeat,
+        )
+        .await
     }
 
     pub(crate) fn url(&self, path: &str) -> String {
@@ -228,6 +239,7 @@ impl Harness {
     /// 本 harness 的 executor 子进程 pid：断链用例直接杀掉它。
     pub(crate) fn executor_pid(&self) -> u32 {
         self.executor_pid
+            .expect("本 harness 的 local host 启动过 executor 子进程")
     }
 
     pub(crate) fn workspace_path(&self, name: &str) -> PathBuf {
@@ -238,24 +250,6 @@ impl Harness {
         let path = self.workspace_path(name);
         std::fs::create_dir(&path).expect("创建 workspace 目录");
         path
-    }
-
-    pub(crate) async fn register(&self, path: &str) -> Response {
-        self.client
-            .post(self.url("/api/workspaces"))
-            .json(&serde_json::json!({ "path": path }))
-            .send()
-            .await
-            .expect("注册 workspace")
-    }
-
-    pub(crate) async fn remove(&self, path: &str) -> Response {
-        self.client
-            .post(self.url("/api/workspaces/remove"))
-            .json(&serde_json::json!({ "path": path }))
-            .send()
-            .await
-            .expect("移除 workspace")
     }
 
     pub(crate) async fn bootstrap(&self) -> agent::BootstrapResponse {
@@ -282,9 +276,19 @@ impl Harness {
         workspace: &str,
         title: Option<&str>,
     ) -> Response {
+        self.create_session_on("local", workspace, title).await
+    }
+
+    /// 在指定 host 上创建 session。
+    pub(crate) async fn create_session_on(
+        &self,
+        host: &str,
+        workspace: &str,
+        title: Option<&str>,
+    ) -> Response {
         self.client
             .post(self.url("/api/sessions"))
-            .json(&serde_json::json!({ "workspace": workspace, "title": title }))
+            .json(&serde_json::json!({ "host": host, "workspace": workspace, "title": title }))
             .send()
             .await
             .expect("创建 session")
@@ -558,37 +562,36 @@ impl Harness {
     }
 }
 
-/// 已订阅的事件流，按 SSE `data:` 行产出协议事件。
-pub(crate) struct EventStream {
-    response: Response,
-    buffer: Vec<u8>,
+/// 本机 host 的 executor 子进程 pid。断链用例据它杀进程。
+async fn local_executor_pid(hosts: &agent::HostRegistry) -> Option<u32> {
+    let local = agent::HostName::parse(agent::LOCAL_HOST).expect("内置 host 名合法");
+    hosts.link(&local).await.and_then(|link| link.pid())
 }
 
-impl EventStream {
-    pub(crate) async fn next(&mut self) -> Option<agent::StreamEvent> {
-        loop {
-            if let Some(position) = self.buffer.iter().position(|byte| *byte == b'\n') {
-                let line: Vec<u8> = self.buffer.drain(..=position).collect();
-                let line = String::from_utf8(line).expect("事件行是 UTF-8");
-                let Some(data) = line.trim_end().strip_prefix("data:") else {
-                    continue;
-                };
-                let data = data.trim();
-                if data.is_empty() {
-                    continue;
-                }
-                return Some(serde_json::from_str(data).expect("解析事件"));
+/// harness 的启动参数。字段都有默认值，用例只覆盖自己关心的那几项。
+mod options {
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    use crate::support::{Script, process};
+
+    pub(super) struct Options {
+        pub config: agent::EngineConfig,
+        pub scripts: Vec<Script>,
+        pub limits: agent::ToolLimits,
+        pub executor: PathBuf,
+        pub heartbeat: Duration,
+    }
+
+    impl Default for Options {
+        fn default() -> Self {
+            Self {
+                config: agent::EngineConfig::default(),
+                scripts: Vec::new(),
+                limits: agent::ToolLimits::default(),
+                executor: process::executor_binary(),
+                heartbeat: agent::HEARTBEAT_INTERVAL,
             }
-            let chunk = self.response.chunk().await.expect("读取事件流")?;
-            self.buffer.extend_from_slice(&chunk);
         }
     }
-}
-
-pub(crate) async fn error_code(response: Response) -> agent::ErrorCode {
-    error_envelope(response).await.code
-}
-
-pub(crate) async fn error_envelope(response: Response) -> agent::ErrorResponse {
-    response.json().await.expect("解析错误响应")
 }

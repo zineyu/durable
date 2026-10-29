@@ -4,8 +4,8 @@
 #![expect(clippy::expect_used, reason = "测试用 expect 直接报告夹具与断言失败。")]
 
 use durable::{
-    CommittedEvent, ContentPart, FactEvent, MessageText, RunId, RunRecord, RunStatus, SessionId,
-    SessionTitle, Store, StoreError, SubmitMode, WorkspacePath,
+    CommittedEvent, ContentPart, FactEvent, HostKind, HostName, MessageText, RunId, RunRecord,
+    RunStatus, SessionId, SessionTitle, Store, StoreError, SubmitMode, WorkspacePath,
 };
 use tempfile::TempDir;
 
@@ -15,14 +15,19 @@ async fn store_with_session() -> (TempDir, Store, SessionId) {
     let store = Store::open(&directory.path().join("store.sqlite"))
         .await
         .expect("打开数据库");
+    let host = HostName::parse("local").expect("合法 host 名");
     let workspace = WorkspacePath::parse("/work").expect("合法 workspace 路径");
     store
-        .register_workspace(&workspace)
+        .register_host(host.clone(), HostKind::Local, None)
+        .await
+        .expect("注册 host");
+    store
+        .register_workspace(&host, &workspace)
         .await
         .expect("注册 workspace");
     let title = SessionTitle::parse("初始标题").expect("合法标题");
     let session = store
-        .create_session(&workspace, title)
+        .create_session(&host, &workspace, title)
         .await
         .expect("创建 session");
     (directory, store, session.id)
@@ -315,11 +320,12 @@ async fn drain_queue(store: &Store, session: &SessionId) {
 #[tokio::test]
 async fn create_session_reports_an_empty_view() {
     let (_directory, store, _session) = store_with_session().await;
+    let host = HostName::parse("local").expect("合法 host 名");
     let workspace = WorkspacePath::parse("/work").expect("合法 workspace 路径");
     let before = max_event_id(&store).await;
 
     let created = store
-        .create_session(&workspace, title("第二个"))
+        .create_session(&host, &workspace, title("第二个"))
         .await
         .expect("创建 session");
     let committed = store.events_after(before).await.expect("回放事件");
@@ -338,49 +344,57 @@ async fn create_session_reports_an_empty_view() {
 async fn root_commands_have_no_session_view() {
     let (_directory, store, _session) = store_with_session().await;
     let workspace = WorkspacePath::parse("/other").expect("合法 workspace 路径");
-    let name = durable::NodeName::parse("laptop").expect("合法节点名");
+    let host = HostName::parse("laptop").expect("合法 host 名");
 
     let before = max_event_id(&store).await;
     store
-        .register_workspace(&workspace)
+        .register_host(host.clone(), HostKind::Ssh, Some("laptop".to_owned()))
+        .await
+        .expect("注册 host");
+    store
+        .register_workspace(&host, &workspace)
         .await
         .expect("注册 workspace");
     store
-        .register_node(name.clone(), "http://127.0.0.1:18081".to_owned())
-        .await
-        .expect("注册节点");
-    store
-        .update_node(
-            &name,
-            durable::NodeUpdate {
+        .update_host(
+            &host,
+            durable::HostUpdate {
                 name: None,
-                url: Some("http://127.0.0.1:18082".to_owned()),
+                target: Some("laptop.lan".to_owned()),
                 enabled: None,
             },
         )
         .await
-        .expect("更新节点");
-    store.remove_node(&name).await.expect("移除节点");
+        .expect("更新 host");
     store
-        .remove_workspace(&workspace)
+        .remove_workspace(&host, &workspace)
         .await
         .expect("移除 workspace");
+    store.remove_host(&host).await.expect("移除 host");
 
     let committed = store.events_after(before).await.expect("回放事件");
-    assert_eq!(committed.len(), 2, "节点命令不写事实事件");
-    assert!(matches!(
-        committed[0].event,
-        FactEvent::WorkspaceRegistered { .. }
-    ));
+    let kinds: Vec<&FactEvent> = committed.iter().map(|event| &event.event).collect();
+    assert_eq!(kinds.len(), 5, "五条命令各写一条事实");
+    assert!(
+        matches!(kinds[0], FactEvent::HostRegistered { host: recorded } if recorded.name == host)
+    );
+    assert!(
+        matches!(kinds[1], FactEvent::WorkspaceRegistered { workspace: recorded } if recorded.host == host && recorded.path == workspace)
+    );
+    assert!(
+        matches!(kinds[2], FactEvent::HostUpdated { host: recorded } if recorded.target.as_deref() == Some("laptop.lan"))
+    );
     assert_eq!(
-        committed[1].event,
+        *kinds[3],
         FactEvent::WorkspaceRemoved {
+            host: host.clone(),
             path: workspace.clone(),
         }
     );
+    assert_eq!(*kinds[4], FactEvent::HostRemoved { host: host.clone() });
     assert!(
         committed.iter().all(|event| event.session.is_none()),
-        "workspace 事实不带 session 视图"
+        "host 与 workspace 事实不带 session 视图"
     );
 }
 

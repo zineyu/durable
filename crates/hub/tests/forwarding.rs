@@ -58,7 +58,7 @@ async fn forwards_node_scoped_requests_to_that_node_only() {
     let path = laptop.directory.path().to_str().expect("临时路径是 UTF-8");
     let response = reqwest::Client::new()
         .post(harness.url("/api/n/laptop/workspaces"))
-        .json(&serde_json::json!({ "path": path }))
+        .json(&serde_json::json!({ "host": "local", "path": path }))
         .send()
         .await
         .expect("经 hub 注册 workspace");

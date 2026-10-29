@@ -3,8 +3,8 @@
 
 use std::time::Duration;
 
+use crate::node::NodeMetadata;
 use agent::BootstrapResponse;
-use durable::NodeMetadata;
 
 /// 读取节点的 bootstrap 元数据。状态由总线负责，这里只管取数据。
 ///

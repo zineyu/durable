@@ -1,6 +1,7 @@
 //! link 帧：agent 与 executor 在标准输入输出上交换的长度前缀 JSON 帧。
 //! 帧的驱动在 `crates/agent/src/link`，工具执行在 `crates/executor`。
 
+use std::fmt;
 use std::io;
 
 use serde::{Deserialize, Serialize};
@@ -9,7 +10,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use crate::ToolOutcome;
 
 /// 帧协议版本。两侧通过启动参数比对，不符即 `incompatible`。
-pub const LINK_PROTOCOL_VERSION: u32 = 1;
+///
+/// 2：请求改为带操作种类，结果带上操作各自的答复，因此多了 workspace 校验这一个操作。
+pub const LINK_PROTOCOL_VERSION: u32 = 2;
 
 /// 单帧正文上限。超限说明链路已损坏，而不是某次工具输出过大。
 pub const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
@@ -18,7 +21,7 @@ const LENGTH_BYTES: usize = 4;
 
 /// link 上的一种帧。
 ///
-/// 一次工具调用是一帧请求与一帧结果，按 `id` 配对；取消按同一 `id` 匹配，
+/// 一次请求是一帧请求与一帧结果，按 `id` 配对；取消按同一 `id` 匹配，
 /// 被取消的请求仍回一帧结果；心跳用于保活与量延迟。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
@@ -27,26 +30,73 @@ const LENGTH_BYTES: usize = 4;
     rename_all_fields = "camelCase"
 )]
 pub enum Frame {
-    Request {
-        id: String,
+    Request { id: String, operation: Operation },
+    Result { id: String, reply: Reply },
+    Cancel { id: String },
+    Ping { seq: u64 },
+    Pong { seq: u64 },
+}
+
+/// 请求的操作。工具执行与 workspace 校验都在 host 上完成。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum Operation {
+    /// 在 workspace 根内执行一次工具调用。
+    Tool {
         workspace: String,
         tool: String,
         arguments: String,
     },
-    Result {
-        id: String,
+    /// 校验一个绝对目录能否成为 workspace 身份。文件系统事实只有 host 判定。
+    CheckWorkspace { path: String },
+}
+
+/// 一帧结果里的答复，与 [`Operation`] 一一对应。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum Reply {
+    Outcome {
         outcome: ToolOutcome,
     },
-    Cancel {
-        id: String,
-    },
-    Ping {
-        seq: u64,
-    },
-    Pong {
-        seq: u64,
+    /// 校验通过时回规范化后的绝对路径：workspace 身份是 host 与规范化路径这一对。
+    Workspace {
+        result: Result<String, WorkspaceCheckError>,
     },
 }
+
+/// workspace 校验失败的类别。变体与 `WorkspacePathError` 同名，序列化用 `snake_case`。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceCheckError {
+    NotAbsolute,
+    NotUtf8,
+    NotFound,
+    Unreadable,
+    NotDirectory,
+}
+
+impl fmt::Display for WorkspaceCheckError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let text = match self {
+            Self::NotAbsolute => "workspace 路径必须是绝对路径",
+            Self::NotUtf8 => "workspace 路径不是 UTF-8",
+            Self::NotFound => "workspace 路径不存在",
+            Self::Unreadable => "workspace 路径无法读取",
+            Self::NotDirectory => "workspace 路径不是目录",
+        };
+        formatter.write_str(text)
+    }
+}
+
+impl std::error::Error for WorkspaceCheckError {}
 
 /// 写一帧：4 字节大端长度，然后是 UTF-8 JSON 正文。
 ///
@@ -153,26 +203,45 @@ mod tests {
     async fn every_frame_variant_round_trips() {
         round_trip(Frame::Request {
             id: "req-1".into(),
-            workspace: "/tmp/workspace".into(),
-            tool: "bash".into(),
-            arguments: r#"{"command":"echo 你好"}"#.into(),
-        })
-        .await;
-        round_trip(Frame::Result {
-            id: "req-1".into(),
-            outcome: ToolOutcome::Succeeded {
-                content: "输出".into(),
+            operation: Operation::Tool {
+                workspace: "/tmp/workspace".into(),
+                tool: "bash".into(),
+                arguments: r#"{"command":"echo 你好"}"#.into(),
             },
         })
         .await;
-        round_trip(Frame::Result {
+        round_trip(Frame::Request {
             id: "req-2".into(),
-            outcome: ToolOutcome::Failed {
-                code: ToolErrorCode::BashTimeout,
-                message: "命令超过 120000 ms 未结束".into(),
+            operation: Operation::CheckWorkspace {
+                path: "/tmp/workspace".into(),
             },
         })
         .await;
+        for reply in [
+            Reply::Outcome {
+                outcome: ToolOutcome::Succeeded {
+                    content: "输出".into(),
+                },
+            },
+            Reply::Outcome {
+                outcome: ToolOutcome::Failed {
+                    code: ToolErrorCode::BashTimeout,
+                    message: "命令超过 120000 ms 未结束".into(),
+                },
+            },
+            Reply::Workspace {
+                result: Ok("/tmp/workspace".to_owned()),
+            },
+            Reply::Workspace {
+                result: Err(WorkspaceCheckError::NotDirectory),
+            },
+        ] {
+            round_trip(Frame::Result {
+                id: "req-1".into(),
+                reply,
+            })
+            .await;
+        }
         round_trip(Frame::Cancel { id: "req-1".into() }).await;
         round_trip(Frame::Ping { seq: 7 }).await;
         round_trip(Frame::Pong { seq: 7 }).await;

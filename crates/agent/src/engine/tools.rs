@@ -23,6 +23,7 @@ impl RunEngine {
     ) -> Result<bool, RunFailure> {
         let session = &start.run.session_id;
         let context = ToolContext {
+            host: start.host.clone(),
             workspace: start.workspace.clone(),
             cancellation: cancellation.clone(),
         };

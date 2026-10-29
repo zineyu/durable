@@ -10,6 +10,7 @@ import type { SessionView } from './types';
 
 const session: SessionMetadata = {
   id: 's-1',
+  host: 'local',
   workspace: '/work/a',
   title: '迁移',
   busy: false,
@@ -28,6 +29,7 @@ function text(value: string): ContentPart[] {
 function state(bodies: Record<number, ContentPart[]>): NodeState {
   return {
     modelName: 'm',
+    hosts: [],
     workspaces: [],
     sessions: [session],
     trees: {

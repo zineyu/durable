@@ -1,3 +1,4 @@
+import type { HostName } from '../api/generated/HostName';
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { NodeName } from '../api/generated/NodeName';
@@ -45,6 +46,7 @@ export type SessionSummary = {
 
 export type WorkspaceSummary = {
   id: WorkspaceId;
+  host: HostName;
   path: WorkspacePath;
   sessions: SessionSummary[];
 };

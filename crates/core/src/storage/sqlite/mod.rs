@@ -7,12 +7,12 @@ mod rows;
 
 use self::apply::apply_change;
 use self::rows::{
-    parse_node, parse_queue_item, parse_run, parse_session, parse_session_head,
+    parse_host, parse_queue_item, parse_run, parse_session, parse_session_head,
     parse_session_metadata, parse_workspace,
 };
 
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
@@ -21,8 +21,8 @@ use sqlx::{Row, SqlitePool};
 use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
+use crate::host::{HostMetadata, HostName};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
-use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::session::{SessionMetadata, SessionRecord};
@@ -31,19 +31,25 @@ use crate::workspace::WorkspaceMetadata;
 
 pub(crate) struct SqliteStorage {
     pool: SqlitePool,
+    path: PathBuf,
 }
+
+/// 基线的迁移版本与描述。迁移记录不是恰好这一条即视为旧库。
+const BASELINE_VERSION: i64 = 1;
+const BASELINE_DESCRIPTION: &str = "baseline";
 
 /// session 记录与两个轻量计数的查询。全量快照与命令入口共用，两处计数因此一致。
 pub(crate) const SESSION_HEAD_SQL: &str =
-    "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf,
+    "SELECT id, workspace_host, workspace, title, title_auto, created_at, updated_at, active_leaf,
             (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
             (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
      FROM session WHERE id = ?1";
 
 impl SqliteStorage {
-    /// 打开 SQLite 文件并应用尚未执行的迁移。
+    /// 打开 SQLite 文件，确认它是基线结构，再应用尚未执行的迁移。
     ///
-    /// 失败：数据库无法打开、连接参数被拒绝或迁移失败。
+    /// 失败：数据库无法打开、连接参数被拒绝、库是旧结构或迁移失败。旧库不迁移、
+    /// 不导入，调用方必须改用新的数据库路径。
     /// 副作用：创建数据库文件与表。
     pub(crate) async fn open(path: &Path) -> Result<Self, StoreError> {
         create_parent_directory(path).await?;
@@ -58,8 +64,49 @@ impl SqliteStorage {
             .max_connections(1)
             .connect_with(options)
             .await?;
+        verify_baseline(&pool, path).await?;
         sqlx::migrate!("./migrations").run(&pool).await?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            path: path.to_path_buf(),
+        })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub(crate) async fn hosts(&self) -> Result<Vec<HostMetadata>, StoreError> {
+        sqlx::query(
+            "SELECT name, kind, target, enabled, created_at, updated_at FROM host
+             ORDER BY created_at ASC, name ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(parse_host)
+        .collect()
+    }
+
+    pub(crate) async fn host(&self, name: &HostName) -> Result<Option<HostMetadata>, StoreError> {
+        sqlx::query(
+            "SELECT name, kind, target, enabled, created_at, updated_at FROM host WHERE name = ?1",
+        )
+        .bind(name.as_str())
+        .fetch_optional(&self.pool)
+        .await?
+        .as_ref()
+        .map(parse_host)
+        .transpose()
+    }
+
+    /// 该 host 名下已登记的 workspace 数量。
+    pub(crate) async fn host_workspace_count(&self, name: &HostName) -> Result<i64, StoreError> {
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workspace WHERE host = ?1")
+            .bind(name.as_str())
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
     }
 
     pub(crate) async fn snapshot(&self) -> Result<Snapshot, StoreError> {
@@ -67,8 +114,18 @@ impl SqliteStorage {
         let max_event_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(id), 0) FROM event")
             .fetch_one(&mut *transaction)
             .await?;
+        let hosts = sqlx::query(
+            "SELECT name, kind, target, enabled, created_at, updated_at FROM host
+             ORDER BY created_at ASC, name ASC",
+        )
+        .fetch_all(&mut *transaction)
+        .await?
+        .iter()
+        .map(parse_host)
+        .collect::<Result<Vec<_>, _>>()?;
         let workspaces = sqlx::query(
-            "SELECT path, registered_at FROM workspace ORDER BY registered_at ASC, path ASC",
+            "SELECT host, path, registered_at FROM workspace
+             ORDER BY registered_at ASC, host ASC, path ASC",
         )
         .fetch_all(&mut *transaction)
         .await?
@@ -76,7 +133,7 @@ impl SqliteStorage {
         .map(parse_workspace)
         .collect::<Result<Vec<_>, _>>()?;
         let sessions = sqlx::query(
-            "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf,
+            "SELECT id, workspace_host, workspace, title, title_auto, created_at, updated_at, active_leaf,
                     (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
                     (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
              FROM session ORDER BY updated_at DESC, rowid DESC",
@@ -88,6 +145,7 @@ impl SqliteStorage {
         .collect::<Result<Vec<_>, _>>()?;
         transaction.commit().await?;
         Ok(Snapshot {
+            hosts,
             workspaces,
             sessions,
             max_event_id,
@@ -96,9 +154,11 @@ impl SqliteStorage {
 
     pub(crate) async fn workspace(
         &self,
+        host: &HostName,
         path: &WorkspacePath,
     ) -> Result<Option<WorkspaceMetadata>, StoreError> {
-        sqlx::query("SELECT path, registered_at FROM workspace WHERE path = ?1")
+        sqlx::query("SELECT host, path, registered_at FROM workspace WHERE host = ?1 AND path = ?2")
+            .bind(host.as_str())
             .bind(path.as_str())
             .fetch_optional(&self.pool)
             .await?
@@ -107,36 +167,13 @@ impl SqliteStorage {
             .transpose()
     }
 
-    /// 节点表中的全部节点，按注册顺序排列。
-    pub(crate) async fn nodes(&self) -> Result<Vec<NodeMetadata>, StoreError> {
-        sqlx::query(
-            "SELECT name, url, enabled, created_at, updated_at FROM node
-             ORDER BY created_at ASC, name ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?
-        .iter()
-        .map(parse_node)
-        .collect()
-    }
-
-    pub(crate) async fn node(&self, name: &NodeName) -> Result<Option<NodeMetadata>, StoreError> {
-        sqlx::query("SELECT name, url, enabled, created_at, updated_at FROM node WHERE name = ?1")
-            .bind(name.as_str())
-            .fetch_optional(&self.pool)
-            .await?
-            .as_ref()
-            .map(parse_node)
-            .transpose()
-    }
-
     pub(crate) async fn session(
         &self,
         id: &SessionId,
     ) -> Result<Option<SessionRecord>, StoreError> {
         sqlx::query(
-            "SELECT id, workspace, title, title_auto, created_at, updated_at, active_leaf FROM session
-             WHERE id = ?1",
+            "SELECT id, workspace_host, workspace, title, title_auto, created_at, updated_at, active_leaf
+             FROM session WHERE id = ?1",
         )
         .bind(id.as_str())
         .fetch_optional(&self.pool)
@@ -158,11 +195,19 @@ impl SqliteStorage {
         row.as_ref().map(parse_session_head).transpose()
     }
 
-    pub(crate) async fn session_count(&self, workspace: &WorkspacePath) -> Result<i64, StoreError> {
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session WHERE workspace = ?1")
-            .bind(workspace.as_str())
-            .fetch_one(&self.pool)
-            .await?;
+    /// 某个 workspace（host 与路径这一对）下的 session 数量。
+    pub(crate) async fn session_count(
+        &self,
+        host: &HostName,
+        workspace: &WorkspacePath,
+    ) -> Result<i64, StoreError> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM session WHERE workspace_host = ?1 AND workspace = ?2",
+        )
+        .bind(host.as_str())
+        .bind(workspace.as_str())
+        .fetch_one(&self.pool)
+        .await?;
         Ok(count)
     }
 
@@ -341,6 +386,39 @@ impl SqliteStorage {
         .await?;
         RunId::parse(id).map_err(|error| corrupted("run.id", error))
     }
+}
+
+/// 确认库是基线结构。旧库（有节点表、缺 host 表、workspace 缺 host 列、迁移记录不是基线）
+/// 一律以 [`StoreError::LegacyDatabase`] 拒绝：不迁移，也不导入。
+async fn verify_baseline(pool: &SqlitePool, path: &Path) -> Result<(), StoreError> {
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",
+    )
+    .fetch_all(pool)
+    .await?;
+    if tables.is_empty() {
+        return Ok(());
+    }
+    let legacy = || StoreError::LegacyDatabase(path.to_path_buf());
+    let has = |name: &str| tables.iter().any(|table| table == name);
+    if !has("host") || has("node") || !has("_sqlx_migrations") || !has("workspace") {
+        return Err(legacy());
+    }
+    let applied: Vec<(i64, String)> =
+        sqlx::query_as("SELECT version, description FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await?;
+    if applied != [(BASELINE_VERSION, BASELINE_DESCRIPTION.to_owned())] {
+        return Err(legacy());
+    }
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('workspace')")
+            .fetch_all(pool)
+            .await?;
+    if !columns.iter().any(|column| column == "host") {
+        return Err(legacy());
+    }
+    Ok(())
 }
 
 fn corrupted(field: &str, error: impl fmt::Display) -> StoreError {

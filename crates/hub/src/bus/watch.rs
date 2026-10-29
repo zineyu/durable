@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use agent::HealthResponse;
 use axum::body::Bytes;
-use durable::{NodeMetadata, NodeName, ResyncReason, StreamEvent};
+use durable::{ResyncReason, StreamEvent};
+
+use crate::node::{NodeMetadata, NodeName};
 use futures_util::StreamExt;
 use tokio::task::JoinHandle;
 

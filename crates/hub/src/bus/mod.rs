@@ -13,7 +13,9 @@ pub(crate) use self::watch::NodeWatcher;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Mutex, MutexGuard};
 
-use durable::{NodeName, ResyncReason, SessionId};
+use durable::{ResyncReason, SessionId};
+
+use crate::node::NodeName;
 use tokio::sync::broadcast;
 
 use crate::ApiError;
@@ -93,7 +95,7 @@ impl Bus {
             session_id,
             session,
             timestamp,
-            event,
+            event: Box::new(event),
         })
     }
 

@@ -3,7 +3,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use clap::Parser;
 use runtime::dirs;
@@ -98,7 +97,7 @@ fn prepare(arguments: &Arguments) -> Result<Prepared, Box<dyn std::error::Error>
     reason = "这一行是启动测试与 client e2e 约定的就绪信号，必须写标准输出。"
 )]
 async fn run(prepared: Prepared) -> Result<(), Box<dyn std::error::Error>> {
-    let store = Arc::new(durable::Store::open(&prepared.database).await?);
+    hub::ensure_database(&prepared.database).await?;
     let listener = tokio::net::TcpListener::bind(prepared.address).await?;
     let bound = listener.local_addr()?;
     info!(
@@ -111,6 +110,6 @@ async fn run(prepared: Prepared) -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("hub listening on http://{bound}");
     info!(listen = %bound, "hub 开始监听");
-    hub::serve_with(listener, store, prepared.options).await?;
+    hub::serve_with(listener, &prepared.database, prepared.options).await?;
     Ok(())
 }

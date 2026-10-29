@@ -22,7 +22,9 @@ fn run_agent(directory: &Path, configure: impl FnOnce(&mut Command)) -> std::pro
 async fn spawn_agent(directory: &Path, workspaces: &[PathBuf]) -> (tokio::process::Child, String) {
     let mut command = support::serving_command(&directory.join("agent.sqlite"));
     for workspace in workspaces {
-        command.arg("--workspace").arg(workspace);
+        command
+            .arg("--workspace")
+            .arg(format!("local:{}", workspace.display()));
     }
     let mut child = command.spawn().expect("启动 agent");
     let address = support::read_address(&mut child).await;
@@ -106,9 +108,10 @@ fn fails_when_only_one_model_config_is_missing() {
 fn fails_when_initial_workspace_is_missing() {
     let directory = tempfile::tempdir().expect("创建临时目录");
     let output = run_agent(directory.path(), |command| {
-        command
-            .arg("--workspace")
-            .arg(directory.path().join("missing"));
+        command.arg("--workspace").arg(format!(
+            "local:{}",
+            directory.path().join("missing").display()
+        ));
     });
 
     assert!(!output.status.success());
@@ -139,8 +142,9 @@ async fn restarts_with_same_initial_workspace_without_duplicating() {
     assert_eq!(after.workspaces.len(), 1, "重启不产生重复注册");
     assert_eq!(after.workspaces[0].path.as_str(), canonical);
     assert_eq!(
-        after.max_event_id, before.max_event_id,
-        "重复传入已注册的初始 workspace 不写事件"
+        after.max_event_id,
+        before.max_event_id + 1,
+        "重复传入已注册的初始 workspace 不写 workspace 事件，只有一条 host 状态事实"
     );
     second.start_kill().expect("结束第二个 agent");
     second.wait().await.expect("等待第二个 agent 退出");

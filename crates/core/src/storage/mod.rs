@@ -3,6 +3,7 @@
 
 pub(crate) mod sqlite;
 
+use crate::host::HostMetadata;
 use crate::message::MessageSkeleton;
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
@@ -12,6 +13,7 @@ use crate::workspace::WorkspaceMetadata;
 /// bootstrap 所需的元数据快照。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Snapshot {
+    pub hosts: Vec<HostMetadata>,
     pub workspaces: Vec<WorkspaceMetadata>,
     pub sessions: Vec<SessionMetadata>,
     pub max_event_id: i64,

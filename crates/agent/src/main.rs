@@ -1,9 +1,10 @@
-//! agent 进程入口：解析参数、准备目录与日志、拉起 executor 的 link、启动 HTTP 服务。
-//! 路由与状态装配在 `lib`，帧与工具调用在 `lib::link`。
+//! agent 进程入口：解析参数、准备目录与日志、登记 host 与 workspace、启动 HTTP 服务。
+//! 路由与状态装配在 `lib`，host 的 link 与状态在 `lib::hosts`，帧与工具调用在 `lib::link`。
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::Parser;
 use runtime::dirs;
@@ -27,9 +28,12 @@ struct Arguments {
     /// 日志目录。省略时使用标准日志目录。
     #[arg(long = "log-dir")]
     log_dir: Option<PathBuf>,
-    /// 启动时注册的 workspace 路径，可重复。
+    /// 启动时登记的 workspace，写作 `<host>:<绝对路径>`，可重复。
     #[arg(long = "workspace")]
-    workspaces: Vec<PathBuf>,
+    workspaces: Vec<String>,
+    /// 启动时登记的 ssh host，写作 `<name>=<ssh-target>`，可重复。
+    #[arg(long = "host")]
+    hosts: Vec<String>,
 }
 
 /// 已确定的启动路径与日志参数。
@@ -101,20 +105,23 @@ async fn run(arguments: Arguments, prepared: Prepared) -> Result<(), Box<dyn std
     let model = agent::model_config_from_env()?;
     let engine = agent::engine_config_from_env()?;
     let workspaces = resolve_workspaces(&arguments.workspaces)?;
-    let store = agent::Store::open(&prepared.database).await?;
-    store.register_initial_workspaces(&workspaces).await?;
-    let provider = std::sync::Arc::new(agent::OpenAiProvider::new(&model));
-    let model_name = model.model_name.clone();
+    let hosts = resolve_hosts(&arguments.hosts)?;
+    let limits = agent::ToolLimits::default();
+    let store = Arc::new(agent::Store::open(&prepared.database).await?);
+    for (name, target) in hosts {
+        if store.host(&name).await?.is_none() {
+            store
+                .register_host(name, agent::HostKind::Ssh, Some(target))
+                .await?;
+        }
+    }
     let executor = executor_binary()?;
-    let link = agent::LinkHandle::spawn_local(&executor, agent::ToolLimits::default())?;
-    let state = agent::AgentState::start(
-        store,
-        model_name,
-        provider,
-        std::sync::Arc::new(agent::RemoteTools::new(link)),
-        engine,
-    )
-    .await?;
+    let hosts = agent::HostRegistry::start(Arc::clone(&store), executor.clone(), limits).await?;
+    register_startup_workspaces(&store, &hosts, &workspaces).await?;
+    let provider = Arc::new(agent::OpenAiProvider::new(&model));
+    let model_name = model.model_name.clone();
+    let tools = Arc::new(agent::RemoteTools::new(Arc::clone(&hosts)));
+    let state = agent::AgentState::start(store, hosts, model_name, provider, tools, engine).await?;
     info!(
         executor = %executor.display(),
         database = %prepared.database.display(),
@@ -155,19 +162,75 @@ fn executor_binary() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(path)
 }
 
-/// 把启动参数中的 workspace 路径解析为规范化身份。
+/// 把 `--workspace <host>:<path>` 解析为 host 与路径这一对。
 ///
-/// 失败：路径不是 UTF-8、不是绝对路径、不存在或不是目录。
+/// 失败：缺少冒号、host 名不合法、路径不是绝对路径。
 fn resolve_workspaces(
-    paths: &[PathBuf],
-) -> Result<Vec<agent::WorkspacePath>, agent::WorkspacePathError> {
-    paths
+    entries: &[String],
+) -> Result<Vec<(agent::HostName, agent::WorkspacePath)>, Box<dyn std::error::Error>> {
+    entries
         .iter()
-        .map(|path| {
-            let raw = path
-                .to_str()
-                .ok_or_else(|| agent::WorkspacePathError::NotUtf8(path.display().to_string()))?;
-            agent::WorkspacePath::resolve(raw)
+        .map(|entry| {
+            let (host, path) = entry
+                .split_once(':')
+                .ok_or_else(|| format!("--workspace 需要写成 <host>:<绝对路径>，实际是 {entry}"))?;
+            Ok((
+                agent::HostName::parse(host)?,
+                agent::WorkspacePath::parse(path)?,
+            ))
         })
         .collect()
+}
+
+/// 把 `--host <name>=<ssh-target>` 解析为 host 名与目标字符串。
+///
+/// 失败：缺少等号、host 名不合法、目标为空。
+fn resolve_hosts(
+    entries: &[String],
+) -> Result<Vec<(agent::HostName, String)>, Box<dyn std::error::Error>> {
+    entries
+        .iter()
+        .map(|entry| {
+            let (name, target) = entry
+                .split_once('=')
+                .ok_or_else(|| format!("--host 需要写成 <name>=<ssh-target>，实际是 {entry}"))?;
+            let target = target.trim();
+            if target.is_empty() {
+                return Err(format!("--host 的 SSH 目标不能为空: {entry}").into());
+            }
+            Ok((agent::HostName::parse(name)?, target.to_owned()))
+        })
+        .collect()
+}
+
+/// 登记启动参数给出的 workspace：host 必须已登记，路径由 host 判定。
+///
+/// host 当前不可用时跳过并留下告警：已登记的 workspace 仍可用，不必让整个进程起不来。
+async fn register_startup_workspaces(
+    store: &agent::Store,
+    hosts: &agent::HostRegistry,
+    workspaces: &[(agent::HostName, agent::WorkspacePath)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut accepted: Vec<(agent::HostName, agent::WorkspacePath)> = Vec::new();
+    for (host, path) in workspaces {
+        if store.host(host).await?.is_none() {
+            return Err(format!(
+                "host 未登记: {host}。先用 --host 登记，或核对 --workspace 的 host 名。"
+            )
+            .into());
+        }
+        match hosts.check_workspace(host, path.as_str()).await {
+            Some(Ok(canonical)) => {
+                accepted.push((host.clone(), agent::WorkspacePath::parse(&canonical)?));
+            }
+            Some(Err(error)) => {
+                return Err(format!("workspace 路径不可用 {}：{error}", path.as_str()).into());
+            }
+            None => {
+                tracing::warn!(host = %host, path = %path.as_str(), "host 当前不可用，跳过启动参数里的 workspace");
+            }
+        }
+    }
+    store.register_initial_workspaces(&accepted).await?;
+    Ok(())
 }

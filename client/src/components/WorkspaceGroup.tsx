@@ -6,6 +6,7 @@ import styles from './WorkspaceGroup.module.css';
 import type { WorkspacePath } from '../view/ids';
 
 export type WorkspaceGroupProps = {
+  host: string;
   path: WorkspacePath;
   sessionCount: number;
   children: ReactNode;
@@ -15,6 +16,7 @@ export type WorkspaceGroupProps = {
 };
 
 export function WorkspaceGroup({
+  host,
   path,
   sessionCount,
   children,
@@ -35,8 +37,8 @@ export function WorkspaceGroup({
           <span className={open ? styles.chevronOpen : styles.chevron} aria-hidden="true">
             ›
           </span>
-          <span className={styles.path} title={path}>
-            {path}
+          <span className={styles.path} title={`${host}:${path}`}>
+            {host} · {path}
           </span>
           <span className={styles.count}>{sessionCount}</span>
         </button>

@@ -5,11 +5,11 @@ export type WorkspacePath = string & { readonly [brand]: 'WorkspacePath' };
 export type SessionId = string & { readonly [brand]: 'SessionId' };
 export type QueueItemId = string & { readonly [brand]: 'QueueItemId' };
 
-export function toWorkspaceId(value: string): WorkspaceId {
-  if (value.trim().length === 0) {
+export function toWorkspaceId(host: string, path: string): WorkspaceId {
+  if (host.trim().length === 0 || path.trim().length === 0) {
     throw new Error('WorkspaceId 不能为空');
   }
-  return value as WorkspaceId;
+  return `${host}:${path}` as WorkspaceId;
 }
 
 export function toWorkspacePath(value: string): WorkspacePath {

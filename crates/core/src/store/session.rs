@@ -6,36 +6,39 @@ use std::collections::HashMap;
 use super::{Store, snapshot_into_tree};
 use crate::error::StoreError;
 use crate::event::FactEvent;
+use crate::host::HostName;
 use crate::id::{MessageId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{ContentPart, MessageBody, MessageNode, MessageSkeleton};
 use crate::session::{SessionMetadata, SessionRecord, SessionTreeSnapshot};
 use crate::storage::SessionSnapshot;
 
 impl Store {
-    /// 在指定 workspace 下创建 session。
+    /// 在指定 workspace（host 与路径这一对）下创建 session。
     ///
-    /// 输入：已规范化的 workspace 路径与已解析的标题。
+    /// 输入：workspace 所属的 host、workspace 身份路径与已解析的标题。
     ///
     /// # Errors
     ///
-    /// - `StoreError::WorkspaceNotFound`：该 workspace 未注册。
+    /// - `StoreError::WorkspaceNotFound`：该 workspace 未在这台 host 上注册。
     /// - `StoreError::Database`：数据库读取或写入失败。
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
-    /// 副作用：写入 session 行与 `session_created` 事实事件。
+    /// 副作用：写入 session 行与 `session_created` 事实事件。session 继承 workspace 的 host。
     pub async fn create_session(
         &self,
+        host: &HostName,
         workspace: &WorkspacePath,
         title: SessionTitle,
     ) -> Result<SessionMetadata, StoreError> {
         self.command_root(async |command| {
-            if self.storage.workspace(workspace).await?.is_none() {
+            if self.storage.workspace(host, workspace).await?.is_none() {
                 return Err(StoreError::WorkspaceNotFound(workspace.clone()));
             }
             let now = command.now();
             let session = SessionRecord {
                 id: SessionId::generate(),
+                host: host.clone(),
                 workspace: workspace.clone(),
                 title: title.clone(),
                 title_auto: true,

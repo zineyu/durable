@@ -6,22 +6,24 @@ use sqlx::sqlite::SqliteRow;
 
 use super::corrupted;
 use crate::error::StoreError;
+use crate::host::{HostKind, HostMetadata, HostName};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{
     ContentKind, ContentPart, MessageNode, MessageRole, MessageSkeleton, PartSkeleton, PartState,
 };
-use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
 use crate::storage::SessionHead;
 use crate::workspace::WorkspaceMetadata;
 
-pub(super) fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
-    Ok(NodeMetadata {
-        name: NodeName::parse(&row.get::<String, _>("name"))
-            .map_err(|error| corrupted("node.name", error))?,
-        url: row.get("url"),
+pub(super) fn parse_host(row: &SqliteRow) -> Result<HostMetadata, StoreError> {
+    Ok(HostMetadata {
+        name: HostName::parse(&row.get::<String, _>("name"))
+            .map_err(|error| corrupted("host.name", error))?,
+        kind: HostKind::parse(&row.get::<String, _>("kind"))
+            .map_err(|error| corrupted("host.kind", error))?,
+        target: row.get("target"),
         enabled: row.get("enabled"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
@@ -30,6 +32,8 @@ pub(super) fn parse_node(row: &SqliteRow) -> Result<NodeMetadata, StoreError> {
 
 pub(super) fn parse_workspace(row: &SqliteRow) -> Result<WorkspaceMetadata, StoreError> {
     Ok(WorkspaceMetadata {
+        host: HostName::parse(&row.get::<String, _>("host"))
+            .map_err(|error| corrupted("workspace.host", error))?,
         path: WorkspacePath::parse(&row.get::<String, _>("path"))
             .map_err(|error| corrupted("workspace.path", error))?,
         registered_at: row.get("registered_at"),
@@ -46,6 +50,8 @@ pub(super) fn parse_session(row: &SqliteRow) -> Result<SessionRecord, StoreError
     Ok(SessionRecord {
         id: SessionId::parse(&row.get::<String, _>("id"))
             .map_err(|error| corrupted("session.id", error))?,
+        host: HostName::parse(&row.get::<String, _>("workspace_host"))
+            .map_err(|error| corrupted("session.workspace_host", error))?,
         workspace: WorkspacePath::parse(&row.get::<String, _>("workspace"))
             .map_err(|error| corrupted("session.workspace", error))?,
         title: SessionTitle::parse(&row.get::<String, _>("title"))

@@ -5,9 +5,10 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use durable::link::WorkspaceCheckError;
 use durable::{
-    MessageIdError, MessageTextError, QueueItemIdError, SessionIdError, SessionTitleError,
-    StoreError, StoreErrorClass, StoreErrorKind, WorkspacePathError,
+    HostNameError, MessageIdError, MessageTextError, QueueItemIdError, SessionIdError,
+    SessionTitleError, StoreError, StoreErrorClass, StoreErrorKind, WorkspacePathError,
 };
 
 use crate::protocol::{ErrorCode, ErrorResponse};
@@ -37,6 +38,61 @@ impl ApiError {
     #[must_use]
     pub fn invalid_request(status: StatusCode, message: String) -> Self {
         Self::new(ErrorCode::InvalidRequest, status, message)
+    }
+
+    /// 请求里的 host 不在 host 表中。
+    #[must_use]
+    pub fn host_not_found(message: String) -> Self {
+        Self::new(ErrorCode::HostNotFound, StatusCode::NOT_FOUND, message)
+    }
+
+    /// host 当前不可用：停用、不可达或版本不符。
+    #[must_use]
+    pub fn host_unavailable(message: String) -> Self {
+        Self::new(ErrorCode::HostUnavailable, StatusCode::CONFLICT, message)
+    }
+
+    /// `ssh` 种类的 host 缺少目标字符串。
+    #[must_use]
+    pub fn host_invalid_target(message: String) -> Self {
+        Self::new(
+            ErrorCode::HostInvalidTarget,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            message,
+        )
+    }
+
+    /// host 上判定的路径错误。
+    #[must_use]
+    pub fn workspace_invalid(message: String) -> Self {
+        Self::new(
+            ErrorCode::WorkspacePathInvalid,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            message,
+        )
+    }
+}
+
+impl From<HostNameError> for ApiError {
+    fn from(error: HostNameError) -> Self {
+        Self::new(
+            ErrorCode::HostNameInvalid,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            error.to_string(),
+        )
+    }
+}
+
+/// executor 判定的路径错误。文件系统事实只有 host 判定，agent 只做映射。
+impl From<WorkspaceCheckError> for ApiError {
+    fn from(error: WorkspaceCheckError) -> Self {
+        Self::workspace_invalid(match error {
+            WorkspaceCheckError::NotAbsolute => "workspace 路径必须是绝对路径".to_owned(),
+            WorkspaceCheckError::NotUtf8 => "workspace 路径不是 UTF-8".to_owned(),
+            WorkspaceCheckError::NotFound => "workspace 路径不存在".to_owned(),
+            WorkspaceCheckError::Unreadable => "workspace 路径无法读取".to_owned(),
+            WorkspaceCheckError::NotDirectory => "workspace 路径不是目录".to_owned(),
+        })
     }
 }
 
@@ -114,6 +170,7 @@ fn code_of(kind: StoreErrorKind) -> ErrorCode {
         | StoreErrorKind::DatabaseDirectory
         | StoreErrorKind::Serialization
         | StoreErrorKind::CorruptedData
+        | StoreErrorKind::LegacyDatabase
         | StoreErrorKind::Invariant => ErrorCode::Internal,
         StoreErrorKind::WorkspaceDuplicate => ErrorCode::WorkspaceDuplicate,
         StoreErrorKind::WorkspaceNotFound => ErrorCode::WorkspaceNotFound,
@@ -124,8 +181,9 @@ fn code_of(kind: StoreErrorKind) -> ErrorCode {
         StoreErrorKind::MessageRoleMismatch => ErrorCode::MessageRoleMismatch,
         StoreErrorKind::RunInProgress => ErrorCode::RunInProgress,
         StoreErrorKind::QueueNotEmpty => ErrorCode::QueueNotEmpty,
-        StoreErrorKind::NodeNameTaken => ErrorCode::NodeNameTaken,
-        StoreErrorKind::NodeNotFound => ErrorCode::NodeNotFound,
+        StoreErrorKind::HostNameTaken => ErrorCode::HostNameTaken,
+        StoreErrorKind::HostNotFound => ErrorCode::HostNotFound,
+        StoreErrorKind::HostNotEmpty => ErrorCode::HostInUse,
     }
 }
 
@@ -163,12 +221,13 @@ mod tests {
     use crate::protocol::ErrorCode;
 
     /// 分类到协议码与状态码的独立事实源。
-    const TABLE: [(StoreErrorKind, ErrorCode, u16); 17] = [
+    const TABLE: [(StoreErrorKind, ErrorCode, u16); 19] = [
         (StoreErrorKind::Database, ErrorCode::Internal, 500),
         (StoreErrorKind::Migration, ErrorCode::Internal, 500),
         (StoreErrorKind::DatabaseDirectory, ErrorCode::Internal, 500),
         (StoreErrorKind::Serialization, ErrorCode::Internal, 500),
         (StoreErrorKind::CorruptedData, ErrorCode::Internal, 500),
+        (StoreErrorKind::LegacyDatabase, ErrorCode::Internal, 500),
         (StoreErrorKind::Invariant, ErrorCode::Internal, 500),
         (
             StoreErrorKind::WorkspaceDuplicate,
@@ -207,8 +266,9 @@ mod tests {
         ),
         (StoreErrorKind::RunInProgress, ErrorCode::RunInProgress, 409),
         (StoreErrorKind::QueueNotEmpty, ErrorCode::QueueNotEmpty, 409),
-        (StoreErrorKind::NodeNameTaken, ErrorCode::NodeNameTaken, 409),
-        (StoreErrorKind::NodeNotFound, ErrorCode::NodeNotFound, 404),
+        (StoreErrorKind::HostNameTaken, ErrorCode::HostNameTaken, 409),
+        (StoreErrorKind::HostNotFound, ErrorCode::HostNotFound, 404),
+        (StoreErrorKind::HostNotEmpty, ErrorCode::HostInUse, 409),
     ];
 
     /// ADR 0043：分类到协议码与状态码的映射穷尽，状态码取自结局类别。

@@ -29,12 +29,18 @@ fn workspaces(directory: &std::path::Path, count: usize) -> Vec<String> {
 }
 
 async fn register_workspace(harness: &Harness, node: &str, path: &str) {
-    reqwest::Client::new()
+    let response = reqwest::Client::new()
         .post(harness.url(&format!("/api/n/{node}/workspaces")))
-        .json(&serde_json::json!({ "path": path }))
+        .json(&serde_json::json!({ "host": "local", "path": path }))
         .send()
         .await
         .expect("经 hub 注册 workspace");
+    assert!(
+        response.status().is_success(),
+        "注册 workspace 必须成功: {} {}",
+        response.status(),
+        response.text().await.unwrap_or_default()
+    );
 }
 
 /// 规格 user story H-30：合并流的广播序号跨节点严格递增。
@@ -186,6 +192,7 @@ async fn forwards_session_view_of_fact_envelope() {
     let before = harness.bootstrap().await.max_hub_seq;
     let view = durable::SessionMetadata {
         id: durable::SessionId::parse("s1").expect("合法 session id"),
+        host: durable::HostName::parse("local").expect("合法 host 名"),
         workspace: durable::WorkspacePath::parse("/work").expect("合法 workspace 路径"),
         title: durable::SessionTitle::parse("标题").expect("合法标题"),
         busy: true,

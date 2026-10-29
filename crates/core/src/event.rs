@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::host::{HostMetadata, HostName, HostStatus};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
 use crate::message::MessageSkeleton;
 use crate::queue::QueueItem;
@@ -22,10 +23,26 @@ use crate::workspace::WorkspaceMetadata;
     rename_all_fields = "camelCase"
 )]
 pub enum FactEvent {
+    HostRegistered {
+        host: HostMetadata,
+    },
+    HostRemoved {
+        host: HostName,
+    },
+    HostUpdated {
+        host: HostMetadata,
+    },
+    /// host 的运行状态变化。状态本身是进程状态，只有事实落库。
+    HostStatusChanged {
+        host: HostName,
+        status: HostStatus,
+        detail: Option<String>,
+    },
     WorkspaceRegistered {
         workspace: WorkspaceMetadata,
     },
     WorkspaceRemoved {
+        host: HostName,
         path: WorkspacePath,
     },
     SessionCreated {
@@ -85,11 +102,16 @@ pub enum FactEvent {
 }
 
 impl FactEvent {
-    /// 事件所属的 session；workspace 事件不属于任何 session。
+    /// 事件所属的 session；host 与 workspace 事件不属于任何 session。
     #[must_use]
     pub fn session_id(&self) -> Option<&SessionId> {
         match self {
-            Self::WorkspaceRegistered { .. } | Self::WorkspaceRemoved { .. } => None,
+            Self::HostRegistered { .. }
+            | Self::HostRemoved { .. }
+            | Self::HostUpdated { .. }
+            | Self::HostStatusChanged { .. }
+            | Self::WorkspaceRegistered { .. }
+            | Self::WorkspaceRemoved { .. } => None,
             Self::SessionCreated { session_id }
             | Self::SessionRenamed { session_id }
             | Self::SessionDeleted { session_id }
@@ -108,7 +130,7 @@ impl FactEvent {
 
 /// 已提交的事实事件，携带存储分配的全局事件 id 与事实提交后的 session 视图。
 ///
-/// `session` 为空只有两种含义：该事实不属于任何 session（workspace 事件），
+/// `session` 为空只有两种含义：该事实不属于任何 session（host 与 workspace 事件），
 /// 或该事实删除了 session（`session_deleted`）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedEvent {

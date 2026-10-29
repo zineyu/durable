@@ -3,10 +3,12 @@
 //!
 //! 规格 user story R-35：同一 host 上的多个 session 共用一条 link，请求按 id 配对。
 //! 断链时的退出码与标准错误尾部记在 [`LinkClosed`]；host 的 `ok`/`unreachable`/`incompatible`
-//! 三态由 host registry 按这些数据装配，本模块只分类、不宣布状态。
+//! 三态由 `crate::hosts` 按这些数据装配，本模块只分类、不宣布状态。
+//!
+//! link 上有两种请求：工具执行与 workspace 校验。两者都是一帧请求、一帧结果，
+//! 答复种类与请求操作一一对应。
 
 use std::collections::{HashMap, VecDeque};
-use std::fmt;
 use std::io;
 use std::path::Path;
 use std::process::Stdio;
@@ -14,13 +16,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use durable::link::{Frame, LINK_PROTOCOL_VERSION, read_frame, write_frame};
-use durable::{Cancellation, ToolLimits, ToolOutcome};
+use durable::link::{
+    Frame, LINK_PROTOCOL_VERSION, Operation, Reply, WorkspaceCheckError, read_frame, write_frame,
+};
+use durable::{Cancellation, ToolErrorCode, ToolLimits, ToolOutcome};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
+mod closed;
 mod tools;
+
+pub use closed::{INCOMPATIBLE_EXIT_CODE, LinkClosed};
 
 pub use tools::{NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
 
@@ -36,58 +43,14 @@ const EXIT_WAIT: Duration = Duration::from_secs(2);
 /// 子进程退出后等待标准错误读尽的时限。
 const STDERR_DRAIN: Duration = Duration::from_secs(1);
 
-/// executor 表示帧协议或构建版本不符的退出码（见 `crates/executor`）。
-const INCOMPATIBLE_EXIT_CODE: i32 = 3;
-
-/// 在途请求的等待者。
-type Waiter = oneshot::Sender<Result<ToolOutcome, LinkClosed>>;
+/// 在途请求的等待者。答复种类与请求操作一一对应，由调用方解释。
+type Waiter = oneshot::Sender<Result<Reply, LinkClosed>>;
 
 /// 在途请求表，按请求 id 索引。
 type Pending = HashMap<String, Waiter>;
 
-/// link 已断开：executor 的退出码与最后几行标准错误。
-///
-/// 只由本模块产生。工具结局里的 [`durable::ToolErrorCode::LinkClosed`] 是它在工具层的对应码，
-/// 但工具实现从不产生该码；引擎据本结构把在途调用记为「结果未知」。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinkClosed {
-    /// executor 的退出码。被信号终止或退出码未及时到达时为 `None`。
-    pub exit_code: Option<i32>,
-    /// executor 标准错误的最后若干行，用于说明断开原因。
-    pub stderr_tail: String,
-}
-
-impl LinkClosed {
-    /// 退出码 3 表示帧协议或构建版本不符，host 据此成为 `incompatible`。
-    #[must_use]
-    pub fn protocol_mismatch(&self) -> bool {
-        self.exit_code == Some(INCOMPATIBLE_EXIT_CODE)
-    }
-
-    /// 没有退出码与标准错误可依据的断开：等待者被丢弃但状态没来得及写上。
-    fn lost() -> Self {
-        Self {
-            exit_code: None,
-            stderr_tail: String::new(),
-        }
-    }
-}
-
-impl fmt::Display for LinkClosed {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("link 已断开")?;
-        if let Some(code) = self.exit_code {
-            write!(formatter, "（executor 退出码 {code}）")?;
-        }
-        let tail = self.stderr_tail.trim();
-        if !tail.is_empty() {
-            write!(formatter, ": {tail}")?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for LinkClosed {}
+/// 心跳等待者：发出时刻与应答通道。
+type Pong = (Instant, oneshot::Sender<u64>);
 
 /// 在途请求与断链原因。两者同一把锁，避免「刚登记就错过断链」的竞态。
 #[derive(Default)]
@@ -97,16 +60,33 @@ struct Requests {
 }
 
 /// 一条 link 的共享状态：读侧、写侧、退出观察者与在途请求共看这一份。
-#[derive(Default)]
 struct LinkState {
     requests: Mutex<Requests>,
     stderr_tail: Mutex<VecDeque<String>>,
+    /// 断链广播。`wait_closed` 订阅它，因此不依赖轮询。
+    closed: watch::Sender<Option<LinkClosed>>,
+}
+
+impl Default for LinkState {
+    fn default() -> Self {
+        let (closed, _receiver) = watch::channel(None);
+        Self {
+            requests: Mutex::default(),
+            stderr_tail: Mutex::default(),
+            closed,
+        }
+    }
 }
 
 impl LinkState {
     /// 当前断链原因。
     async fn closed(&self) -> Option<LinkClosed> {
         self.requests.lock().await.closed.clone()
+    }
+
+    /// 订阅断链广播。
+    fn subscribe(&self) -> watch::Receiver<Option<LinkClosed>> {
+        self.closed.subscribe()
     }
 
     /// 登记在途请求。link 已断开时不再登记，直接返回断链原因。
@@ -125,15 +105,20 @@ impl LinkState {
     }
 
     /// 读侧收到的一帧结果交给对应等待者。
-    async fn resolve(&self, id: &str, outcome: ToolOutcome) {
+    async fn resolve(&self, id: &str, reply: Reply) {
         let waiter = self.requests.lock().await.pending.remove(id);
         if let Some(sender) = waiter {
-            if sender.send(Ok(outcome)).is_err() {
-                tracing::debug!(id = %id, "工具结果没有等待者");
+            if sender.send(Ok(reply)).is_err() {
+                tracing::debug!(id = %id, "请求结果没有等待者");
             }
         } else {
-            tracing::debug!(id = %id, "收到不匹配的工具结果");
+            tracing::debug!(id = %id, "收到不匹配的请求结果");
         }
+    }
+
+    /// 是否有在途请求。心跳只在空闲 link 上发。
+    async fn is_idle(&self) -> bool {
+        self.requests.lock().await.pending.is_empty()
     }
 
     /// 记录断链，并取出全部在途等待者。先到者决定 [`LinkClosed`]，后来者只读取。
@@ -155,6 +140,10 @@ impl LinkState {
         }
         let closed = requests.closed.clone().unwrap_or_else(LinkClosed::lost);
         let waiters = requests.pending.drain().map(|(_, sender)| sender).collect();
+        drop(requests);
+        if self.closed.send(Some(closed.clone())).is_err() {
+            tracing::debug!("断链广播没有订阅者");
+        }
         (closed, waiters)
     }
 }
@@ -167,7 +156,7 @@ pub struct LinkHandle {
     terminate: Option<oneshot::Sender<()>>,
     writer: mpsc::Sender<Frame>,
     state: Arc<LinkState>,
-    pings: Arc<Mutex<HashMap<u64, Instant>>>,
+    pings: Arc<Mutex<HashMap<u64, Pong>>>,
     next_request: AtomicU64,
     pid: Option<u32>,
 }
@@ -212,7 +201,7 @@ impl LinkHandle {
         let (terminate, termination) = oneshot::channel();
         let (exit, exits) = oneshot::channel::<Option<i32>>();
         let state = Arc::new(LinkState::default());
-        let pings: Arc<Mutex<HashMap<u64, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
+        let pings: Arc<Mutex<HashMap<u64, Pong>>> = Arc::new(Mutex::new(HashMap::new()));
         tokio::spawn(write_loop(stdin, frames));
         tokio::spawn(watch_child(
             child,
@@ -243,18 +232,52 @@ impl LinkHandle {
         self.pid
     }
 
-    /// 发一帧心跳。应答到达时读侧以 debug 记录往返毫秒数。
-    pub async fn ping(&self, seq: u64) {
-        self.pings.lock().await.insert(seq, Instant::now());
+    /// 发一帧心跳并等应答，返回往返毫秒数。
+    ///
+    /// link 已关闭或超过 `timeout` 仍未应答时返回 `None`：心跳只用于量延迟，
+    /// 断链由读侧与退出观察者判定。
+    pub async fn ping(&self, seq: u64, timeout: Duration) -> Option<u64> {
+        if self.closed().await.is_some() {
+            return None;
+        }
+        let (sender, receiver) = oneshot::channel();
+        self.pings
+            .lock()
+            .await
+            .insert(seq, (Instant::now(), sender));
         if self.writer.send(Frame::Ping { seq }).await.is_err() {
             self.pings.lock().await.remove(&seq);
-            tracing::debug!(seq, "心跳未能发出：link 已关闭");
+            return None;
         }
+        let Ok(Ok(latency)) = tokio::time::timeout(timeout, receiver).await else {
+            self.pings.lock().await.remove(&seq);
+            return None;
+        };
+        Some(latency)
     }
 
     /// 当前断链原因。link 仍可用时返回 `None`。
     pub async fn closed(&self) -> Option<LinkClosed> {
         self.state.closed().await
+    }
+
+    /// link 是否空闲：没有在途请求。
+    pub async fn is_idle(&self) -> bool {
+        self.state.is_idle().await
+    }
+
+    /// 等 link 断开并返回它的原因。已经断开时立即返回。
+    pub async fn wait_closed(&self) -> LinkClosed {
+        let mut closed = self.state.subscribe();
+        loop {
+            let current = closed.borrow_and_update().clone();
+            if let Some(closed) = current {
+                return closed;
+            }
+            if closed.changed().await.is_err() {
+                return LinkClosed::lost();
+            }
+        }
     }
 
     /// 在 executor 上执行一次工具调用。
@@ -273,32 +296,69 @@ impl LinkHandle {
         arguments: &str,
         cancellation: &Cancellation,
     ) -> Result<ToolOutcome, LinkClosed> {
+        let operation = Operation::Tool {
+            workspace: workspace.to_owned(),
+            tool: tool.to_owned(),
+            arguments: arguments.to_owned(),
+        };
+        match self.exchange(operation, Some(cancellation)).await? {
+            Reply::Outcome { outcome } => Ok(outcome),
+            Reply::Workspace { .. } => Ok(mismatched_reply("工具调用")),
+        }
+    }
+
+    /// 让 executor 校验一个绝对目录能否成为 workspace 身份。
+    ///
+    /// 文件系统事实只有 host 判定：agent 只保存结果，不重算边界。
+    ///
+    /// # Errors
+    ///
+    /// link 断开时返回 [`LinkClosed`]；此时这次校验没有结论。
+    pub async fn check_workspace(
+        &self,
+        path: &str,
+    ) -> Result<Result<String, WorkspaceCheckError>, LinkClosed> {
+        let operation = Operation::CheckWorkspace {
+            path: path.to_owned(),
+        };
+        match self.exchange(operation, None).await? {
+            Reply::Workspace { result } => Ok(result),
+            Reply::Outcome { .. } => Ok(Err(WorkspaceCheckError::Unreadable)),
+        }
+    }
+
+    /// 发一帧请求并等配对的结果帧。
+    async fn exchange(
+        &self,
+        operation: Operation,
+        cancellation: Option<&Cancellation>,
+    ) -> Result<Reply, LinkClosed> {
         let id = format!("req-{}", self.next_request.fetch_add(1, Ordering::SeqCst));
         let (sender, mut receiver) = oneshot::channel();
         self.state.register(id.clone(), sender).await?;
         let frame = Frame::Request {
             id: id.clone(),
-            workspace: workspace.to_owned(),
-            tool: tool.to_owned(),
-            arguments: arguments.to_owned(),
+            operation,
         };
         if self.writer.send(frame).await.is_err() {
             self.state.forget(&id).await;
             return Err(self.closed_or_lost().await);
         }
-        tokio::select! {
-            biased;
-            () = cancellation.cancelled() => {}
-            outcome = &mut receiver => return outcome.unwrap_or_else(|_| Err(LinkClosed::lost())),
-        }
-        if self
-            .writer
-            .send(Frame::Cancel { id: id.clone() })
-            .await
-            .is_err()
-        {
-            self.state.forget(&id).await;
-            return Err(self.closed_or_lost().await);
+        if let Some(cancellation) = cancellation {
+            tokio::select! {
+                biased;
+                () = cancellation.cancelled() => {}
+                reply = &mut receiver => return reply.unwrap_or_else(|_| Err(LinkClosed::lost())),
+            }
+            if self
+                .writer
+                .send(Frame::Cancel { id: id.clone() })
+                .await
+                .is_err()
+            {
+                self.state.forget(&id).await;
+                return Err(self.closed_or_lost().await);
+            }
         }
         receiver.await.unwrap_or_else(|_| Err(LinkClosed::lost()))
     }
@@ -319,6 +379,14 @@ impl Drop for LinkHandle {
     }
 }
 
+/// 答复种类与请求操作不符。link 仍然活着，因此按工具失败返回。
+fn mismatched_reply(operation: &str) -> ToolOutcome {
+    ToolOutcome::Failed {
+        code: ToolErrorCode::IoError,
+        message: format!("link 回答了与{operation}不匹配的答复"),
+    }
+}
+
 /// 单写者：所有帧经这里串行写出，避免多任务交错半个帧。
 async fn write_loop(mut stdin: ChildStdin, mut frames: mpsc::Receiver<Frame>) {
     while let Some(frame) = frames.recv().await {
@@ -329,23 +397,26 @@ async fn write_loop(mut stdin: ChildStdin, mut frames: mpsc::Receiver<Frame>) {
     }
 }
 
-/// 读侧：结果帧唤醒对应等待者，心跳记延迟，读侧结束即视为断链。
+/// 读侧：结果帧唤醒对应等待者，心跳应答写回延迟，读侧结束即视为断链。
 async fn read_loop(
     stdout: ChildStdout,
     mut exits: oneshot::Receiver<Option<i32>>,
     state: Arc<LinkState>,
-    pings: Arc<Mutex<HashMap<u64, Instant>>>,
+    pings: Arc<Mutex<HashMap<u64, Pong>>>,
 ) {
     let mut reader = BufReader::new(stdout);
     let reason = loop {
         match read_frame(&mut reader).await {
-            Ok(Some(Frame::Result { id, outcome })) => {
-                state.resolve(&id, outcome).await;
+            Ok(Some(Frame::Result { id, reply })) => {
+                state.resolve(&id, reply).await;
             }
             Ok(Some(Frame::Pong { seq })) => {
-                let sent = pings.lock().await.remove(&seq);
-                if let Some(sent) = sent {
-                    tracing::debug!(seq, latency_ms = sent.elapsed().as_millis(), "收到心跳应答");
+                let waited = pings.lock().await.remove(&seq);
+                if let Some((sent, sender)) = waited {
+                    let latency = u64::try_from(sent.elapsed().as_millis()).unwrap_or(u64::MAX);
+                    if sender.send(latency).is_err() {
+                        tracing::debug!(seq, "心跳应答没有等待者");
+                    }
                 } else {
                     tracing::debug!(seq, "收到不匹配的心跳应答");
                 }
@@ -478,5 +549,7 @@ mod tests {
         };
         assert!(!failed.protocol_mismatch(), "普通非零退出不是版本不符");
         assert_eq!(killed.to_string(), "link 已断开");
+        let unavailable = LinkClosed::unavailable("host 已停用".to_owned());
+        assert!(unavailable.to_string().contains("host 已停用"));
     }
 }

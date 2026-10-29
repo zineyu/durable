@@ -11,6 +11,7 @@ import type { SessionView } from './types';
 
 const session: SessionMetadata = {
   id: 's-1',
+  host: 'local',
   workspace: '/work/a',
   title: '迁移与恢复',
   busy: false,

@@ -38,7 +38,7 @@ impl Process {
         let mut command = serving_command(database);
         command
             .arg("--workspace")
-            .arg(workspace)
+            .arg(format!("local:{}", workspace.display()))
             .env(agent::MODEL_BASE_URL, provider.base_url());
         let mut child = command.spawn().expect("启动 agent");
         let address = read_address(&mut child).await;
@@ -66,7 +66,7 @@ pub(crate) async fn create_session(process: &Process, workspace: &Path) -> agent
         .into_owned();
     let response = reqwest::Client::new()
         .post(process.url("/api/sessions"))
-        .json(&serde_json::json!({ "workspace": path, "title": null }))
+        .json(&serde_json::json!({ "host": "local", "workspace": path, "title": null }))
         .send()
         .await
         .expect("创建 session");

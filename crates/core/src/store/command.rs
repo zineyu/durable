@@ -1,5 +1,5 @@
 //! 写命令入口：加锁、轻量快照、session 视图推导、提交与发布。
-//! 各对象的写命令在 `session`、`queue`、`run`、`branch`、`compaction`、`workspace`、`node`；
+//! 各对象的写命令在 `session`、`queue`、`run`、`branch`、`compaction`、`workspace`、`host`；
 //! 读方法留在同一门面，不加锁。
 
 use crate::change::{Change, Changeset};
@@ -142,7 +142,7 @@ impl SessionCommand<'_> {
     }
 }
 
-/// 不读 session 快照的写命令的上下文：workspace、node 与新建 session。
+/// 不读 session 快照的写命令的上下文：host、workspace 与新建 session。
 pub struct Command<'a> {
     changes: &'a mut Changeset,
     now: i64,

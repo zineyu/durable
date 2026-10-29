@@ -45,7 +45,10 @@ async fn registers_workspace_with_canonical_path() {
     let bootstrap = harness.bootstrap().await;
     assert_eq!(bootstrap.model, "test-model");
     assert_eq!(bootstrap.workspaces, vec![registered]);
-    assert_eq!(bootstrap.max_event_id, 1);
+    assert_eq!(
+        bootstrap.max_event_id, 3,
+        "启动的两条 host 事实之后才是这次注册"
+    );
 }
 
 #[tokio::test]
@@ -272,8 +275,9 @@ async fn duplicate_workspace_registration_survives_restart() {
     let after = harness.bootstrap().await;
     assert_eq!(after.workspaces, before.workspaces);
     assert_eq!(
-        after.max_event_id, before.max_event_id,
-        "被拒绝的注册不写事实事件"
+        after.max_event_id,
+        before.max_event_id + 1,
+        "被拒绝的注册不写 workspace 事实，只有一条 host 状态事实"
     );
 }
 

@@ -9,7 +9,7 @@ use std::time::Duration;
 use clap::Parser;
 use durable::Cancellation;
 use durable::ToolLimits;
-use durable::link::{Frame, LINK_PROTOCOL_VERSION, read_frame, write_frame};
+use durable::link::{Frame, LINK_PROTOCOL_VERSION, Operation, Reply, read_frame, write_frame};
 use tokio::io::BufReader;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task::JoinSet;
@@ -98,28 +98,34 @@ async fn serve(limits: ToolLimits) {
             Ok(Some(frame)) => {
                 remember(&mut recent, describe(&frame));
                 match frame {
-                    Frame::Request {
-                        id,
-                        workspace,
-                        tool,
-                        arguments,
-                    } => {
+                    Frame::Request { id, operation } => {
                         let cancellation = Cancellation::new();
                         active.lock().await.insert(id.clone(), cancellation.clone());
                         let sender = sender.clone();
                         let active = Arc::clone(&active);
                         tasks.spawn(async move {
-                            let outcome = tools::execute(
-                                &tool,
-                                &workspace,
-                                &arguments,
-                                &cancellation,
-                                &limits,
-                            )
-                            .await;
+                            let reply = match operation {
+                                Operation::Tool {
+                                    workspace,
+                                    tool,
+                                    arguments,
+                                } => Reply::Outcome {
+                                    outcome: tools::execute(
+                                        &tool,
+                                        &workspace,
+                                        &arguments,
+                                        &cancellation,
+                                        &limits,
+                                    )
+                                    .await,
+                                },
+                                Operation::CheckWorkspace { path } => Reply::Workspace {
+                                    result: tools::check_workspace(&path),
+                                },
+                            };
                             active.lock().await.remove(&id);
-                            if sender.send(Frame::Result { id, outcome }).await.is_err() {
-                                tracing::warn!("link 写侧已关闭，工具结果被丢弃");
+                            if sender.send(Frame::Result { id, reply }).await.is_err() {
+                                tracing::warn!("link 写侧已关闭，请求结果被丢弃");
                             }
                         });
                     }
@@ -163,7 +169,10 @@ async fn serve(limits: ToolLimits) {
 /// 一帧的简短描述，用于退出日志。不打印参数正文，避免日志被工具输入撑大。
 fn describe(frame: &Frame) -> String {
     match frame {
-        Frame::Request { id, tool, .. } => format!("request {id} {tool}"),
+        Frame::Request { id, operation } => match operation {
+            Operation::Tool { tool, .. } => format!("request {id} {tool}"),
+            Operation::CheckWorkspace { .. } => format!("request {id} check_workspace"),
+        },
         Frame::Result { id, .. } => format!("result {id}"),
         Frame::Cancel { id } => format!("cancel {id}"),
         Frame::Ping { seq } => format!("ping {seq}"),

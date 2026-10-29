@@ -4,8 +4,8 @@ import type { NodeName } from '../api/generated/NodeName';
 export type DialogState =
   | { kind: 'edit'; sessionId: string; messageId: number; text: string }
   | { kind: 'retry'; sessionId: string; messageId: number }
-  | { kind: 'register-workspace'; path: string }
-  | { kind: 'remove-workspace'; path: string }
+  | { kind: 'register-workspace'; host: string; path: string }
+  | { kind: 'remove-workspace'; host: string; path: string }
   | { kind: 'register-node'; name: string; url: string }
   | { kind: 'rename-node'; name: NodeName; next: string }
   | { kind: 'remove-node'; name: NodeName };
@@ -26,7 +26,7 @@ export function isNodeDialog(dialog: DialogState): dialog is NodeDialog {
 export function dialogConfirmDisabled(dialog: DialogState): boolean {
   switch (dialog.kind) {
     case 'register-workspace':
-      return dialog.path.trim().length === 0;
+      return dialog.host.trim().length === 0 || dialog.path.trim().length === 0;
     case 'register-node':
       return dialog.name.trim().length === 0 || dialog.url.trim().length === 0;
     case 'rename-node':
@@ -108,18 +108,27 @@ export function renderDialogBody(
       );
     case 'register-workspace':
       return (
-        <input
-          value={dialog.path}
-          aria-label="workspace 路径"
-          placeholder="/absolute/path"
-          autoFocus
-          onChange={(event) => { setDialog({ ...dialog, path: event.target.value }); }}
-        />
+        <>
+          <input
+            value={dialog.host}
+            aria-label="host 名"
+            placeholder="local"
+            onChange={(event) => { setDialog({ ...dialog, host: event.target.value }); }}
+          />
+          <input
+            value={dialog.path}
+            aria-label="workspace 路径"
+            placeholder="/absolute/path"
+            autoFocus
+            onChange={(event) => { setDialog({ ...dialog, path: event.target.value }); }}
+          />
+        </>
       );
     case 'remove-workspace':
       return (
         <p>
-          移除只删除注册记录，不触碰磁盘文件。仍有 session 时 server 会拒绝并说明原因，此操作不可撤销。
+          移除 {dialog.host} 上的 {dialog.path}。移除只删除注册记录，不触碰磁盘文件。仍有
+          session 时 server 会拒绝并说明原因，此操作不可撤销。
         </p>
       );
     case 'register-node':

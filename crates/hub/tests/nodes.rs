@@ -250,7 +250,7 @@ async fn updates_node_url_and_forwards_to_new_address() {
         .to_owned();
     let response = reqwest::Client::new()
         .post(format!("{}/api/workspaces", second.url))
-        .json(&serde_json::json!({ "path": workspace }))
+        .json(&serde_json::json!({ "host": "local", "path": workspace }))
         .send()
         .await
         .expect("注册 workspace");

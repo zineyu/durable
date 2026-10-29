@@ -2,9 +2,9 @@
 //! 行写入在 `storage/sqlite/apply`，领域类型在同级各对象模块。
 
 use crate::event::FactEvent;
+use crate::host::{HostMetadata, HostName};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{ContentPart, Message};
-use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::SessionRecord;
@@ -22,12 +22,26 @@ impl Changeset {
         Self::default()
     }
 
+    pub fn insert_host(&mut self, host: HostMetadata) {
+        self.push(Change::InsertHost(host));
+    }
+
+    /// 写入 host 的可变字段：名称、目标、启用标志与更新时间。
+    pub fn update_host(&mut self, host: HostMetadata) {
+        self.push(Change::UpdateHost(host));
+    }
+
+    pub fn delete_host(&mut self, name: HostName) {
+        self.push(Change::DeleteHost(name));
+    }
+
     pub fn insert_workspace(&mut self, workspace: WorkspaceMetadata) {
         self.push(Change::InsertWorkspace(workspace));
     }
 
-    pub fn delete_workspace(&mut self, path: WorkspacePath) {
-        self.push(Change::DeleteWorkspace(path));
+    /// 移除 workspace。identity 是 host 与路径这一对。
+    pub fn delete_workspace(&mut self, host: HostName, path: WorkspacePath) {
+        self.push(Change::DeleteWorkspace { host, path });
     }
 
     pub fn insert_session(&mut self, session: SessionRecord) {
@@ -62,19 +76,6 @@ impl Changeset {
 
     pub fn insert_queue_item(&mut self, session: SessionId, item: QueueItem) {
         self.push(Change::InsertQueueItem { session, item });
-    }
-
-    pub fn insert_node(&mut self, node: NodeMetadata) {
-        self.push(Change::InsertNode(node));
-    }
-
-    /// 写入节点的可变字段：名称、URL、启用标志与更新时间。
-    pub fn update_node(&mut self, node: NodeMetadata) {
-        self.push(Change::UpdateNode(node));
-    }
-
-    pub fn delete_node(&mut self, name: NodeName) {
-        self.push(Change::DeleteNode(name));
     }
 
     pub fn delete_queue_item(&mut self, session: SessionId, item: QueueItemId) {
@@ -144,11 +145,14 @@ impl Changeset {
 #[derive(Debug)]
 pub(crate) enum Change {
     InsertWorkspace(WorkspaceMetadata),
-    DeleteWorkspace(WorkspacePath),
+    DeleteWorkspace {
+        host: HostName,
+        path: WorkspacePath,
+    },
+    InsertHost(HostMetadata),
+    UpdateHost(HostMetadata),
+    DeleteHost(HostName),
     InsertSession(SessionRecord),
-    InsertNode(NodeMetadata),
-    UpdateNode(NodeMetadata),
-    DeleteNode(NodeName),
     UpdateSession {
         id: SessionId,
         title: SessionTitle,

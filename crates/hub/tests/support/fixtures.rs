@@ -36,6 +36,7 @@ pub(crate) async fn start_fake_agent(protocol_version: u32) -> String {
                 Json(serde_json::json!({
                     "model": "fake",
                     "maxEventId": 0,
+                    "hosts": [],
                     "workspaces": [],
                     "sessions": [],
                 }))
@@ -244,6 +245,7 @@ pub(crate) mod scripted {
                                 Json(serde_json::json!({
                                     "model": "scripted",
                                     "maxEventId": inner.watermark.load(Ordering::SeqCst),
+                                    "hosts": [],
                                     "workspaces": [],
                                     "sessions": [],
                                 }))

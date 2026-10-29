@@ -90,6 +90,7 @@ impl Store {
             );
             Ok(Some(RunStart {
                 run,
+                host: command.session().host().clone(),
                 workspace: command.session().workspace().clone(),
             }))
         })

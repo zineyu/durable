@@ -38,10 +38,13 @@ export function sessionSummaries(shard: NodeState): SessionSummary[] {
 export function workspaceSummaries(shard: NodeState): WorkspaceSummary[] {
   const rows = summaryRows(shard);
   return [...shard.workspaces].sort(compareWorkspaces).map((workspace) => ({
-    id: toWorkspaceId(workspace.path),
+    id: toWorkspaceId(workspace.host, workspace.path),
+    host: workspace.host,
     path: toWorkspacePath(workspace.path),
     sessions: rows
-      .filter((row) => row.session.workspace === workspace.path)
+      .filter(
+        (row) => row.session.host === workspace.host && row.session.workspace === workspace.path,
+      )
       .sort((left, right) => right.session.updatedAt - left.session.updatedAt)
       .map((row) => row.summary),
   }));
@@ -366,5 +369,9 @@ function queueOf(shard: NodeState, sessionId: string): QueueItem[] {
 }
 
 function compareWorkspaces(left: WorkspaceMetadata, right: WorkspaceMetadata): number {
-  return left.registeredAt - right.registeredAt || left.path.localeCompare(right.path);
+  return (
+    left.host.localeCompare(right.host) ||
+    left.registeredAt - right.registeredAt ||
+    left.path.localeCompare(right.path)
+  );
 }

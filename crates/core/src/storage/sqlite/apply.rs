@@ -6,9 +6,9 @@ use sqlx::sqlite::{SqliteConnection, SqliteQueryResult};
 use crate::change::Change;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
+use crate::host::{HostMetadata, HostName};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{ContentPart, Message};
-use crate::node::{NodeMetadata, NodeName};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::{SessionMetadata, SessionRecord};
@@ -23,10 +23,10 @@ pub(super) async fn apply_change(
 ) -> Result<(), StoreError> {
     match change {
         Change::InsertWorkspace(workspace) => insert_workspace(connection, workspace).await,
-        Change::DeleteWorkspace(path) => delete_workspace(connection, path).await,
-        Change::InsertNode(node) => insert_node(connection, node).await,
-        Change::UpdateNode(node) => update_node(connection, node).await,
-        Change::DeleteNode(name) => delete_node(connection, name).await,
+        Change::DeleteWorkspace { host, path } => delete_workspace(connection, host, path).await,
+        Change::InsertHost(host) => insert_host(connection, host).await,
+        Change::UpdateHost(host) => update_host(connection, host).await,
+        Change::DeleteHost(name) => delete_host(connection, name).await,
         Change::InsertSession(session) => insert_session(connection, session).await,
         Change::UpdateSession {
             id,
@@ -83,7 +83,8 @@ async fn insert_workspace(
     connection: &mut SqliteConnection,
     workspace: &WorkspaceMetadata,
 ) -> Result<(), StoreError> {
-    sqlx::query("INSERT INTO workspace (path, registered_at) VALUES (?1, ?2)")
+    sqlx::query("INSERT INTO workspace (host, path, registered_at) VALUES (?1, ?2, ?3)")
+        .bind(workspace.host.as_str())
         .bind(workspace.path.as_str())
         .bind(workspace.registered_at)
         .execute(&mut *connection)
@@ -93,54 +94,59 @@ async fn insert_workspace(
 
 async fn delete_workspace(
     connection: &mut SqliteConnection,
+    host: &HostName,
     path: &WorkspacePath,
 ) -> Result<(), StoreError> {
-    let result = sqlx::query("DELETE FROM workspace WHERE path = ?1")
+    let result = sqlx::query("DELETE FROM workspace WHERE host = ?1 AND path = ?2")
+        .bind(host.as_str())
         .bind(path.as_str())
         .execute(&mut *connection)
         .await?;
     ensure_written(&result, "删除 workspace")
 }
 
-async fn insert_node(
+async fn insert_host(
     connection: &mut SqliteConnection,
-    node: &NodeMetadata,
+    host: &HostMetadata,
 ) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO node (name, url, enabled, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO host (name, kind, target, enabled, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
     )
-    .bind(node.name.as_str())
-    .bind(&node.url)
-    .bind(node.enabled)
-    .bind(node.created_at)
-    .bind(node.updated_at)
+    .bind(host.name.as_str())
+    .bind(host.kind.as_str())
+    .bind(host.target.as_deref())
+    .bind(host.enabled)
+    .bind(host.created_at)
+    .bind(host.updated_at)
     .execute(&mut *connection)
     .await?;
     Ok(())
 }
 
-async fn update_node(
+async fn update_host(
     connection: &mut SqliteConnection,
-    node: &NodeMetadata,
+    host: &HostMetadata,
 ) -> Result<(), StoreError> {
-    let result =
-        sqlx::query("UPDATE node SET url = ?2, enabled = ?3, updated_at = ?4 WHERE name = ?1")
-            .bind(node.name.as_str())
-            .bind(&node.url)
-            .bind(node.enabled)
-            .bind(node.updated_at)
-            .execute(&mut *connection)
-            .await?;
-    ensure_written(&result, "更新 node")
+    let result = sqlx::query(
+        "UPDATE host SET kind = ?2, target = ?3, enabled = ?4, updated_at = ?5 WHERE name = ?1",
+    )
+    .bind(host.name.as_str())
+    .bind(host.kind.as_str())
+    .bind(host.target.as_deref())
+    .bind(host.enabled)
+    .bind(host.updated_at)
+    .execute(&mut *connection)
+    .await?;
+    ensure_written(&result, "更新 host")
 }
 
-async fn delete_node(connection: &mut SqliteConnection, name: &NodeName) -> Result<(), StoreError> {
-    let result = sqlx::query("DELETE FROM node WHERE name = ?1")
+async fn delete_host(connection: &mut SqliteConnection, name: &HostName) -> Result<(), StoreError> {
+    let result = sqlx::query("DELETE FROM host WHERE name = ?1")
         .bind(name.as_str())
         .execute(&mut *connection)
         .await?;
-    ensure_written(&result, "删除 node")
+    ensure_written(&result, "删除 host")
 }
 
 async fn insert_session(
@@ -148,10 +154,11 @@ async fn insert_session(
     session: &SessionRecord,
 ) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO session (id, workspace, title, title_auto, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO session (id, workspace_host, workspace, title, title_auto, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )
     .bind(session.id.as_str())
+    .bind(session.host.as_str())
     .bind(session.workspace.as_str())
     .bind(session.title.as_str())
     .bind(session.title_auto)

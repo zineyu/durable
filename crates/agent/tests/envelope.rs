@@ -156,7 +156,8 @@ async fn persists_fact_event_envelope_fields() {
     let session = harness.created_session(&workspace.path).await;
 
     let rows = recorded_event_rows(&harness.database).await;
-    assert_eq!(rows.len(), 2);
+    // 启动先写 host 的两条事实：登记本机 host，再宣告它可用。
+    assert_eq!(rows.len(), 4);
 
     let mut previous_id = 0;
     for (id, session_id, created_at, payload) in rows {
@@ -171,8 +172,19 @@ async fn persists_fact_event_envelope_fields() {
         );
     }
 
+    let events: Vec<agent::FactEvent> = recorded_events(&harness.database)
+        .await
+        .into_iter()
+        .filter(|event| {
+            !matches!(
+                event,
+                agent::FactEvent::HostRegistered { .. }
+                    | agent::FactEvent::HostStatusChanged { .. }
+            )
+        })
+        .collect();
     assert_eq!(
-        recorded_events(&harness.database).await,
+        events,
         vec![
             agent::FactEvent::WorkspaceRegistered {
                 workspace: workspace.clone(),
@@ -188,7 +200,7 @@ async fn persists_fact_event_envelope_fields() {
         facts.into_iter().map(|fact| fact.session).collect();
     assert_eq!(
         sessions,
-        vec![None, Some(session)],
+        vec![None, None, None, Some(session)],
         "信封的 session 视图只在属于 session 的事实上出现"
     );
 }
@@ -201,10 +213,11 @@ async fn reports_corrupted_stored_metadata_as_internal_error() {
     {
         let mut connection = connect(&harness.database).await;
         sqlx::query(
-            "INSERT INTO session (id, workspace, title, created_at, updated_at)
-             VALUES (?1, ?2, '', 0, 0)",
+            "INSERT INTO session (id, workspace_host, workspace, title, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '', 0, 0)",
         )
         .bind("corrupted")
+        .bind(workspace.host.as_str())
         .bind(workspace.path.as_str())
         .execute(&mut connection)
         .await
@@ -228,7 +241,10 @@ async fn empty_bootstrap_reports_no_metadata_and_zero_events() {
 
     let bootstrap = harness.bootstrap().await;
     assert_eq!(bootstrap.model, "test-model");
-    assert_eq!(bootstrap.max_event_id, 0);
+    assert_eq!(bootstrap.hosts.len(), 1, "启动即登记本机 host");
+    assert_eq!(bootstrap.hosts[0].name.as_str(), agent::LOCAL_HOST);
+    assert_eq!(bootstrap.hosts[0].status, agent::HostStatus::Ok);
+    assert_eq!(bootstrap.max_event_id, 2, "两条 host 事实");
     assert!(bootstrap.workspaces.is_empty());
     assert!(bootstrap.sessions.is_empty());
 }
@@ -283,7 +299,13 @@ async fn persists_event_kind_wire_names() {
     );
     assert_eq!(
         recorded_event_kinds(&harness.database).await,
-        vec!["workspace_registered", "session_created", "session_renamed"]
+        vec![
+            "host_registered",
+            "host_status_changed",
+            "workspace_registered",
+            "session_created",
+            "session_renamed"
+        ]
     );
 
     assert_eq!(
@@ -297,6 +319,8 @@ async fn persists_event_kind_wire_names() {
     assert_eq!(
         recorded_event_kinds(&harness.database).await,
         vec![
+            "host_registered",
+            "host_status_changed",
             "workspace_registered",
             "session_deleted",
             "workspace_removed"

@@ -1,11 +1,11 @@
 //! 领域内核的门面：打开数据库、元数据快照、事件回放、提交与读方法转发，
-//! 以及各写命令共用的节点入树辅助。
+//! 以及各写命令共用的消息入树辅助。
 //! 写命令入口在 `command`；按对象的写命令在同级各子模块；存储后端在 `crate::storage`。
 
 mod branch;
 mod command;
 mod compaction;
-mod node;
+mod host;
 mod queue;
 mod run;
 mod session;
@@ -33,6 +33,7 @@ use crate::tree::MessageTree;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunStart {
     pub run: RunRecord,
+    pub host: crate::host::HostName,
     pub workspace: WorkspacePath,
 }
 
@@ -55,6 +56,7 @@ impl Store {
     /// - `StoreError::DatabaseDirectory`：数据库父目录无法建立。
     /// - `StoreError::Database`：数据库无法打开或连接参数被拒绝。
     /// - `StoreError::Migration`：迁移执行失败。
+    /// - `StoreError::LegacyDatabase`：库是旧结构，不迁移也不导入。
     ///
     /// 副作用：创建数据库目录、数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
@@ -69,6 +71,11 @@ impl Store {
     /// 进程内事件总线。事实事件在提交成功后发布。
     pub fn events(&self) -> &EventBus {
         &self.bus
+    }
+
+    /// 数据库文件路径。
+    pub fn path(&self) -> &Path {
+        self.storage.path()
     }
 
     /// 读取 bootstrap 元数据。

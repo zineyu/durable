@@ -23,7 +23,10 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
     assert_eq!(created.queue_length, 0);
 
     let bootstrap = harness.bootstrap().await;
-    assert_eq!(bootstrap.max_event_id, 2);
+    assert_eq!(
+        bootstrap.max_event_id, 4,
+        "启动的两条 host 事实之后才轮到 workspace"
+    );
     assert_eq!(bootstrap.sessions, vec![created.clone()]);
 
     let tree: agent::SessionTreeSnapshot = harness
@@ -50,8 +53,19 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
         .expect("解析消息树");
     assert_eq!(tree.session, renamed);
 
+    let events: Vec<agent::FactEvent> = recorded_events(&harness.database)
+        .await
+        .into_iter()
+        .filter(|event| {
+            !matches!(
+                event,
+                agent::FactEvent::HostRegistered { .. }
+                    | agent::FactEvent::HostStatusChanged { .. }
+            )
+        })
+        .collect();
     assert_eq!(
-        recorded_events(&harness.database).await,
+        events,
         vec![
             agent::FactEvent::WorkspaceRegistered {
                 workspace: workspace.clone(),
@@ -69,14 +83,25 @@ async fn records_session_lifecycle_events_and_keeps_metadata_consistent() {
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
     let bootstrap = harness.bootstrap().await;
     assert!(bootstrap.sessions.is_empty());
-    assert_eq!(bootstrap.max_event_id, 4);
+    assert_eq!(bootstrap.max_event_id, 6, "两条 host 事实加删除事实");
     assert_eq!(
         harness.session_tree(&created.id).await.status(),
         StatusCode::NOT_FOUND
     );
 
+    let events: Vec<agent::FactEvent> = recorded_events(&harness.database)
+        .await
+        .into_iter()
+        .filter(|event| {
+            !matches!(
+                event,
+                agent::FactEvent::HostRegistered { .. }
+                    | agent::FactEvent::HostStatusChanged { .. }
+            )
+        })
+        .collect();
     assert_eq!(
-        recorded_events(&harness.database).await,
+        events,
         vec![
             agent::FactEvent::WorkspaceRegistered {
                 workspace: workspace.clone(),
@@ -133,7 +158,12 @@ async fn restores_workspaces_sessions_and_titles_after_restart() {
 
     let harness = harness.restart().await;
     let after = harness.bootstrap().await;
-    assert_eq!(after, before);
+    assert_eq!(
+        after.max_event_id,
+        before.max_event_id + 1,
+        "重启只多一条 host 状态事实"
+    );
+    assert_eq!(after.hosts, before.hosts);
     assert_eq!(after.workspaces, vec![workspace]);
     assert_eq!(after.sessions, vec![renamed.clone()]);
 
@@ -210,7 +240,11 @@ async fn keeps_event_ids_monotonic_and_deletion_after_restart() {
     let after = harness.bootstrap().await;
     assert_eq!(after.sessions, vec![renamed]);
     assert_eq!(after.workspaces, before.workspaces);
-    assert_eq!(after.max_event_id, before.max_event_id);
+    assert_eq!(
+        after.max_event_id,
+        before.max_event_id + 1,
+        "重启只多一条 host 状态事实，已写的事件不重编号"
+    );
     assert_eq!(
         harness.session_tree(&deleted.id).await.status(),
         StatusCode::NOT_FOUND,
@@ -367,10 +401,11 @@ async fn reports_corrupted_stored_session_id_as_internal_error() {
     {
         let mut connection = connect(&harness.database).await;
         sqlx::query(
-            "INSERT INTO session (id, workspace, title, created_at, updated_at)
-             VALUES (?1, ?2, ?3, 0, 0)",
+            "INSERT INTO session (id, workspace_host, workspace, title, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, 0)",
         )
         .bind("   ")
+        .bind(workspace.host.as_str())
         .bind(workspace.path.as_str())
         .bind("标题")
         .execute(&mut connection)

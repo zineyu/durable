@@ -5,9 +5,9 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::host::HostName;
 use crate::id::{MessageId, QueueItemId, SessionId, WorkspacePath};
 use crate::message::MessageRole;
-use crate::node::NodeName;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -21,6 +21,8 @@ pub enum StoreError {
     Serialization(#[from] serde_json::Error),
     #[error("数据库中的值不符合领域约束: {0}")]
     CorruptedData(String),
+    #[error("数据库是旧结构，不提供导入；请改用新的数据库路径: {}", .0.display())]
+    LegacyDatabase(PathBuf),
     #[error("写入违反内核不变量: {0}")]
     Invariant(String),
     #[error("workspace 已注册: {}", .0.as_str())]
@@ -41,10 +43,12 @@ pub enum StoreError {
     RunInProgress(SessionId),
     #[error("session 的队列非空: {}", .0.as_str())]
     QueueNotEmpty(SessionId),
-    #[error("节点名已注册: {}", .0.as_str())]
-    NodeNameTaken(NodeName),
-    #[error("节点未注册: {}", .0.as_str())]
-    NodeNotFound(NodeName),
+    #[error("host 名已注册: {}", .0.as_str())]
+    HostNameTaken(HostName),
+    #[error("host 未注册: {}", .0.as_str())]
+    HostNotFound(HostName),
+    #[error("host 仍有 {} 个 workspace，不能删除: {}", .1, .0.as_str())]
+    HostNotEmpty(HostName, i64),
 }
 
 impl StoreError {
@@ -59,6 +63,7 @@ impl StoreError {
             Self::DatabaseDirectory { .. } => StoreErrorKind::DatabaseDirectory,
             Self::Serialization(_) => StoreErrorKind::Serialization,
             Self::CorruptedData(_) => StoreErrorKind::CorruptedData,
+            Self::LegacyDatabase(_) => StoreErrorKind::LegacyDatabase,
             Self::Invariant(_) => StoreErrorKind::Invariant,
             Self::WorkspaceDuplicate(_) => StoreErrorKind::WorkspaceDuplicate,
             Self::WorkspaceNotFound(_) => StoreErrorKind::WorkspaceNotFound,
@@ -69,8 +74,9 @@ impl StoreError {
             Self::MessageRoleMismatch(_, _) => StoreErrorKind::MessageRoleMismatch,
             Self::RunInProgress(_) => StoreErrorKind::RunInProgress,
             Self::QueueNotEmpty(_) => StoreErrorKind::QueueNotEmpty,
-            Self::NodeNameTaken(_) => StoreErrorKind::NodeNameTaken,
-            Self::NodeNotFound(_) => StoreErrorKind::NodeNotFound,
+            Self::HostNameTaken(_) => StoreErrorKind::HostNameTaken,
+            Self::HostNotFound(_) => StoreErrorKind::HostNotFound,
+            Self::HostNotEmpty(_, _) => StoreErrorKind::HostNotEmpty,
         }
     }
 }
@@ -83,6 +89,7 @@ pub enum StoreErrorKind {
     DatabaseDirectory,
     Serialization,
     CorruptedData,
+    LegacyDatabase,
     Invariant,
     WorkspaceDuplicate,
     WorkspaceNotFound,
@@ -93,8 +100,9 @@ pub enum StoreErrorKind {
     MessageRoleMismatch,
     RunInProgress,
     QueueNotEmpty,
-    NodeNameTaken,
-    NodeNotFound,
+    HostNameTaken,
+    HostNotFound,
+    HostNotEmpty,
 }
 
 impl StoreErrorKind {
@@ -106,7 +114,7 @@ impl StoreErrorKind {
     #[must_use]
     pub fn class(self) -> StoreErrorClass {
         match self {
-            Self::Database | Self::Migration | Self::DatabaseDirectory => {
+            Self::Database | Self::Migration | Self::DatabaseDirectory | Self::LegacyDatabase => {
                 StoreErrorClass::StorageFailure
             }
             Self::Serialization | Self::CorruptedData | Self::Invariant => {
@@ -116,12 +124,13 @@ impl StoreErrorKind {
             | Self::WorkspaceNotEmpty
             | Self::RunInProgress
             | Self::QueueNotEmpty
-            | Self::NodeNameTaken => StoreErrorClass::Conflict,
+            | Self::HostNameTaken
+            | Self::HostNotEmpty => StoreErrorClass::Conflict,
             Self::WorkspaceNotFound
             | Self::SessionNotFound
             | Self::QueueItemNotFound
             | Self::MessageNotFound
-            | Self::NodeNotFound => StoreErrorClass::NotFound,
+            | Self::HostNotFound => StoreErrorClass::NotFound,
             Self::MessageRoleMismatch => StoreErrorClass::InvalidArgument,
         }
     }
@@ -144,14 +153,14 @@ pub enum StoreErrorClass {
 
 #[cfg(test)]
 mod tests {
+    use crate::host::HostName;
     use crate::id::{MessageId, QueueItemId, SessionId, WorkspacePath};
     use crate::message::MessageRole;
-    use crate::node::NodeName;
 
     use super::{StoreError, StoreErrorClass, StoreErrorKind};
 
     /// 分类表的独立事实源：新增变体时必须在这里给出它的结局类别。
-    const TABLE: [(StoreErrorKind, StoreErrorClass); 17] = [
+    const TABLE: [(StoreErrorKind, StoreErrorClass); 19] = [
         (StoreErrorKind::Database, StoreErrorClass::StorageFailure),
         (StoreErrorKind::Migration, StoreErrorClass::StorageFailure),
         (
@@ -160,6 +169,10 @@ mod tests {
         ),
         (StoreErrorKind::Serialization, StoreErrorClass::Internal),
         (StoreErrorKind::CorruptedData, StoreErrorClass::Internal),
+        (
+            StoreErrorKind::LegacyDatabase,
+            StoreErrorClass::StorageFailure,
+        ),
         (StoreErrorKind::Invariant, StoreErrorClass::Internal),
         (
             StoreErrorKind::WorkspaceDuplicate,
@@ -176,18 +189,19 @@ mod tests {
         ),
         (StoreErrorKind::RunInProgress, StoreErrorClass::Conflict),
         (StoreErrorKind::QueueNotEmpty, StoreErrorClass::Conflict),
-        (StoreErrorKind::NodeNameTaken, StoreErrorClass::Conflict),
-        (StoreErrorKind::NodeNotFound, StoreErrorClass::NotFound),
+        (StoreErrorKind::HostNameTaken, StoreErrorClass::Conflict),
+        (StoreErrorKind::HostNotFound, StoreErrorClass::NotFound),
+        (StoreErrorKind::HostNotEmpty, StoreErrorClass::Conflict),
     ];
 
-    /// 17 个变体到分类的映射。带载荷的变体在这里给出真实载荷，
+    /// 19 个变体到分类的映射。带载荷的变体在这里给出真实载荷，
     /// 因此 `StoreError::kind` 的每个分支都被走到。
     fn every_error() -> Vec<(StoreError, StoreErrorKind)> {
         let workspace = WorkspacePath::parse("/workspace").expect("合法 workspace 路径");
         let session = SessionId::parse("session").expect("合法 session id");
         let message = MessageId::parse(7).expect("合法消息 id");
         let queue_item = QueueItemId::parse(3).expect("合法队列项 id");
-        let node = NodeName::parse("local").expect("合法节点名");
+        let host = HostName::parse("local").expect("合法 host 名");
         vec![
             (
                 StoreError::Database(sqlx::Error::RowNotFound),
@@ -213,6 +227,10 @@ mod tests {
             (
                 StoreError::CorruptedData("message_part.body".to_owned()),
                 StoreErrorKind::CorruptedData,
+            ),
+            (
+                StoreError::LegacyDatabase("/nowhere/old.sqlite".into()),
+                StoreErrorKind::LegacyDatabase,
             ),
             (
                 StoreError::Invariant("测试".to_owned()),
@@ -255,10 +273,17 @@ mod tests {
                 StoreErrorKind::QueueNotEmpty,
             ),
             (
-                StoreError::NodeNameTaken(node.clone()),
-                StoreErrorKind::NodeNameTaken,
+                StoreError::HostNameTaken(host.clone()),
+                StoreErrorKind::HostNameTaken,
             ),
-            (StoreError::NodeNotFound(node), StoreErrorKind::NodeNotFound),
+            (
+                StoreError::HostNotFound(host.clone()),
+                StoreErrorKind::HostNotFound,
+            ),
+            (
+                StoreError::HostNotEmpty(host, 2),
+                StoreErrorKind::HostNotEmpty,
+            ),
         ]
     }
 

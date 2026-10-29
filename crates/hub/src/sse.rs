@@ -87,7 +87,7 @@ fn sse_event(event: &HubStreamEvent) -> Result<Event, ApiError> {
 mod tests {
     use std::sync::Arc;
 
-    use durable::NodeName;
+    use crate::node::NodeName;
     use futures_util::StreamExt;
 
     use super::*;

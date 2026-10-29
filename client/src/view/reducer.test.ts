@@ -24,8 +24,8 @@ import type { ClientState } from './reducer';
 const nodeA = 'macbook-air-01';
 const nodeB = 'studio';
 
-const workspaceA: WorkspaceMetadata = { path: '/work/a', registeredAt: 10 };
-const workspaceB: WorkspaceMetadata = { path: '/work/b', registeredAt: 20 };
+const workspaceA: WorkspaceMetadata = { host: 'local', path: '/work/a', registeredAt: 10 };
+const workspaceB: WorkspaceMetadata = { host: 'studio', path: '/work/b', registeredAt: 20 };
 
 function session(
   id: string,
@@ -35,6 +35,7 @@ function session(
 ): SessionMetadata {
   return {
     id,
+    host: workspace === '/work/b' ? 'studio' : 'local',
     workspace,
     title: `标题 ${id}`,
     busy: false,
@@ -75,7 +76,7 @@ function bootstrap(
   sessions: SessionMetadata[],
   maxEventId = 7,
 ): BootstrapResponse {
-  return { model: 'gpt-5-codex', maxEventId, workspaces, sessions };
+  return { model: 'gpt-5-codex', maxEventId, hosts: [], workspaces, sessions };
 }
 
 function snapshot(
@@ -254,7 +255,7 @@ describe('侧栏状态', () => {
     );
     const removed = streamed(
       withSession,
-      fact(nodeA, 10, 102, { kind: 'workspace_removed', path: '/work/b' }),
+      fact(nodeA, 10, 102, { kind: 'workspace_removed', host: 'studio', path: '/work/b' }),
     );
     expect(shardOf(removed, nodeA).workspaces.map((workspace) => workspace.path)).toEqual([
       '/work/a',

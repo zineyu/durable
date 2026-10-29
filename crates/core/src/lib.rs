@@ -5,10 +5,10 @@ mod cancel;
 mod change;
 mod error;
 mod event;
+mod host;
 mod id;
 pub mod link;
 mod message;
-mod node;
 mod queue;
 mod run;
 mod session;
@@ -23,6 +23,7 @@ pub use cancel::Cancellation;
 pub use change::Changeset;
 pub use error::{StoreError, StoreErrorClass, StoreErrorKind};
 pub use event::{CommittedEvent, FactEvent};
+pub use host::{HostKind, HostMetadata, HostName, HostNameError, HostStatus, HostUpdate};
 pub use id::{
     DEFAULT_SESSION_TITLE, MessageId, MessageIdError, QueueItemId, QueueItemIdError, RunId,
     RunIdError, SessionId, SessionIdError, SessionTitle, SessionTitleError, WorkspacePath,
@@ -33,7 +34,6 @@ pub use message::{
     MessageRoleError, MessageSkeleton, MessageText, MessageTextError, PartSkeleton, PartState,
     PartStateError, ProviderMeta,
 };
-pub use node::{NodeMetadata, NodeName, NodeNameError, NodeUpdate};
 pub use queue::{QueueItem, SubmitMode};
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTreeSnapshot};

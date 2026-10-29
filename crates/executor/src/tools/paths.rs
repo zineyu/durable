@@ -1,9 +1,31 @@
 //! workspace 边界：把工具路径解析到根内，拒绝绝对路径、点段与符号链接逃逸。
+//! 注册 workspace 时的目录校验也在 `check_workspace`：文件系统事实只有 host 判定。
 //! 各工具的参数校验在自己的模块，工具定义在 `durable::tool`。
 
 use std::path::{Component, Path, PathBuf};
 
+use durable::link::WorkspaceCheckError as WorkspaceCheckFailure;
 use durable::{ToolErrorCode, ToolFailure};
+
+/// 校验一个绝对目录能否成为 workspace 身份：必须存在、是目录、规范化后仍是 UTF-8。
+///
+/// 成功时返回规范化后的绝对路径：workspace 身份是 host 与它这一对，agent 只保存结果。
+/// 失败类别与 `durable::WorkspacePathError` 的变体一一对应，agent 据此映射协议错误码。
+pub(crate) fn check_workspace(raw: &str) -> Result<String, WorkspaceCheckFailure> {
+    let path = Path::new(raw);
+    if raw.is_empty() || !path.is_absolute() {
+        return Err(WorkspaceCheckFailure::NotAbsolute);
+    }
+    let canonical = std::fs::canonicalize(path).map_err(|error| match error.kind() {
+        std::io::ErrorKind::NotFound => WorkspaceCheckFailure::NotFound,
+        _ => WorkspaceCheckFailure::Unreadable,
+    })?;
+    if !canonical.is_dir() {
+        return Err(WorkspaceCheckFailure::NotDirectory);
+    }
+    let canonical = canonical.to_str().ok_or(WorkspaceCheckFailure::NotUtf8)?;
+    Ok(canonical.to_owned())
+}
 
 /// workspace 根内的路径解析。根是已规范化的绝对路径，来自 session 的 workspace。
 pub(crate) struct Workspace {

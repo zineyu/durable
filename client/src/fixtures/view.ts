@@ -38,7 +38,8 @@ const updated = (hours: number, minutes: number): number =>
 
 export const workspaces: WorkspaceSummary[] = [
   {
-    id: toWorkspaceId('ws-durable'),
+    id: toWorkspaceId('studio', '/Users/zine/space/project/durable'),
+    host: 'studio',
     path: toWorkspacePath('/Users/zine/space/project/durable'),
     sessions: [
       {
@@ -71,7 +72,8 @@ export const workspaces: WorkspaceSummary[] = [
     ],
   },
   {
-    id: toWorkspaceId('ws-agent'),
+    id: toWorkspaceId('macbook-air-01', '/Users/zine/space/agent'),
+    host: 'macbook-air-01',
     path: toWorkspacePath('/Users/zine/space/project/agent-lab'),
     sessions: [
       {
@@ -89,7 +91,8 @@ export const workspaces: WorkspaceSummary[] = [
 
 export const workspaceWithoutSessions: WorkspaceSummary[] = [
   {
-    id: toWorkspaceId('ws-empty'),
+    id: toWorkspaceId('local', '/Users/zine/space/empty'),
+    host: 'local',
     path: toWorkspacePath('/Users/zine/space/project/durable'),
     sessions: [],
   },

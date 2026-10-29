@@ -174,14 +174,12 @@ impl RunEngine {
     /// 进程重启后接管仍是 running 的 run。
     async fn resume_existing(&self, session: &SessionId) -> Option<RunStart> {
         let run = self.store.running_run(session).await.ok().flatten()?;
-        let workspace = self
-            .store
-            .session_record(session)
-            .await
-            .ok()?
-            .workspace()
-            .clone();
-        Some(RunStart { run, workspace })
+        let record = self.store.session_record(session).await.ok()?;
+        Some(RunStart {
+            run,
+            host: record.host().clone(),
+            workspace: record.workspace().clone(),
+        })
     }
 
     /// 通过注销与重新登记决定是否继续执行。

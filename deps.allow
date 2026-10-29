@@ -53,6 +53,7 @@ hub rust-embed # 编译期内嵌 client/dist
 hub runtime # 平台标准目录与日志初始化
 hub serde # 协议结构序列化
 hub serde_json # JSON 编解码
+hub sqlx # 节点表留在 hub 自己的库里，随 hub 一起退役（ADR 0048）
 hub tempfile # 测试用临时目录
 hub tokio # 异步运行时
 hub tracing # 结构化日志

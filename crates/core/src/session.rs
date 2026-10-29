@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::host::HostName;
 use crate::id::{MessageId, SessionId, SessionTitle, SessionTitleError, WorkspacePath};
 use crate::message::{MessageSkeleton, MessageText};
 use crate::queue::QueueItem;
@@ -17,6 +18,8 @@ const AUTO_TITLE_LIMIT: usize = 50;
 #[serde(rename_all = "camelCase")]
 pub struct SessionMetadata {
     pub id: SessionId,
+    /// session 所属 workspace 的 host。工具调用固定走它的 link。
+    pub host: HostName,
     pub workspace: WorkspacePath,
     pub title: SessionTitle,
     pub busy: bool,
@@ -29,6 +32,7 @@ pub struct SessionMetadata {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
     pub(crate) id: SessionId,
+    pub(crate) host: HostName,
     pub(crate) workspace: WorkspacePath,
     pub(crate) title: SessionTitle,
     pub(crate) title_auto: bool,
@@ -39,6 +43,11 @@ pub struct SessionRecord {
 
 impl SessionRecord {
     #[must_use]
+    pub fn host(&self) -> &HostName {
+        &self.host
+    }
+
+    #[must_use]
     pub fn workspace(&self) -> &WorkspacePath {
         &self.workspace
     }
@@ -47,6 +56,7 @@ impl SessionRecord {
     pub fn metadata(&self, queue_length: u32, busy: bool) -> SessionMetadata {
         SessionMetadata {
             id: self.id.clone(),
+            host: self.host.clone(),
             workspace: self.workspace.clone(),
             title: self.title.clone(),
             busy,

@@ -1,3 +1,8 @@
+#![expect(
+    clippy::too_many_lines,
+    reason = "测试用例用一个函数描述完整的工具循环，拆开会掩盖时序断言。"
+)]
+
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -174,6 +179,8 @@ async fn executes_tool_calls_in_order_and_continues() {
     assert_eq!(
         support::recorded_event_kinds(&harness.database).await,
         vec![
+            "host_registered",
+            "host_status_changed",
             "workspace_registered",
             "session_created",
             "message_queued",

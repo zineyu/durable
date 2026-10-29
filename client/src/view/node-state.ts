@@ -6,8 +6,17 @@ import type { QueueItem } from '../api/generated/QueueItem';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
+import {
+  removeSession,
+  removeWorkspace,
+  upsertHost,
+  upsertSession,
+  upsertWorkspace,
+  withoutRetryKey,
+} from './node-state-helpers';
+import type { HostSnapshot } from '../api/generated/HostSnapshot';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
-import { dropFinished, dropPlaceholder, forgetBodies, invalidateBody } from './bodies';
+import { dropFinished, dropPlaceholder, invalidateBody } from './bodies';
 import type { MessagePlaceholder, RetryState } from './types';
 
 /// 一条事实事件的信封：事件 id、事实提交后的 session 视图与事实本体。
@@ -26,6 +35,7 @@ export type SessionTreeState = Omit<SessionTreeSnapshot, 'session' | 'maxEventId
 /// 单个节点的分片。一个节点的事件只归约到自己的分片，分片之间互不影响。
 export type NodeState = {
   modelName: string;
+  hosts: HostSnapshot[];
   workspaces: WorkspaceMetadata[];
   sessions: SessionMetadata[];
   trees: Record<string, SessionTreeState>;
@@ -49,6 +59,7 @@ export type NodeState = {
 
 export const emptyNodeState: NodeState = {
   modelName: '',
+  hosts: [],
   workspaces: [],
   sessions: [],
   trees: {},
@@ -72,6 +83,7 @@ export function loadNodeBootstrap(state: NodeState, bootstrap: BootstrapResponse
   return rebase(state, bootstrap.maxEventId, {
     ...state,
     modelName: bootstrap.model,
+    hosts: bootstrap.hosts,
     workspaces: bootstrap.workspaces,
     sessions: bootstrap.sessions,
     lastSeenAt: bootstrap.sessions.reduce(seedSeenAt, state.lastSeenAt),
@@ -104,10 +116,24 @@ function sessionOf(fact: FactEnvelope): SessionMetadata {
 export function applyFactEvent(state: NodeState, fact: FactEnvelope): NodeState {
   const event = fact.event;
   switch (event.kind) {
+    case 'host_registered':
+    case 'host_updated':
+      return { ...state, hosts: upsertHost(state.hosts, event.host) };
+    case 'host_removed':
+      return { ...state, hosts: state.hosts.filter((host) => host.name !== event.host) };
+    case 'host_status_changed':
+      return {
+        ...state,
+        hosts: state.hosts.map((host) =>
+          host.name === event.host
+            ? { ...host, status: event.status, detail: event.detail }
+            : host,
+        ),
+      };
     case 'workspace_registered':
       return { ...state, workspaces: upsertWorkspace(state.workspaces, event.workspace) };
     case 'workspace_removed':
-      return removeWorkspace(state, event.path);
+      return removeWorkspace(state, event.host, event.path);
     case 'session_created':
     case 'session_renamed':
       return storeSession(state, sessionOf(fact));
@@ -294,69 +320,6 @@ export function clearRetry(state: NodeState, sessionId: string): NodeState {
     return state;
   }
   return { ...state, retries: withoutRetryKey(state.retries, sessionId) };
-}
-
-function removeSession(state: NodeState, sessionId: string): NodeState {
-  const removed = forgetBodies(state, messageIds(state, sessionId));
-  return {
-    ...removed,
-    sessions: removed.sessions.filter((session) => session.id !== sessionId),
-    trees: withoutKey(removed.trees, sessionId),
-    retries: withoutRetryKey(removed.retries, sessionId),
-    placeholders: withoutKey(removed.placeholders, sessionId),
-    lastSeenAt: withoutKey(removed.lastSeenAt, sessionId),
-  };
-}
-
-/// 该 session 树里全部消息 id。
-function messageIds(state: NodeState, sessionId: string): number[] {
-  return (state.trees[sessionId]?.nodes ?? []).map((node) => node.id);
-}
-
-function removeWorkspace(state: NodeState, path: string): NodeState {
-  const removed = state.sessions
-    .filter((session) => session.workspace === path)
-    .map((session) => session.id);
-  let next = state;
-  for (const id of removed) {
-    next = removeSession(next, id);
-  }
-  return {
-    ...next,
-    workspaces: next.workspaces.filter((workspace) => workspace.path !== path),
-    sessions: next.sessions.filter((session) => session.workspace !== path),
-  };
-}
-
-function withoutRetryKey(
-  retries: Record<string, RetryState>,
-  sessionId: string,
-): Record<string, RetryState> {
-  if (retries[sessionId] === undefined) {
-    return retries;
-  }
-  return Object.fromEntries(Object.entries(retries).filter(([id]) => id !== sessionId));
-}
-
-function withoutKey<T>(entries: Record<string, T>, key: string): Record<string, T> {
-  return Object.fromEntries(Object.entries(entries).filter(([id]) => id !== key));
-}
-
-function upsertWorkspace(
-  workspaces: WorkspaceMetadata[],
-  incoming: WorkspaceMetadata,
-): WorkspaceMetadata[] {
-  if (workspaces.some((workspace) => workspace.path === incoming.path)) {
-    return workspaces;
-  }
-  return [...workspaces, incoming];
-}
-
-function upsertSession(sessions: SessionMetadata[], incoming: SessionMetadata): SessionMetadata[] {
-  if (!sessions.some((session) => session.id === incoming.id)) {
-    return [...sessions, incoming];
-  }
-  return sessions.map((session) => (session.id === incoming.id ? incoming : session));
 }
 
 function upsertNode(nodes: MessageSkeleton[], incoming: MessageSkeleton): MessageSkeleton[] {

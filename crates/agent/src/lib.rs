@@ -1,5 +1,6 @@
 //! agent 二进制库：路由装配、监听地址与类型导出入口。
-//! run 执行在 `engine`，link 与工具契约在 `link`，进程启动在 `main`。
+//! run 执行在 `engine`，host 的运行状态在 `hosts`，link 与工具契约在 `link`，
+//! 进程启动在 `main`。
 
 use std::fmt;
 use std::net::SocketAddr;
@@ -13,6 +14,7 @@ mod api;
 mod config;
 mod engine;
 mod error;
+mod hosts;
 mod link;
 mod provider;
 mod sse;
@@ -22,23 +24,29 @@ pub use config::{
     CONTEXT_CHAR_LIMIT, ConfigError, EngineConfig, MAX_STEPS, MODEL_API_KEY, MODEL_BASE_URL,
     MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
 };
+pub use durable::link::{Operation, Reply, WorkspaceCheckError};
 pub use durable::{
-    Cancellation, ContentKind, ContentPart, DEFAULT_SESSION_TITLE, DeltaKind, FactEvent,
-    MessageBody, MessageId, MessageNode, MessageRole, MessageSkeleton, MessageText,
-    MessageTextError, MessageTree, PartSkeleton, PartState, ProviderMeta, QueueItem, QueueItemId,
-    RunFailure, RunFailureCode, RunId, RunRecord, RunStatus, SessionId, SessionIdError,
-    SessionMetadata, SessionTitle, SessionTitleError, SessionTreeSnapshot, Store, StoreError,
-    StreamEvent, SubmitMode, ToolDefinition, ToolErrorCode, ToolFailure, ToolLimits, ToolOutcome,
-    ToolResultState, WorkspaceMetadata, WorkspacePath, WorkspacePathError,
+    Cancellation, ContentKind, ContentPart, DEFAULT_SESSION_TITLE, DeltaKind, FactEvent, HostKind,
+    HostMetadata, HostName, HostNameError, HostStatus, HostUpdate, MessageBody, MessageId,
+    MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, MessageTree,
+    PartSkeleton, PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode,
+    RunId, RunRecord, RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle,
+    SessionTitleError, SessionTreeSnapshot, Store, StoreError, StreamEvent, SubmitMode,
+    ToolDefinition, ToolErrorCode, ToolFailure, ToolLimits, ToolOutcome, ToolResultState,
+    WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
-pub use link::{LinkClosed, LinkHandle, NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
+pub use hosts::{HEARTBEAT_INTERVAL, HostRegistry, LOCAL_HOST};
+pub use link::{
+    INCOMPATIBLE_EXIT_CODE, LinkClosed, LinkHandle, NoTools, RemoteTools, ToolBox, ToolCall,
+    ToolContext,
+};
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,
-    HealthResponse, HealthStatus, MessageBodiesRequest, MessageBodiesResponse, PROTOCOL_VERSION,
-    RegisterWorkspaceRequest, RemoveWorkspaceRequest, RenameSessionRequest, SubmitMessageRequest,
-    SwitchActiveLeafRequest,
+    HealthResponse, HealthStatus, HostSnapshot, MessageBodiesRequest, MessageBodiesResponse,
+    PROTOCOL_VERSION, RegisterHostRequest, RegisterWorkspaceRequest, RemoveWorkspaceRequest,
+    RenameSessionRequest, SubmitMessageRequest, SwitchActiveLeafRequest, UpdateHostRequest,
 };
 pub use provider::{
     ChatChunk, ChatMessage, ChatRole, ChatStream, ChatToolCall, ModelProvider, OpenAiProvider,
@@ -95,6 +103,13 @@ pub fn export_types(directory: &Path) -> Result<(), Box<dyn std::error::Error>> 
     let config = ts_rs::Config::new().with_out_dir(directory);
     HealthResponse::export_all(&config)?;
     HealthStatus::export_all(&config)?;
+    HostName::export_all(&config)?;
+    HostKind::export_all(&config)?;
+    HostMetadata::export_all(&config)?;
+    HostStatus::export_all(&config)?;
+    HostSnapshot::export_all(&config)?;
+    RegisterHostRequest::export_all(&config)?;
+    UpdateHostRequest::export_all(&config)?;
     WorkspacePath::export_all(&config)?;
     WorkspaceMetadata::export_all(&config)?;
     SessionId::export_all(&config)?;

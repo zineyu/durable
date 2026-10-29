@@ -12,6 +12,8 @@ mod paths;
 mod read_file;
 mod write_file;
 
+pub(crate) use paths::check_workspace;
+
 /// 执行一次工具调用。失败以结构化结果返回，不作为错误传播。
 pub(crate) async fn execute(
     tool: &str,

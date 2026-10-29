@@ -1,11 +1,11 @@
 //! hub 的节点表命令：注册、更新、删除与重连，以及节点快照。
 //! 路由与节点作用域转发在父模块，上游订阅在 `bus`。
 
+use crate::node::{NodeMetadata, NodeName, NodeUpdate};
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Path as UrlPath, Request, State};
 use axum::http::StatusCode;
-use durable::{NodeMetadata, NodeName};
 use serde::de::DeserializeOwned;
 
 use crate::bus;
@@ -59,7 +59,7 @@ pub(crate) async fn register_node(
 ) -> Result<(StatusCode, Json<NodeSnapshot>), ApiError> {
     let name = NodeName::parse(&request.name)?;
     let url = validate_node_url(&request.url)?;
-    let node = state.store.register_node(name, url).await?;
+    let node = state.nodes.register(name, url).await?;
     state.bus.node_registered(node.clone())?;
     state.apply_enabled(node.clone())?;
     tracing::info!(node = %node.name, url = %node.url, "注册节点");
@@ -86,10 +86,10 @@ pub(crate) async fn update_node(
         None => None,
     };
     let after = state
-        .store
-        .update_node(
+        .nodes
+        .update(
             &name,
-            durable::NodeUpdate {
+            NodeUpdate {
                 name: next,
                 url,
                 enabled: request.enabled,
@@ -131,7 +131,7 @@ pub(crate) async fn remove_node(
     UrlPath(name): UrlPath<String>,
 ) -> Result<StatusCode, ApiError> {
     let name = NodeName::parse(&name)?;
-    state.store.remove_node(&name).await?;
+    state.nodes.remove(&name).await?;
     tracing::info!(node = %name, "移除节点");
     state.unwatch(&name)?;
     state.bus.node_removed(name)?;
@@ -140,7 +140,7 @@ pub(crate) async fn remove_node(
 
 pub(crate) async fn lookup(state: &HubState, name: &NodeName) -> Result<NodeMetadata, ApiError> {
     state
-        .store
+        .nodes
         .node(name)
         .await?
         .ok_or_else(|| ApiError::node_not_found(format!("节点不存在: {name}")))

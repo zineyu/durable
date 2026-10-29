@@ -2,7 +2,9 @@
 //! 节点状态机在 `bus/node`，上游协议复用 `agent` 的 DTO。
 
 use agent::BootstrapResponse;
-use durable::{FactEvent, MessageId, NodeMetadata, NodeName, ResyncReason, SessionId};
+
+use crate::node::{NodeMetadata, NodeName};
+use durable::{FactEvent, MessageId, ResyncReason, SessionId};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -15,7 +17,7 @@ use ts_rs::TS;
 pub const HUB_PROTOCOL_VERSION: u32 = 6;
 
 /// hub 期望的 agent 协议版本。与 `agent::PROTOCOL_VERSION` 由测试保持一致。
-pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 6;
+pub const REQUIRED_AGENT_PROTOCOL_VERSION: u32 = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
@@ -155,7 +157,7 @@ pub enum HubStreamEvent {
         session: Option<durable::SessionMetadata>,
         #[ts(type = "number")]
         timestamp: i64,
-        event: FactEvent,
+        event: Box<FactEvent>,
     },
     Delta {
         node: NodeName,
