@@ -108,19 +108,27 @@ impl Store {
                 created_at: host.created_at,
                 updated_at: now,
             };
-            if updated.name == host.name {
-                command.changes().update_host(updated.clone());
-                if updated.target != host.target {
-                    // 更换目标可能就是更换了一台机器：已安装的构建不再可信，下次连接重新安装。
-                    command
-                        .changes()
-                        .set_host_installed_build(updated.name.clone(), None);
-                }
-            } else {
+            if updated.name != host.name {
+                // 改名只更改主键；`ON UPDATE CASCADE` 让 workspace 与 session 跟着更换。
                 command
                     .changes()
                     .rename_host(host.name.clone(), updated.name.clone());
-                command.changes().update_host(updated.clone());
+            }
+            command.changes().update_host(updated.clone());
+            if updated.target != host.target {
+                // 更换目标可能就是更换了一台机器：已安装的构建不再可信，下次连接重新安装。
+                command
+                    .changes()
+                    .set_host_installed_build(updated.name.clone(), None);
+            }
+            if updated.name != host.name {
+                // 改名对读取方是「旧名消失，新名出现」：先移除旧名，再写新元数据。
+                command.changes().append_event(
+                    FactEvent::HostRemoved {
+                        host: host.name.clone(),
+                    },
+                    now,
+                );
             }
             command.changes().append_event(
                 FactEvent::HostUpdated {

@@ -31,7 +31,7 @@ impl Changeset {
         self.push(Change::UpdateHost(host));
     }
 
-    /// 改名只改主键；`ON UPDATE CASCADE` 让 workspace 与 session 跟着换。
+    /// 改名只更改主键；`ON UPDATE CASCADE` 让 workspace 与 session 跟着更换。
     pub fn rename_host(&mut self, from: HostName, to: HostName) {
         self.push(Change::RenameHost { from, to });
     }

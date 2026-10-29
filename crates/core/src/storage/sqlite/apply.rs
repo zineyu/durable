@@ -145,7 +145,7 @@ async fn update_host(
     ensure_written(&result, "更新 host")
 }
 
-/// 改主键。workspace 与 session 的外键带 `ON UPDATE CASCADE`，因此它们随主键一起换名。
+/// 更改主键。workspace 与 session 的外键带 `ON UPDATE CASCADE`，因此它们随主键一起更换名字。
 async fn rename_host(
     connection: &mut SqliteConnection,
     from: &HostName,

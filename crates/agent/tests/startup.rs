@@ -141,9 +141,10 @@ async fn restarts_with_same_initial_workspace_without_duplicating() {
     let after = read_bootstrap(&address).await;
     assert_eq!(after.workspaces.len(), 1, "重启不产生重复注册");
     assert_eq!(after.workspaces[0].path.as_str(), canonical);
-    assert!(
-        after.max_event_id >= before.max_event_id,
-        "重复传入已注册的初始 workspace 不写 workspace 事件；link 连接过程中的 host 状态事实会推进事件 id"
+    assert_eq!(
+        after.max_event_id,
+        before.max_event_id + 1,
+        "重复传入已注册的初始 workspace 不写 workspace 事件，只有一条 host 状态事实"
     );
     second.start_kill().expect("结束第二个 agent");
     second.wait().await.expect("等待第二个 agent 退出");

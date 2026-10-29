@@ -5,7 +5,8 @@
 
 use durable::{
     CommittedEvent, ContentPart, FactEvent, HostKind, HostName, MessageText, RunId, RunRecord,
-    RunStatus, SessionId, SessionTitle, Store, StoreError, SubmitMode, WorkspacePath,
+    RunStatus, SessionId, SessionTitle, Store, StoreError, SubmitMode, WorkspaceMetadata,
+    WorkspacePath,
 };
 use tempfile::TempDir;
 
@@ -337,6 +338,70 @@ async fn create_session_reports_an_empty_view() {
     );
     assert_eq!(created.queue_length, 0);
     assert!(!created.busy);
+}
+
+/// 规格 user story R-5 与 R-7：改名带走 workspace 与 session，同时更换目标会清空已安装构建。
+#[tokio::test]
+async fn renaming_and_retargeting_a_host_keeps_data_and_clears_the_build() {
+    let (_directory, store, _session) = store_with_session().await;
+    let host = HostName::parse("laptop").expect("合法 host 名");
+    let path = WorkspacePath::parse("/work").expect("合法 workspace 路径");
+    store
+        .register_host(host.clone(), HostKind::Ssh, Some("laptop".to_owned()))
+        .await
+        .expect("注册 host");
+    store
+        .register_workspace(&host, &path)
+        .await
+        .expect("注册 workspace");
+    let laptop_session = store
+        .create_session(&host, &path, title("改名前的会话"))
+        .await
+        .expect("在 laptop 上创建 session");
+    store
+        .set_host_installed_build(&host, "0.1.0-x86_64")
+        .await
+        .expect("记录已安装构建");
+
+    let renamed = HostName::parse("studio").expect("合法 host 名");
+    store
+        .update_host(
+            &host,
+            durable::HostUpdate {
+                name: Some(renamed.clone()),
+                target: Some("studio.lan".to_owned()),
+                enabled: None,
+            },
+        )
+        .await
+        .expect("改名并更换目标");
+
+    let snapshot = store.bootstrap().await.expect("读取快照");
+    let workspaces: Vec<&WorkspaceMetadata> = snapshot
+        .workspaces
+        .iter()
+        .filter(|workspace| workspace.path == path && workspace.host == renamed)
+        .collect();
+    assert_eq!(workspaces.len(), 1, "workspace 跟着改名");
+    assert_eq!(workspaces[0].host, renamed, "workspace 的 host 是新的名字");
+    let session = snapshot
+        .sessions
+        .iter()
+        .find(|entry| entry.id == laptop_session.id)
+        .expect("session 仍在");
+    assert_eq!(session.host, renamed, "session 跟着改名");
+    assert_eq!(
+        store
+            .host_installed_build(&renamed)
+            .await
+            .expect("读取构建"),
+        None,
+        "更换目标清空已安装构建"
+    );
+    assert!(
+        store.host(&host).await.expect("读取旧名").is_none(),
+        "旧名立即消失"
+    );
 }
 
 /// 根命令的事实不带 session 视图。

@@ -17,6 +17,20 @@ fn binary() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_executor"))
 }
 
+fn command_with_build(protocol: u32, build: &str) -> Command {
+    let mut command = Command::new(binary());
+    command
+        .arg("--link-protocol")
+        .arg(protocol.to_string())
+        .arg("--build")
+        .arg(build)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    command
+}
+
 fn command(protocol: u32) -> Command {
     let mut command = Command::new(binary());
     command
@@ -75,4 +89,16 @@ async fn answers_ping_and_exits_on_eof() {
         .expect("EOF 后按时退出")
         .expect("等待 executor 退出");
     assert!(status.success(), "干净 EOF 以 0 退出，实际 {status:?}");
+}
+
+/// 规格 user story R-16：期望的构建 id 与本二进制不符时以退出码 3 结束。
+#[tokio::test]
+async fn rejects_a_foreign_build_id() {
+    let status = command_with_build(LINK_PROTOCOL_VERSION, "0.0.0-foreign")
+        .spawn()
+        .expect("启动 executor")
+        .wait()
+        .await
+        .expect("等待 executor 退出");
+    assert_eq!(status.code(), Some(3), "构建不符以 3 退出，实际 {status:?}");
 }

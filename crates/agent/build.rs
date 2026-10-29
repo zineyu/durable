@@ -4,12 +4,14 @@
 use std::env;
 use std::path::Path;
 
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../build/build_id.rs"
+));
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=TARGET");
-    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_owned());
+    emit_build_id();
     let target = env::var("TARGET").unwrap_or_else(|_| "unknown".to_owned());
-    println!("cargo:rustc-env=DURABLE_BUILD_ID={version}-{target}");
     println!(
         "cargo:rustc-env=DURABLE_BUILD_PLATFORM={}",
         platform(&target)

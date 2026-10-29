@@ -3,10 +3,11 @@
 
 use std::env;
 
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../build/build_id.rs"
+));
+
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=TARGET");
-    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".to_owned());
-    let target = env::var("TARGET").unwrap_or_else(|_| "unknown".to_owned());
-    println!("cargo:rustc-env=DURABLE_BUILD_ID={version}-{target}");
+    emit_build_id();
 }

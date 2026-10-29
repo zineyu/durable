@@ -42,7 +42,7 @@ impl HostRegistry {
         tokio::spawn(Arc::clone(self).supervisor(host.name.clone(), cancel));
     }
 
-    /// host 的后台连接任务：连上就等它断开，断开或连不上就退避后重试。
+    /// host 的后台连接任务：连上就等待它断开，断开或连不上就退避后重试。
     ///
     /// 退避为 1 秒起、逐次翻倍、封顶 30 秒，并加一半以内的抖动。
     /// 用户动作（重连、更改目标、停用、删除）会让 [`cancelled`] 醒来，任务随即退出。

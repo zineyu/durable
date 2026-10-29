@@ -276,7 +276,7 @@ impl LinkHandle {
 
     /// 在 executor 上执行一次工具调用。
     ///
-    /// 取消时向 executor 发取消帧并等它的回答：executor 总是回一帧结果，
+    /// 取消时向 executor 发取消帧并等待它的回答：executor 总是回一帧结果，
     /// 因此取消的结局仍是工具失败（`cancelled` 或被杀进程组之后的失败）。
     ///
     /// # Errors

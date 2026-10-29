@@ -38,7 +38,7 @@ pub use durable::{
 };
 pub use engine::RunEngine;
 pub use error::ApiError;
-pub use hosts::{HEARTBEAT_INTERVAL, HostRegistry, LOCAL_HOST};
+pub use hosts::{HEARTBEAT_INTERVAL, HostRegistry, LOCAL_HOST, STARTUP_READY_WAIT};
 pub use link::{
     BUILD_ID, BUILD_PLATFORM, INCOMPATIBLE_EXIT_CODE, LinkClosed, LinkHandle, NoTools, RemoteTools,
     ToolBox, ToolCall, ToolContext,

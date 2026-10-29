@@ -130,7 +130,7 @@
 - 帧格式为长度前缀（4 字节大端）加 UTF-8 JSON。帧的种类是：`request`、`result`、`cancel`、`ping`、`pong`。心跳是 `ping` 与 `pong` 一对；`request` 的操作有两种，工具执行与 workspace 校验，`result` 的答复种类与请求操作一一对应。
 - `request` 带请求 id、工具名与参数 JSON。`result` 带同一 id、结局（成功、工具失败、取消）与内容。多个请求按 id 多路复用，一个 host 只有一条 link。
 - `agent` 与 `executor` 的帧协议版本与构建 id 通过启动参数传递：`agent` 启动 `executor` 时带上 `--link-protocol` 与 `--build`。`executor` 发现不符立即以退出码 3 结束并在标准错误写出原因，`agent` 据此把 host 置为 `incompatible`。
-- 远端传输：`agent` 启动 `ssh <target> executor --protocol <n> --build <id>`，以 ssh 子进程的标准输入输出为 link。远端不监听端口。
+- 远端传输：`agent` 启动 `ssh <target> executor --link-protocol <n> --build <id>`，以 ssh 子进程的标准输入输出为 link。远端不监听端口。
 - 本机传输：`agent` 直接启动 `executor` 子进程，参数相同，标准输入输出为 link。
 - 安装：`agent` 记录每个 host 的 `installed_build`。首次连接或构建变化时，按远端 `uname -sm` 选择执行端二进制，经 SSH 的标准输入写入 host 的标准数据目录下的 `executor-<build>`，加可执行位，然后启动。载荷来源是环境变量 `DURABLE_EXECUTOR_<平台>`（发布钩子），省略时用与 `agent` 同目录的 `executor`，要求平台一致；没有可用载荷的组合直接 `incompatible`。更改 SSH 目标会清空 `installed_build`，下次连接重新安装。
 - 心跳：每 15 秒一次 `ping`，往返毫秒数写入 host 快照的延迟字段。

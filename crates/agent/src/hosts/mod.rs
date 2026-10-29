@@ -6,7 +6,7 @@
 //! 本机 host 启动即自动注册，状态三态显式可见，ssh host 首次连接时自动安装 executor，
 //! 断链后按退避重连，同一 host 上的多个 session 共用一条 link。
 
-mod ssh;
+mod connect;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -25,6 +25,12 @@ use crate::protocol::HostSnapshot;
 
 /// 心跳间隔。往返毫秒数写进 host 快照的延迟字段。
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
+
+/// 等待 host 就绪时的轮询间隔。
+const READY_POLL: Duration = Duration::from_millis(20);
+
+/// 启动参数登记 workspace 前等待本机 link 的上限。
+pub const STARTUP_READY_WAIT: Duration = Duration::from_secs(2);
 
 /// 本机 host 的固定名字。首次启动自动注册。
 pub const LOCAL_HOST: &str = "local";
@@ -227,15 +233,16 @@ impl HostRegistry {
             .map_or(HostStatus::Unreachable, |runtime| runtime.status)
     }
 
-    /// 等 host 变成 `ok`，最多等到 `timeout`。启动参数里的 workspace 依赖它在登记前就绪。
-    pub async fn await_ready(&self, name: &HostName, timeout: Duration) {
+    /// 等待 host 变成 `ok`，最多等待 `timeout`。启动参数里的 workspace 依赖它在登记前就绪。
+    pub async fn await_ready(&self, name: &HostName, timeout: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + timeout;
         while tokio::time::Instant::now() < deadline {
             if self.status(name).await == HostStatus::Ok {
-                return;
+                return true;
             }
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            tokio::time::sleep(READY_POLL).await;
         }
+        false
     }
 
     /// 请求因 host 不可用而失败时的说明：优先用状态说明，没有时给通用文案。

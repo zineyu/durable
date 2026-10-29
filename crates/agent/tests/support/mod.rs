@@ -31,7 +31,7 @@ pub(crate) use event_stream::{EventStream, error_code, error_envelope};
 pub(crate) use test_agent::TestAgent;
 pub(crate) mod process;
 
-pub(crate) use process::{log_directory, read_address, serving_command};
+pub(crate) use process::{kill_process, log_directory, read_address, serving_command};
 pub(crate) mod provider;
 
 pub(crate) use db::{
@@ -528,10 +528,10 @@ impl Harness {
     }
 }
 
-/// 本机 host 的 executor 子进程 pid。link 由后台任务建立，先等它到 `ok`。
+/// 本机 host 的 executor 子进程 pid。link 由后台任务建立，先等待它到 `ok`。
 async fn await_local_executor_pid(hosts: &agent::HostRegistry) -> Option<u32> {
     let local = agent::HostName::parse(agent::LOCAL_HOST).expect("内置 host 名合法");
-    hosts.await_ready(&local, Duration::from_secs(2)).await;
+    hosts.await_ready(&local, agent::STARTUP_READY_WAIT).await;
     hosts.link(&local).await.and_then(|link| link.pid())
 }
 

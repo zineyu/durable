@@ -10,6 +10,15 @@ use reqwest::StatusCode;
 
 use super::{ScriptedProvider, binary, model_environment};
 
+/// 强杀进程。断链用例直接杀 executor，进程组在强杀时不保证清理，见 ADR 0048。
+pub(crate) fn kill_process(pid: u32) {
+    let status = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("执行 kill");
+    assert!(status.success(), "kill 命令成功");
+}
+
 /// 与 agent 二进制同目录的 executor 二进制：测试内的传输一律是本地子进程。
 pub(crate) fn executor_binary() -> PathBuf {
     let path = binary()

@@ -39,7 +39,7 @@
 - `#[expect]` 在 lint 不再触发时自身报错。过时的抑制无法留在代码里。
 - ESLint 的 `reportUnusedDisableDirectives` 设为 `error`，`--max-warnings=0`，`clippy` 用 `-D warnings`。失效的 `eslint-disable` 是错误，任何告警都阻断。
 
-### 生产代码的四处置信
+### 生产代码的四处抑制
 
 `crates/*/src/` 只有四处 `#[expect]`，全部与运行环境边界有关。逐条列出，便于审查（`crates/hub` 删除后原有三处随 crate 消失，见 ADR 0048）：
 
@@ -62,7 +62,7 @@
 
 ### 范围
 
-检查代码与仓库配置，不检查文档与 SQL。36 个 Markdown 文档是规格与决策记录，结构由人手写维护；5 个迁移文件的正确性由集成测试覆盖。
+检查代码与仓库配置，不检查文档与 SQL。53 个 Markdown 文档是规格与决策记录，结构由人手写维护；唯一的基线迁移文件的正确性由集成测试覆盖。
 
 ## 备选
 

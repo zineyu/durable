@@ -219,11 +219,7 @@ async fn killed_executor_marks_the_host_unreachable_and_reconnect_restores_it() 
         .await;
     let pid = harness.executor_pid();
 
-    let status = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("杀掉 executor");
-    assert!(status.success(), "kill 命令成功");
+    support::kill_process(pid);
 
     let unreachable = harness
         .host_snapshot("local", |host| {
@@ -359,7 +355,7 @@ async fn the_local_host_reconnects_without_a_manual_click() {
     harness
         .host_snapshot("local", |host| host.status == agent::HostStatus::Ok)
         .await;
-    kill_executor(harness.executor_pid());
+    support::kill_process(harness.executor_pid());
 
     harness
         .host_snapshot("local", |host| {
@@ -369,13 +365,4 @@ async fn the_local_host_reconnects_without_a_manual_click() {
     harness
         .host_snapshot("local", |host| host.status == agent::HostStatus::Ok)
         .await;
-}
-
-/// 强杀 executor 子进程。进程组在强杀时不保证清理，见 ADR 0048。
-fn kill_executor(pid: u32) {
-    let status = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("执行 kill");
-    assert!(status.success(), "kill 命令成功");
 }

@@ -21,13 +21,13 @@ ADR 0001 把 agent 循环与工具执行放在同一个进程，ADR 0021 再让 
 
 **传输。** `agent` 启动 `ssh <target> durable-executor`，两侧在标准输入输出上交换带长度前缀的 JSON 帧。远端不监听任何端口，信任边界完全落在 SSH 上。本机是一个 host，传输是直接启动 `executor` 子进程，帧协议与工具语义只有一份。
 
-**安装。** `agent` 内嵌各平台的 `executor` 二进制，首次连接时按远端平台选择、推送并校验构建版本。版本不符时 host 状态为 `incompatible`。发布因此需要构建矩阵。
+**安装。** 首次连接时按远端平台选择执行端二进制、推送并校验构建版本与构建 id。版本不符时 host 状态为 `incompatible`。载荷来源是环境变量 `DURABLE_EXECUTOR_<平台>`，省略时用与 `agent` 同目录的 `executor`；多平台内置矩阵不在首版范围内（见规格 Out of Scope）。
 
 **文件系统事实只有一处判定。** workspace 注册时的路径校验、工具路径解析与四个工具的执行全部在 `executor` 内完成。`agent` 只保存结果，不重算边界。
 
 **工具定义只有一份。** 名称、说明与 JSON Schema 留在共用的 `durable` crate：`agent` 引用它拼模型请求，`executor` 引用它做参数反序列化与校验。`agent` 只透传 JSON，不理解参数形状。
 
-**传输有两种，帧只有一种。** 远端 host 的传输是 `ssh` 子进程，本机 host 的传输是 `executor` 子进程，两者都以标准输入输出作为 link。帧只有四种：请求、结果、取消、心跳。一次工具调用一帧请求、一帧结果；取消按请求 id 匹配；`executor` 收到取消后杀掉进程组，仍回一帧结果；心跳用于保活与量延迟。工具输出不在 link 上流式传输。
+**传输有两种，帧只有一种。** 远端 host 的传输是 `ssh` 子进程，本机 host 的传输是 `executor` 子进程，两者都以标准输入输出作为 link。帧是请求、结果、取消、`ping` 与 `pong`：心跳是后两者一对。一次工具调用一帧请求、一帧结果；取消按请求 id 匹配；`executor` 收到取消后杀掉进程组，仍回一帧结果；心跳用于保活与量延迟。工具输出不在 link 上流式传输。
 
 **host 仍是三态。** `ok`、`unreachable`、`incompatible`。安装失败归 `unreachable`，说明写失败原文；构建版本或帧协议版本不符归 `incompatible`。日志方面 `executor` 只写标准错误，由 `agent` 并入自己的日志并标注 host 名，host 上不留日志文件。
 

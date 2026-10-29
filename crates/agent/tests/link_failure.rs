@@ -3,8 +3,6 @@
 //!
 //! 断链用杀掉本地 executor 子进程模拟；进程组在 executor 被强杀时不保证清理，见 ADR 0048。
 
-#![expect(clippy::expect_used, reason = "测试用 expect 直接报告夹具与断言失败。")]
-
 use std::time::Duration;
 
 mod support;
@@ -39,7 +37,7 @@ async fn executor_killed_mid_tool_fails_run_and_continues_queue() {
     assert!(marker.exists(), "bash 已开始执行");
 
     harness.submit_message(&session.id, "继续").await;
-    kill_executor(harness.executor_pid());
+    support::kill_process(harness.executor_pid());
 
     let tree = harness.wait_idle(&session.id).await;
     assert_eq!(tree.runs.len(), 2, "断链后队列继续执行下一项");
@@ -72,12 +70,4 @@ async fn executor_killed_mid_tool_fails_run_and_continues_queue() {
         vec![agent::ToolResultState::Unknown],
         "在途工具调用记为结果未知"
     );
-}
-
-fn kill_executor(pid: u32) {
-    let status = std::process::Command::new("kill")
-        .args(["-9", &pid.to_string()])
-        .status()
-        .expect("执行 kill -9");
-    assert!(status.success(), "executor 进程被杀");
 }
