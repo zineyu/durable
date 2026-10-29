@@ -3,7 +3,7 @@ import { AppShell } from './AppShell';
 import { EmptyState } from './EmptyState';
 import { Sidebar } from './Sidebar';
 import { toSessionId } from '../view/ids';
-import { modelName, nodes, workspaces } from '../fixtures/view';
+import { hosts, modelName, workspaces } from '../fixtures/view';
 
 const meta = {
   title: 'Components/AppShell',
@@ -19,8 +19,9 @@ export const WithSidebar: Story = {
   args: {
     sidebar: (
       <Sidebar
-        nodes={nodes}
-        selectedNode="macbook-air-01"
+        hosts={hosts}
+        selectedHost="macbook-air-01"
+        sessions={workspaces.flatMap((workspace) => workspace.sessions)}
         modelName={modelName}
         workspaces={workspaces}
         selectedSessionId={toSessionId('s-2')}

@@ -2,9 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { Sidebar } from './Sidebar';
 import { toSessionId } from '../view/ids';
 import {
+  hosts,
   modelName,
-  nodes,
-  unreachableNode,
+  unreachableHost,
   workspaceWithoutSessions,
   workspaces,
 } from '../fixtures/view';
@@ -20,9 +20,12 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+const sessions = workspaces.flatMap((workspace) => workspace.sessions);
+
 const base = {
-  nodes,
-  selectedNode: 'macbook-air-01',
+  hosts,
+  selectedHost: 'macbook-air-01',
+  sessions,
   modelName,
   workspaces,
 };
@@ -38,6 +41,7 @@ export const Empty: Story = {
   args: {
     ...base,
     workspaces: [],
+    sessions: [],
     selectedSessionId: null,
   },
 };
@@ -46,6 +50,7 @@ export const WorkspaceWithoutSessions: Story = {
   args: {
     ...base,
     workspaces: workspaceWithoutSessions,
+    sessions: [],
     selectedSessionId: null,
   },
 };
@@ -66,59 +71,62 @@ export const DeleteConfirm: Story = {
   },
 };
 
-export const UnreachableNode: Story = {
+export const UnreachableHost: Story = {
   args: {
     ...base,
-    selectedNode: unreachableNode.name,
+    selectedHost: unreachableHost.name,
     workspaces: [],
+    sessions: [],
     selectedSessionId: null,
-    notice: unreachableNode.detail,
+    notice: unreachableHost.detail,
     commandsDisabled: true,
   },
 };
 
-export const UnknownNode: Story = {
+export const UnknownHost: Story = {
   args: {
     ...base,
-    selectedNode: 'retired-studio',
+    selectedHost: 'retired-studio',
     workspaces: [],
+    sessions: [],
     selectedSessionId: null,
-    notice: '未知节点，节点表里没有这个名字',
+    notice: '未知 host，host 表里没有这个名字',
     commandsDisabled: true,
   },
 };
 
-export const NoNodes: Story = {
+export const NoHosts: Story = {
   args: {
     ...base,
-    nodes: [],
-    selectedNode: null,
+    hosts: [],
+    selectedHost: null,
     workspaces: [],
+    sessions: [],
     selectedSessionId: null,
   },
 };
 
 const running: RunningEntry[] = [
   {
-    node: 'macbook-air-01',
+    host: 'macbook-air-01',
     sessionId: toSessionId('s-1'),
     title: '双二进制骨架与工程基线',
-    queueLength: 0,
-    startedAt: 1,
-  },
-  {
-    node: 'macbook-air-02',
-    sessionId: toSessionId('s-4'),
-    title: 'SQLite 迁移与恢复',
     queueLength: 2,
     startedAt: 2,
+  },
+  {
+    host: 'macbook-air-02',
+    sessionId: toSessionId('s-4'),
+    title: 'SQLite 迁移与恢复',
+    queueLength: 0,
+    startedAt: 1,
   },
 ];
 
 export const WithActivity: Story = {
   args: {
     ...base,
-    selectedSessionId: toSessionId('s-1'),
+    selectedSessionId: toSessionId('s-2'),
     running,
   },
 };

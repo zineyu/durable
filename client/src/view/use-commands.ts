@@ -2,9 +2,8 @@ import { useCallback, useState } from 'react';
 import type { Dispatch } from 'react';
 import { api } from '../api/client';
 import type { ApiFailure, ApiResult } from '../api/client';
-import type { NodeName } from '../api/generated/NodeName';
 import type { SubmitMode } from '../api/generated/SubmitMode';
-import { isNodeDialog } from '../components/dialog-body';
+import { isHostDialog } from '../components/dialog-body';
 import type { DialogState } from '../components/dialog-body';
 import type { SessionEditing } from '../components/Sidebar';
 import { emptyDraft, readDraft, writeDraft } from './drafts';
@@ -27,7 +26,7 @@ export type CommandsOptions = {
   dispatch: Dispatch<ClientAction>;
   report: (failure: ApiFailure) => void;
   runCommand: (result: Promise<ApiResult<unknown>>) => void;
-  navigate: (node: NodeName | null, sessionId: SessionId | null) => void;
+  navigate: (sessionId: Selection) => void;
 };
 
 export type Commands = {
@@ -63,13 +62,10 @@ export function useCommands({
 }: CommandsOptions): Commands {
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [editing, setEditing] = useState<SessionEditing | null>(null);
-  const [draft, setDraft] = useState<Draft>(() =>
-    readDraft(storage, selection.node, selection.sessionId),
-  );
+  const [draft, setDraft] = useState<Draft>(() => readDraft(storage, selection));
   const [sendMode, setSendMode] = useState<SubmitMode>('queue');
 
-  const selectedNode = selection.node;
-  const selectedSessionId = selection.sessionId;
+  const selectedSessionId = selection;
 
   const updateDialog = useCallback((next: DialogState | null) => { setDialog(next); }, []);
   const closeDialog = useCallback(() => { setDialog(null); }, []);
@@ -88,44 +84,36 @@ export function useCommands({
     (text: string, pastes: Record<string, string>) => {
       const next: Draft = { text, pastes };
       setDraft(next);
-      writeDraft(storage, selectedNode, selectedSessionId, next);
+      writeDraft(storage, selectedSessionId, next);
     },
-    [selectedNode, selectedSessionId],
+    [selectedSessionId],
   );
 
   const resetForLocation = useCallback((next: Selection) => {
-    setDraft(readDraft(storage, next.node, next.sessionId));
+    setDraft(readDraft(storage, next));
     setDialog(null);
     setEditing(null);
   }, []);
 
   const createSession = useCallback(
     (host: string, workspace: WorkspacePath) => {
-      if (selectedNode === null) {
-        return;
-      }
-      const node = selectedNode;
       void (async () => {
-        const outcome = await api.createSession(node, host, workspace, null);
+        const outcome = await api.createSession(host, workspace, null);
         if (!outcome.ok) {
           report(outcome.error);
           return;
         }
-        dispatch({ type: 'session', node, session: outcome.value });
-        navigate(node, toSessionId(outcome.value.id));
+        dispatch({ type: 'session', session: outcome.value });
+        navigate(toSessionId(outcome.value.id));
       })();
     },
-    [dispatch, navigate, report, selectedNode],
+    [dispatch, navigate, report],
   );
 
   const renameSession = useCallback(
     (id: SessionId, title: string) => {
-      if (selectedNode === null) {
-        return;
-      }
-      const node = selectedNode;
       void (async () => {
-        const outcome = await api.renameSession(node, id, title);
+        const outcome = await api.renameSession(id, title);
         if (!outcome.ok) {
           report(outcome.error);
           return;
@@ -133,61 +121,56 @@ export function useCommands({
         setEditing(null);
       })();
     },
-    [report, selectedNode],
+    [report],
   );
 
   const deleteSession = useCallback(
     (id: SessionId) => {
-      if (selectedNode === null) {
-        return;
-      }
-      const node = selectedNode;
       void (async () => {
-        const outcome = await api.deleteSession(node, id);
+        const outcome = await api.deleteSession(id);
         if (!outcome.ok) {
           report(outcome.error);
           return;
         }
         setEditing(null);
         if (id === selectedSessionId) {
-          navigate(node, null);
+          navigate(null);
         }
       })();
     },
-    [navigate, report, selectedNode, selectedSessionId],
+    [navigate, report, selectedSessionId],
   );
 
   const send = useCallback(
     (text: string) => {
-      if (selectedNode === null || view === null) {
+      if (view === null) {
         return;
       }
       const trimmed = text.trim();
       if (trimmed.length === 0) {
         return;
       }
-      const node = selectedNode;
       const id = view.session.id;
       const mode = view.session.busy ? sendMode : 'queue';
       void (async () => {
-        const outcome = await api.submitMessage(node, id, trimmed, mode);
+        const outcome = await api.submitMessage(id, trimmed, mode);
         if (!outcome.ok) {
           report(outcome.error);
           return;
         }
         setDraft(emptyDraft);
-        writeDraft(storage, node, toSessionId(id), emptyDraft);
+        writeDraft(storage, toSessionId(id), emptyDraft);
       })();
     },
-    [report, selectedNode, sendMode, view],
+    [report, sendMode, view],
   );
 
   const cancelRun = useCallback(() => {
-    if (selectedNode === null || view?.session.busy !== true) {
+    if (view?.session.busy !== true) {
       return;
     }
-    runCommand(api.cancelRun(selectedNode, view.session.id));
-  }, [runCommand, selectedNode, view]);
+    runCommand(api.cancelRun(view.session.id));
+  }, [runCommand, view]);
 
   const confirmDialog = useCallback(() => {
     if (dialog === null) {
@@ -196,75 +179,65 @@ export function useCommands({
     const current = dialog;
     const close = () => { setDialog(null); };
 
-    if (isNodeDialog(current)) {
+    if (isHostDialog(current)) {
       void (async () => {
         switch (current.kind) {
-          case 'register-node': {
-            const outcome = await api.registerNode(current.name.trim(), current.url.trim());
+          case 'register-host': {
+            const outcome = await api.registerHost(
+              current.name.trim(),
+              current.hostKind,
+              current.hostKind === 'ssh' ? current.target.trim() : null,
+            );
             if (!outcome.ok) {
               report(outcome.error);
               return;
             }
             close();
-            navigate(outcome.value.name, null);
             return;
           }
-          case 'rename-node': {
-            const outcome = await api.renameNode(current.name, current.next.trim());
+          case 'rename-host': {
+            const outcome = await api.updateHost(current.name, {
+              name: current.next.trim(),
+            });
             if (!outcome.ok) {
               report(outcome.error);
               return;
             }
             close();
-            if (selectedNode === current.name) {
-              navigate(outcome.value.name, selectedSessionId);
-            }
             return;
           }
-          case 'remove-node': {
-            const outcome = await api.removeNode(current.name);
+          case 'remove-host': {
+            const outcome = await api.removeHost(current.name);
             if (!outcome.ok) {
               report(outcome.error);
               return;
             }
             close();
-            if (selectedNode === current.name) {
-              navigate(null, null);
-            }
             return;
           }
           default: {
             const unhandled: never = current;
-            throw new Error(`未处理的节点对话框: ${JSON.stringify(unhandled)}`);
+            throw new Error(`未处理的 host 对话框: ${JSON.stringify(unhandled)}`);
           }
         }
       })();
       return;
     }
 
-    if (selectedNode === null) {
-      return;
-    }
-    const node = selectedNode;
     void (async () => {
       let outcome: ApiResult<unknown>;
       switch (current.kind) {
         case 'edit':
-          outcome = await api.editUserMessage(
-            node,
-            current.sessionId,
-            current.messageId,
-            current.text,
-          );
+          outcome = await api.editUserMessage(current.sessionId, current.messageId, current.text);
           break;
         case 'retry':
-          outcome = await api.retryAssistantMessage(node, current.sessionId, current.messageId);
+          outcome = await api.retryAssistantMessage(current.sessionId, current.messageId);
           break;
         case 'register-workspace':
-          outcome = await api.registerWorkspace(node, current.host, current.path);
+          outcome = await api.registerWorkspace(current.host, current.path);
           break;
         case 'remove-workspace':
-          outcome = await api.removeWorkspace(node, current.host, current.path);
+          outcome = await api.removeWorkspace(current.host, current.path);
           break;
         default: {
           const unhandled: never = current;
@@ -277,7 +250,7 @@ export function useCommands({
       }
       close();
     })();
-  }, [dialog, navigate, report, selectedNode, selectedSessionId]);
+  }, [dialog, report]);
 
   return {
     dialog,

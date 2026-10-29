@@ -5,8 +5,8 @@ import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import { sessionView } from './derived';
 import { markdownFileName, sessionMarkdown } from './session-markdown';
-import { emptyNodeState } from './node-state';
-import type { NodeState } from './node-state';
+import { emptyClientState } from './state';
+import type { ClientState } from './state';
 import type { SessionView } from './types';
 
 const session: SessionMetadata = {
@@ -27,9 +27,9 @@ function text(value: string): ContentPart {
   return { kind: 'text', text: value, providerMeta: null };
 }
 
-function state(bodies: Record<number, ContentPart[]>): NodeState {
+function state(bodies: Record<number, ContentPart[]>): ClientState {
   return {
-    ...emptyNodeState,
+    ...emptyClientState,
     sessions: [session],
     trees: {
       's-1': {
@@ -48,7 +48,7 @@ function state(bodies: Record<number, ContentPart[]>): NodeState {
   };
 }
 
-function viewOf(value: NodeState): SessionView {
+function viewOf(value: ClientState): SessionView {
   const view = sessionView(value, 's-1');
   if (view === null) {
     throw new Error('缺少 session 视图');
@@ -65,7 +65,7 @@ describe('Markdown 导出', () => {
       'macbook-air-01',
     );
     expect(markdown).toContain('# 迁移与恢复');
-    expect(markdown).toContain('- 节点：macbook-air-01');
+    expect(markdown).toContain('- host：macbook-air-01');
     expect(markdown).toContain('- workspace：/work/a');
     expect(markdown.indexOf('## 用户')).toBeLessThan(markdown.indexOf('## 助手'));
     expect(markdown).toContain('把迁移补上。');
@@ -106,8 +106,8 @@ describe('Markdown 导出', () => {
   });
 
   it('压缩消息渲染为引用块', () => {
-    const compacted: NodeState = {
-      ...emptyNodeState,
+    const compacted: ClientState = {
+      ...emptyClientState,
       sessions: [session],
       trees: {
         's-1': {

@@ -43,7 +43,7 @@
   color: var(--color-text-tertiary);
 }
 
-.node {
+.host {
   flex: none;
   color: var(--color-text-secondary);
 }

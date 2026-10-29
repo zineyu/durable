@@ -1,4 +1,4 @@
-//! agent 二进制库：路由装配、监听地址与类型导出入口。
+//! agent 二进制库：路由装配、静态资源、监听地址与类型导出入口。
 //! run 执行在 `engine`，host 的运行状态在 `hosts`，link 与工具契约在 `link`，
 //! 进程启动在 `main`。
 
@@ -11,6 +11,7 @@ use ts_rs::TS;
 pub mod protocol;
 
 mod api;
+mod assets;
 mod config;
 mod engine;
 mod error;

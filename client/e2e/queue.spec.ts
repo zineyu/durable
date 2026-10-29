@@ -61,7 +61,7 @@ test('run 进行中发送插话，在下一次模型请求生效', async ({ page
   expect(requests[1]?.messages.at(-1)).toMatchObject({ role: 'user', content: '改成只改领域层' });
 });
 
-test('取消运行中的 run 丢弃未定型的输出并继续执行队列', async ({ page, app }) => {
+test('取消运行中的 run 保留部分输出为已中断并继续执行队列', async ({ page, app }) => {
   app.provider.push({ kind: 'hold', text: '被打断的回答。' });
   app.provider.push({ kind: 'text', text: '队列里那条的回答。' });
 
@@ -77,11 +77,12 @@ test('取消运行中的 run 丢弃未定型的输出并继续执行队列', asy
 
   await page.getByRole('button', { name: '取消' }).click();
 
-  await expect(page.getByText('被打断的回答。')).toHaveCount(0);
   await expect(page.getByText('已取消')).toHaveCount(0);
+  await expect(page.getByText('已中断')).toBeVisible();
 
   await expect(page.getByText('队列里那条的回答。')).toBeVisible();
-  await expect(assistantMessages(page)).toHaveCount(1);
+  await expect(assistantMessages(page)).toHaveCount(2);
+  await expect(assistantMessages(page).first()).toHaveAttribute('data-state', 'interrupted');
   await expect(assistantMessages(page).last()).toHaveAttribute('data-state', 'complete');
   await expect(page.getByText('暂无排队消息')).toBeVisible();
   await expect(composer(page)).toBeVisible();

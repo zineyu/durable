@@ -1,5 +1,4 @@
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
-import type { NodeName } from '../api/generated/NodeName';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { ToolResultState } from '../api/generated/ToolResultState';
@@ -7,12 +6,10 @@ import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { bodyText } from './content';
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
 import { retryNote, runFailureLabel, sessionStateOf } from './labels';
-import type { NodeState, SessionTreeState } from './node-state';
+import type { ClientState, SessionTreeState } from './state';
 import type {
   BranchPosition,
   MessageState,
-  NodeRecord,
-  NodeSummary,
   PaletteSession,
   QueueItem,
   RetryState,
@@ -24,34 +21,38 @@ import type {
   WorkspaceSummary,
 } from './types';
 
-/// 本模块负责由节点分片推导呈现所需的视图：session 摘要、完整 session 视图、
-/// workspace 分组、节点摘要、运行中列表、命令面板 session 列表与缺失分片的节点名。
-/// 它是分片的唯一常规读取者：其它模块不得为呈现目的读取分片字段，
-/// 也不得遍历 `Record<NodeName, NodeState>`。
-/// 不属于它的：事实归约在 `reducer.ts`，块正文缓存的状态机在 `bodies.ts`，
+/// 本模块负责由唯一一份客户端状态推导呈现所需的视图：session 摘要、完整 session 视图、
+/// workspace 分组、运行中列表、命令面板 session 列表与缺失正文 id。
+/// 它是状态的唯一常规读取者：其它模块不得为呈现目的读取状态字段。
+/// 不属于它的：事实归约在 `state.ts` 与 `reducer.ts`，块正文缓存的状态机在 `bodies.ts`，
 /// 组件渲染在 `components/`。
 
-export function sessionSummaries(shard: NodeState): SessionSummary[] {
-  return summaryRows(shard).map((row) => row.summary);
+export function sessionSummaries(state: ClientState): SessionSummary[] {
+  return summaryRows(state).map((row) => row.summary);
 }
 
-export function workspaceSummaries(shard: NodeState): WorkspaceSummary[] {
-  const rows = summaryRows(shard);
-  return [...shard.workspaces].sort(compareWorkspaces).map((workspace) => ({
+export function workspaceSummaries(state: ClientState): WorkspaceSummary[] {
+  const rows = summaryRows(state);
+  return [...state.workspaces].sort(compareWorkspaces).map((workspace) => ({
     id: toWorkspaceId(workspace.host, workspace.path),
     host: workspace.host,
     path: toWorkspacePath(workspace.path),
-    sessions: rows
-      .filter(
-        (row) => row.session.host === workspace.host && row.session.workspace === workspace.path,
-      )
-      .sort((left, right) => right.session.updatedAt - left.session.updatedAt)
-      .map((row) => row.summary),
+    sessions: hostAvailable(state, workspace.host)
+      ? rows
+          .filter(
+            (row) =>
+              row.session.host === workspace.host && row.session.workspace === workspace.path,
+          )
+          .sort((left, right) => right.session.updatedAt - left.session.updatedAt)
+          .map((row) => row.summary)
+      : [],
   }));
 }
 
-export function nodeSummary(shard: NodeState): NodeSummary {
-  return { modelName: shard.modelName, workspaces: workspaceSummaries(shard) };
+/// host 可用时它的 workspace 才列出 session。不可用 host 的列表为空，
+/// 侧栏与主面板据 host 快照显示说明（规格 user story R-47）。
+export function hostAvailable(state: ClientState, host: string): boolean {
+  return state.hosts.some((record) => record.name === host && record.status === 'ok');
 }
 
 /// 侧栏展示顺序下的全部 session，供快捷键在同一顺序里切换。
@@ -59,103 +60,68 @@ export function orderedSessions(workspaces: WorkspaceSummary[]): SessionSummary[
   return workspaces.flatMap((workspace) => workspace.sessions);
 }
 
-export function sessionView(shard: NodeState, sessionId: string): SessionView | null {
-  const session = shard.sessions.find((entry) => entry.id === sessionId);
+export function sessionView(state: ClientState, sessionId: string): SessionView | null {
+  const session = state.sessions.find((entry) => entry.id === sessionId);
   if (session === undefined) {
     return null;
   }
-  const transcript = transcriptEntries(shard, sessionId);
+  const transcript = transcriptEntries(state, sessionId);
   return {
     session,
-    summary: summaryOf(shard, session),
+    summary: summaryOf(state, session),
     transcript,
     history: sessionHistory(transcript),
-    toolResults: toolResultsOf(shard, sessionId),
-    queue: queueOf(shard, sessionId),
-    placeholders: shard.placeholders[sessionId] ?? [],
-    lastRun: latestRun(shard, sessionId)?.status ?? null,
+    toolResults: toolResultsOf(state, sessionId),
+    queue: queueOf(state, sessionId),
+    placeholders: state.placeholders[sessionId] ?? [],
+    lastRun: latestRun(state, sessionId)?.status ?? null,
     idle: !session.busy && session.queueLength === 0,
   };
 }
 
-/// 从各节点分片推导全部正在运行的 session。按开始时间从早到晚排列。
-export function runningEntries(
-  nodes: NodeRecord[],
-  shards: Record<NodeName, NodeState>,
-): RunningEntry[] {
+/// 从唯一状态推导全部正在运行的 session。按开始时间从早到晚排列。
+export function runningEntries(state: ClientState): RunningEntry[] {
   const entries: RunningEntry[] = [];
-  for (const { record, shard } of withShard(nodes, shards)) {
-    for (const summary of sessionSummaries(shard)) {
-      if (summary.state !== 'running') {
-        continue;
-      }
-      const running = shard.trees[summary.id]?.runs.find((run) => run.status === 'running');
-      entries.push({
-        node: record.name,
-        sessionId: summary.id,
-        title: summary.title,
-        queueLength: summary.queuedCount,
-        startedAt: running?.createdAt ?? null,
-      });
+  for (const summary of sessionSummaries(state)) {
+    if (summary.state !== 'running') {
+      continue;
     }
+    const running = state.trees[summary.id]?.runs.find((run) => run.status === 'running');
+    entries.push({
+      host: summary.host,
+      sessionId: summary.id,
+      title: summary.title,
+      queueLength: summary.queuedCount,
+      startedAt: running?.createdAt ?? null,
+    });
   }
   return entries.sort(
     (left, right) =>
       (left.startedAt ?? Number.MAX_SAFE_INTEGER) - (right.startedAt ?? Number.MAX_SAFE_INTEGER) ||
-      left.node.localeCompare(right.node) ||
+      left.host.localeCompare(right.host) ||
       left.sessionId.localeCompare(right.sessionId),
   );
 }
 
-/// 跨节点的 session 列表，供命令面板使用。workspace 不在摘要里，因此取整行。
-export function paletteSessions(
-  nodes: NodeRecord[],
-  shards: Record<NodeName, NodeState>,
-): PaletteSession[] {
-  return withShard(nodes, shards).flatMap(({ record, shard }) =>
-    summaryRows(shard).map(({ session, summary }) => ({
-      node: record.name,
-      sessionId: summary.id,
-      title: summary.title,
-      workspace: session.workspace,
-      updatedAt: summary.updatedAt,
-    })),
-  );
+/// 跨 host 的 session 列表，供命令面板使用。workspace 不在摘要里，因此取整行。
+export function paletteSessions(state: ClientState): PaletteSession[] {
+  return summaryRows(state).map(({ session, summary }) => ({
+    host: session.host,
+    sessionId: summary.id,
+    title: summary.title,
+    workspace: session.workspace,
+    updatedAt: summary.updatedAt,
+  }));
 }
 
-/// 节点表里已有分片的节点。跨节点派生只经这里遍历分片表。
-function withShard(
-  nodes: NodeRecord[],
-  shards: Record<NodeName, NodeState>,
-): { record: NodeRecord; shard: NodeState }[] {
-  const entries: { record: NodeRecord; shard: NodeState }[] = [];
-  for (const record of nodes) {
-    const shard = shards[record.name];
-    if (shard !== undefined) {
-      entries.push({ record, shard });
-    }
-  }
-  return entries;
-}
-
-/// 该 session 是否已进入分片。正文拉取与树快照据此决定要不要发请求。
-export function hasSession(shard: NodeState, sessionId: string): boolean {
-  return shard.sessions.some((session) => session.id === sessionId);
-}
-
-/// `ok` 但尚无分片的节点名。调用方据此取节点作用域的 bootstrap。
-export function missingShards(
-  nodes: NodeRecord[],
-  shards: Record<NodeName, NodeState>,
-): NodeName[] {
-  return nodes
-    .filter((record) => record.status === 'ok' && shards[record.name] === undefined)
-    .map((record) => record.name);
+/// 该 session 是否已在状态里。正文拉取与树快照据此决定要不要发请求。
+export function hasSession(state: ClientState, sessionId: string): boolean {
+  return state.sessions.some((session) => session.id === sessionId);
 }
 
 /// 活动链上尚未取得正文、也没有在请求中的消息 id。调用方据此批量拉取。
-export function missingBodyIds(shard: NodeState, sessionId: string): number[] {
-  const tree = shard.trees[sessionId];
+export function missingBodyIds(state: ClientState, sessionId: string): number[] {
+  const tree = state.trees[sessionId];
   if (tree === undefined) {
     return [];
   }
@@ -163,9 +129,9 @@ export function missingBodyIds(shard: NodeState, sessionId: string): number[] {
     .map((message) => message.id)
     .filter(
       (id) =>
-        shard.bodies[id] === undefined &&
-        !shard.bodyRequests.includes(id) &&
-        !shard.bodyFailures.includes(id),
+        state.bodies[id] === undefined &&
+        !state.bodyRequests.includes(id) &&
+        !state.bodyFailures.includes(id),
     );
 }
 
@@ -185,27 +151,28 @@ export function sessionHistory(transcript: TranscriptEntry[]): string[] {
 }
 
 function summaryRows(
-  shard: NodeState,
+  state: ClientState,
 ): { session: SessionMetadata; summary: SessionSummary }[] {
-  return shard.sessions.map((session) => ({ session, summary: summaryOf(shard, session) }));
+  return state.sessions.map((session) => ({ session, summary: summaryOf(state, session) }));
 }
 
-function summaryOf(shard: NodeState, session: SessionMetadata): SessionSummary {
+function summaryOf(state: ClientState, session: SessionMetadata): SessionSummary {
   return {
     id: toSessionId(session.id),
+    host: session.host,
     title: session.title,
     state: sessionStateOf(session.busy, session.queueLength),
     queuedCount: session.queueLength,
     updatedAt: session.updatedAt,
-    unread: session.updatedAt > (shard.lastSeenAt[session.id] ?? 0),
-    outcome: outcomeOf(latestRun(shard, session.id)),
+    unread: session.updatedAt > (state.lastSeenAt[session.id] ?? 0),
+    outcome: outcomeOf(latestRun(state, session.id)),
   };
 }
 
 /// 最近一次 run，按更新时间取最新。
-function latestRun(shard: NodeState, sessionId: string): RunRecord | null {
+function latestRun(state: ClientState, sessionId: string): RunRecord | null {
   let latest: RunRecord | null = null;
-  for (const run of shard.trees[sessionId]?.runs ?? []) {
+  for (const run of state.trees[sessionId]?.runs ?? []) {
     if (latest === null || run.updatedAt > latest.updatedAt) {
       latest = run;
     }
@@ -240,8 +207,8 @@ function chainOf(tree: SessionTreeState): MessageSkeleton[] {
 }
 
 /// 活动链上供渲染的消息。工具节点的正文只经 `toolResults` 呈现。
-function transcriptEntries(shard: NodeState, sessionId: string): TranscriptEntry[] {
-  const tree = shard.trees[sessionId];
+function transcriptEntries(state: ClientState, sessionId: string): TranscriptEntry[] {
+  const tree = state.trees[sessionId];
   if (tree === undefined) {
     return [];
   }
@@ -249,10 +216,10 @@ function transcriptEntries(shard: NodeState, sessionId: string): TranscriptEntry
   return chainOf(tree)
     .filter((message) => message.role !== 'tool')
     .map((message) => {
-      const display = messageDisplay(tree.runs, shard.retries[sessionId], message);
+      const display = messageDisplay(tree.runs, state.retries[sessionId], message);
       return {
         message,
-        parts: shard.bodies[message.id] ?? null,
+        parts: state.bodies[message.id] ?? null,
         state: display.state,
         note: display.note,
         branch: branchAt(siblings, message),
@@ -341,8 +308,8 @@ function messageDisplay(
 }
 
 /// 按 call id 汇总工具结局。正文未到时没有条目，调用方按执行中渲染。
-function toolResultsOf(shard: NodeState, sessionId: string): Record<string, ToolResultState> {
-  const tree = shard.trees[sessionId];
+function toolResultsOf(state: ClientState, sessionId: string): Record<string, ToolResultState> {
+  const tree = state.trees[sessionId];
   if (tree === undefined) {
     return {};
   }
@@ -351,7 +318,7 @@ function toolResultsOf(shard: NodeState, sessionId: string): Record<string, Tool
     if (node.role !== 'tool') {
       continue;
     }
-    for (const part of shard.bodies[node.id] ?? []) {
+    for (const part of state.bodies[node.id] ?? []) {
       if (part.kind === 'tool_result') {
         results[part.callId] = part.state;
       }
@@ -360,8 +327,8 @@ function toolResultsOf(shard: NodeState, sessionId: string): Record<string, Tool
   return results;
 }
 
-function queueOf(shard: NodeState, sessionId: string): QueueItem[] {
-  return (shard.trees[sessionId]?.queue ?? []).map((item) => ({
+function queueOf(state: ClientState, sessionId: string): QueueItem[] {
+  return (state.trees[sessionId]?.queue ?? []).map((item) => ({
     id: toQueueItemId(String(item.id)),
     text: item.text,
     pendingSteer: item.pendingSteer,

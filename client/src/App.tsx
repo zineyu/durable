@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { api } from './api/client';
-import type { NodeName } from './api/generated/NodeName';
+import type { HostName } from './api/generated/HostName';
 import { AppShell } from './components/AppShell';
 import { CommandPalette } from './components/CommandPalette';
 import { Dialog } from './components/Dialog';
@@ -19,18 +19,17 @@ import { buildPalette, filterPalette, stepPaletteIndex } from './view/command-pa
 import type { PaletteEntry } from './view/command-palette';
 import {
   hasSession,
-  nodeSummary,
   orderedSessions,
   paletteSessions,
   runningEntries,
   sessionView,
+  workspaceSummaries,
 } from './view/derived';
 import { readLastSession, writeLastSession } from './view/drafts';
-import type { SessionId } from './view/ids';
-import { unavailableNotice } from './view/labels';
-import { readSelection, writeLocationToHash } from './view/session-hash';
-import { isEditableTarget, resolveShortcut } from './view/shortcuts';
+import { hostNotice } from './view/labels';
+import { readSelection, writeSelection } from './view/session-hash';
 import type { Selection } from './view/session-hash';
+import { isEditableTarget, resolveShortcut } from './view/shortcuts';
 import { useClientState } from './view/use-client-state';
 import { useCommands } from './view/use-commands';
 import { useDocumentTitle } from './view/use-document-title';
@@ -39,6 +38,8 @@ const storage = window.localStorage;
 
 /// 本模块负责会话选择位置、快捷键、命令面板与侧栏装配。写命令在 `view/use-commands.ts`，
 /// 主面板分支在 `components/MainPane.tsx`，派生视图在 `view/derived.ts`。
+/// 选中位置只是一个 session id；host 由该 session 的 workspace 推出。
+/// 规格 user story R-45：刷新后恢复上次打开的 session。
 export function App(): ReactElement {
   const [selection, setSelection] = useState<Selection>(() => readSelection(window.location.hash));
   const { state, dispatch, report, runCommand } = useClientState(selection);
@@ -47,42 +48,42 @@ export function App(): ReactElement {
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [helpOpen, setHelpOpen] = useState(false);
 
-  const selectedNode = selection.node;
-  const record =
-    selectedNode === null
-      ? undefined
-      : state.hub.nodes.find((entry) => entry.name === selectedNode);
-  const shard = selectedNode === null ? undefined : state.nodes[selectedNode];
   const view = useMemo(
-    () =>
-      shard === undefined || selection.sessionId === null
-        ? null
-        : sessionView(shard, selection.sessionId),
-    [shard, selection.sessionId],
+    () => (selection === null ? null : sessionView(state, selection)),
+    [selection, state],
   );
-  const summary = useMemo(() => (shard === undefined ? null : nodeSummary(shard)), [shard]);
-  const nodeReady = record?.status === 'ok';
+  const workspaces = useMemo(() => workspaceSummaries(state), [state]);
+  const sessions = useMemo(() => orderedSessions(workspaces), [workspaces]);
+  const host = useMemo(
+    () => (view === null ? undefined : state.hosts.find((entry) => entry.name === view.session.host)),
+    [state.hosts, view],
+  );
+  const selectedHost = host?.name ?? null;
+  const connected = host === undefined || host.status === 'ok';
+  const notice = selection === null ? null : hostNotice(host);
 
-  const navigate = useCallback((node: NodeName | null, sessionId: SessionId | null) => {
-    window.location.hash = node === null ? '' : writeLocationToHash(node, sessionId);
+  const navigate = useCallback((sessionId: Selection) => {
+    window.location.hash = writeSelection(sessionId);
   }, []);
 
   const commands = useCommands({ selection, view, dispatch, report, runCommand, navigate });
-  const { cancelRun, closeDialog, dialog, resetForLocation, setDialog } = commands;
+  const { cancelRun, closeDialog, dialog, resetForLocation } = commands;
 
-  const selectNode = useCallback(
-    (node: NodeName) => { navigate(node, null); },
-    [navigate],
-  );
+  const restoreLast = useRef(false);
 
-  const selectSession = useCallback(
-    (id: SessionId) => {
-      if (selectedNode !== null) {
-        navigate(selectedNode, id);
-      }
-    },
-    [navigate, selectedNode],
-  );
+  useEffect(() => {
+    if (restoreLast.current || state.lastEventId === null) {
+      return;
+    }
+    restoreLast.current = true;
+    if (selection !== null) {
+      return;
+    }
+    const last = readLastSession(storage);
+    if (last !== null && hasSession(state, last)) {
+      navigate(last);
+    }
+  }, [navigate, selection, state]);
 
   useEffect(() => {
     const apply = () => {
@@ -96,74 +97,71 @@ export function App(): ReactElement {
   }, [resetForLocation]);
 
   useEffect(() => {
-    if (selectedNode === null || selection.sessionId !== null) {
-      return;
+    if (selection !== null) {
+      writeLastSession(storage, selection);
     }
-    const current = state.hub.nodes.find((entry) => entry.name === selectedNode);
-    if (current?.status !== 'ok' || shard === undefined) {
-      return;
-    }
-    const last = readLastSession(storage, selectedNode);
-    if (last === null || !hasSession(shard, last)) {
-      return;
-    }
-    navigate(selectedNode, last);
-  }, [navigate, selectedNode, selection.sessionId, shard, state.hub.nodes]);
+  }, [selection]);
 
   useEffect(() => {
-    if (selectedNode !== null && selection.sessionId !== null) {
-      writeLastSession(storage, selectedNode, selection.sessionId);
-    }
-  }, [selectedNode, selection.sessionId]);
-
-  useEffect(() => {
-    if (selectedNode === null || view === null) {
+    if (view === null) {
       return;
     }
     dispatch({
       type: 'seen',
-      node: selectedNode,
       sessionId: view.summary.id,
       at: view.summary.updatedAt,
     });
-  }, [dispatch, selectedNode, view]);
+  }, [dispatch, view]);
 
-  useDocumentTitle(selectedNode, view);
+  useDocumentTitle(view);
 
   const paletteEntries = useMemo(
     () =>
       filterPalette(
         buildPalette({
-          nodes: state.hub.nodes,
-          sessions: paletteSessions(state.hub.nodes, state.nodes),
-          selectedNode,
+          hosts: state.hosts,
+          sessions: paletteSessions(state),
+          selectedHost,
           selectedSession: view === null ? null : view.summary,
         }),
         paletteQuery,
       ),
-    [paletteQuery, selectedNode, state.hub.nodes, state.nodes, view],
+    [paletteQuery, selectedHost, state, view],
   );
   const paletteCursor =
     paletteEntries.length === 0 ? 0 : Math.min(paletteIndex, paletteEntries.length - 1);
+
+  const selectSessionOfHost = useCallback(
+    (name: HostName) => {
+      const candidates = paletteSessions(state)
+        .filter((session) => session.host === name)
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+      const target = candidates[0];
+      if (target !== undefined) {
+        navigate(target.sessionId);
+      }
+    },
+    [navigate, state],
+  );
 
   const runPaletteEntry = useCallback(
     (entry: PaletteEntry) => {
       setPaletteOpen(false);
       switch (entry.action.kind) {
         case 'session':
-          navigate(entry.action.node, entry.action.sessionId);
+          navigate(entry.action.sessionId);
           return;
-        case 'node':
-          navigate(entry.action.node, null);
+        case 'host':
+          selectSessionOfHost(entry.action.host);
           return;
-        case 'register-node':
-          setDialog({ kind: 'register-node', name: '', url: '' });
+        case 'register-host':
+          commands.setDialog({ kind: 'register-host', name: '', hostKind: 'local', target: '' });
           return;
         case 'register-workspace':
-          setDialog({ kind: 'register-workspace', host: 'local', path: '' });
+          commands.setDialog({ kind: 'register-workspace', host: selectedHost ?? 'local', path: '' });
           return;
         case 'cancel-run':
-          runCommand(api.cancelRun(entry.action.node, entry.action.sessionId));
+          runCommand(api.cancelRun(entry.action.sessionId));
           return;
         default: {
           const unhandled: never = entry.action;
@@ -171,31 +169,27 @@ export function App(): ReactElement {
         }
       }
     },
-    [navigate, runCommand, setDialog],
+    [commands, navigate, runCommand, selectSessionOfHost, selectedHost],
   );
 
   const cycleSession = useCallback(
     (delta: number) => {
-      if (selectedNode === null || summary === null) {
+      if (sessions.length === 0) {
         return;
       }
-      const ordered = orderedSessions(summary.workspaces);
-      if (ordered.length === 0) {
-        return;
-      }
-      const current = ordered.findIndex((entry) => entry.id === selection.sessionId);
+      const current = sessions.findIndex((entry) => entry.id === selection);
       const next =
         current === -1
           ? delta > 0
             ? 0
-            : ordered.length - 1
-          : (current + delta + ordered.length) % ordered.length;
-      const target = ordered[next];
+            : sessions.length - 1
+          : (current + delta + sessions.length) % sessions.length;
+      const target = sessions[next];
       if (target !== undefined) {
-        navigate(selectedNode, target.id);
+        navigate(target.id);
       }
     },
-    [navigate, selectedNode, selection.sessionId, summary],
+    [navigate, selection, sessions],
   );
 
   useEffect(() => {
@@ -243,11 +237,11 @@ export function App(): ReactElement {
           event.preventDefault();
           cycleSession(command.delta);
           return;
-        case 'select-node': {
-          const target = state.hub.nodes[command.index];
+        case 'select-host': {
+          const target = state.hosts[command.index];
           if (target !== undefined) {
             event.preventDefault();
-            navigate(target.name, null);
+            selectSessionOfHost(target.name);
           }
           return;
         }
@@ -263,46 +257,57 @@ export function App(): ReactElement {
     cycleSession,
     dialog,
     helpOpen,
-    navigate,
     paletteOpen,
-    state.hub.nodes,
+    selectSessionOfHost,
+    state.hosts,
   ]);
 
-  const notice = unavailableNotice(selectedNode, record);
-  const running = useMemo(
-    () => runningEntries(state.hub.nodes, state.nodes),
-    [state.hub.nodes, state.nodes],
-  );
+  const running = useMemo(() => runningEntries(state), [state]);
 
   return (
     <>
       <AppShell
         sidebar={
           <Sidebar
-            nodes={state.hub.nodes}
-            selectedNode={selectedNode}
-            onSelectNode={selectNode}
-            onRegisterNode={() => { commands.setDialog({ kind: 'register-node', name: '', url: '' }); }}
-            onRenameNode={(name) => { commands.setDialog({ kind: 'rename-node', name, next: name }); }}
-            onRemoveNode={(name) => { commands.setDialog({ kind: 'remove-node', name }); }}
+            hosts={state.hosts}
+            selectedHost={selectedHost}
+            selectedSessionId={selection}
+            sessions={sessions}
+            onSelectHostSession={navigate}
+            onRegisterHost={() => {
+              commands.setDialog({ kind: 'register-host', name: '', hostKind: 'local', target: '' });
+            }}
+            onRenameHost={(name) => {
+              commands.setDialog({ kind: 'rename-host', name, next: name });
+            }}
+            onRemoveHost={(name) => {
+              commands.setDialog({ kind: 'remove-host', name });
+            }}
+            onToggleHost={(record) => {
+              runCommand(api.updateHost(record.name, { enabled: !record.enabled }));
+            }}
+            onReconnectHost={(name) => { runCommand(api.reconnectHost(name)); }}
             notice={notice}
-            commandsDisabled={!nodeReady}
+            commandsDisabled={!connected}
             running={running}
-            onSelectRunning={(node, id) => { navigate(node, id); }}
-            onCancelRunning={(node, id) => { runCommand(api.cancelRun(node, id)); }}
-            modelName={summary?.modelName ?? ''}
-            workspaces={summary?.workspaces ?? []}
-            selectedSessionId={selection.sessionId}
+            onSelectRunning={navigate}
+            onCancelRunning={(id) => { runCommand(api.cancelRun(id)); }}
+            modelName={state.modelName}
+            workspaces={workspaces}
             editing={commands.editing}
-            onSelectSession={selectSession}
+            onSelectSession={navigate}
             onRenameRequest={commands.requestRename}
             onRenameSubmit={commands.renameSession}
             onDeleteRequest={commands.requestDelete}
             onDeleteConfirm={commands.deleteSession}
             onEditCancel={commands.cancelEditing}
             onCreateSession={commands.createSession}
-            onAddWorkspace={() => { commands.setDialog({ kind: 'register-workspace', host: 'local', path: '' }); }}
-            onRemoveWorkspace={(host, path) => { commands.setDialog({ kind: 'remove-workspace', host, path }); }}
+            onAddWorkspace={() => {
+              commands.setDialog({ kind: 'register-workspace', host: selectedHost ?? 'local', path: '' });
+            }}
+            onRemoveWorkspace={(host, path) => {
+              commands.setDialog({ kind: 'remove-workspace', host, path });
+            }}
           />
         }
       >
@@ -314,9 +319,9 @@ export function App(): ReactElement {
           />
         ) : null}
         <MainPane
-          node={selectedNode}
-          record={record}
+          sessionId={selection}
           view={view}
+          host={host}
           connection={state.connection}
           draft={commands.draft.text}
           pastes={commands.draft.pastes}
@@ -341,7 +346,9 @@ export function App(): ReactElement {
               commands.setDialog({ kind: 'retry', sessionId: view.session.id, messageId });
             }
           }}
-          onRegisterWorkspace={() => { commands.setDialog({ kind: 'register-workspace', host: 'local', path: '' }); }}
+          onRegisterWorkspace={() => {
+            commands.setDialog({ kind: 'register-workspace', host: selectedHost ?? 'local', path: '' });
+          }}
         />
       </AppShell>
       {commands.dialog !== null ? (
@@ -349,7 +356,7 @@ export function App(): ReactElement {
           title={dialogTitle(commands.dialog)}
           confirmLabel={dialogConfirmLabel(commands.dialog)}
           confirmDisabled={dialogConfirmDisabled(commands.dialog)}
-          danger={commands.dialog.kind === 'remove-node'}
+          danger={commands.dialog.kind === 'remove-host'}
           onConfirm={commands.confirmDialog}
           onCancel={closeDialog}
         >

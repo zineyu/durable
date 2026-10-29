@@ -1,23 +1,22 @@
-import type { NodeName } from '../api/generated/NodeName';
-import type { NodeStatus } from '../api/generated/NodeStatus';
+import type { HostStatus } from '../api/generated/HostStatus';
 import type { RunFailureCode } from '../api/generated/RunFailureCode';
 import type {
   ConnectionState,
+  HostRecord,
   MessageState,
-  NodeRecord,
   RetryState,
   SessionState,
   StatusTone,
   ToolState,
 } from './types';
 
-export const nodeStatusLabel: Record<NodeStatus, string> = {
+export const hostStatusLabel: Record<HostStatus, string> = {
   ok: '可用',
   unreachable: '不可达',
   incompatible: '版本不兼容',
 };
 
-export const nodeStatusTone: Record<NodeStatus, StatusTone> = {
+export const hostStatusTone: Record<HostStatus, StatusTone> = {
   ok: 'success',
   unreachable: 'danger',
   incompatible: 'warn',
@@ -65,21 +64,15 @@ export function retryNote(retry: RetryState): string {
   return `供应商限流，第 ${retry.attempt}/${retry.maxAttempts} 次重试，等待 ${retryDelay(retry.delayMs)}`;
 }
 
-/// 节点切换器下方的说明。节点可用时没有说明。
-export function unavailableNotice(
-  selected: NodeName | null,
-  record: NodeRecord | undefined,
-): string | null {
-  if (selected === null) {
-    return null;
-  }
+/// 侧栏与主面板里的 host 说明。host 可用时没有说明。
+export function hostNotice(record: HostRecord | undefined): string | null {
   if (record === undefined) {
-    return '未知节点，节点表里没有这个名字';
+    return '未知 host，host 表里没有这个名字';
   }
   if (record.status === 'ok') {
     return null;
   }
-  return record.detail ?? nodeStatusLabel[record.status];
+  return record.detail ?? hostStatusLabel[record.status];
 }
 
 function retryDelay(delayMs: number): string {

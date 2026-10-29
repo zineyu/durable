@@ -1,5 +1,6 @@
 //! HTTP 路由与处理器：host、workspace、session、消息树、队列、run 与事件流。
-//! 对外 DTO 在 `protocol`，错误信封在 `error`，host 的运行状态在 `hosts`。
+//! 对外 DTO 在 `protocol`，错误信封在 `error`，host 的运行状态在 `hosts`，
+//! 浏览器入口的静态资源兜底在 `assets`。
 
 use std::sync::Arc;
 
@@ -230,6 +231,7 @@ pub fn router(state: AgentState) -> Router {
             "/api/sessions/{id}/queue/{item}/remove",
             post(remove_queue_item),
         )
+        .fallback(crate::assets::static_asset)
         .with_state(state)
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import type { ApiResult } from '../api/client';
 import { api } from '../api/client';
-import type { NodeName } from '../api/generated/NodeName';
+import type { HostName } from '../api/generated/HostName';
 import type { SubmitMode } from '../api/generated/SubmitMode';
 import { AssistantContent } from './AssistantContent';
 import { AssistantMessage } from './AssistantMessage';
@@ -23,14 +23,14 @@ import type {
   BranchControl,
   BranchPosition,
   ConnectionState,
-  NodeRecord,
+  HostRecord,
   SessionView,
   TranscriptEntry,
 } from '../view/types';
 
 export type SessionPaneProps = {
-  node: NodeName;
-  record: NodeRecord;
+  host: HostName;
+  record: HostRecord;
   view: SessionView;
   connection: ConnectionState;
   draft: string;
@@ -48,7 +48,7 @@ export type SessionPaneProps = {
 /// 本模块负责渲染一个 session 的派生视图：头部、搜索栏、transcript、队列与输入框。
 /// 它不读分片，也不判定 session 状态：这些都在 `view/derived.ts`。
 export function SessionPane({
-  node,
+  host,
   record,
   view,
   connection,
@@ -88,7 +88,7 @@ export function SessionPane({
   const sessionId = view.session.id;
 
   const switchLeaf = (leafId: number): void => {
-    runCommand(api.switchActiveLeaf(node, sessionId, leafId));
+    runCommand(api.switchActiveLeaf(sessionId, leafId));
   };
 
   const controls = (branch: BranchPosition | null): { branch?: BranchControl } => {
@@ -173,7 +173,7 @@ export function SessionPane({
   };
 
   const handleExport = (): void => {
-    const content = sessionMarkdown(view, node);
+    const content = sessionMarkdown(view, host);
     const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -185,9 +185,9 @@ export function SessionPane({
   return (
     <>
       <MainHeader
-        node={node}
-        nodeStatus={record.status}
-        nodeDetail={record.detail}
+        host={host}
+        hostStatus={record.status}
+        hostDetail={record.detail}
         title={view.summary.title}
         workspacePath={toWorkspacePath(view.session.workspace)}
         state={view.summary.state}
@@ -224,7 +224,7 @@ export function SessionPane({
       </Transcript>
       <QueueStrip
         items={view.queue}
-        onRemove={(viewId) => { runCommand(api.removeQueueItem(node, sessionId, Number(viewId))); }}
+        onRemove={(viewId) => { runCommand(api.removeQueueItem(sessionId, Number(viewId))); }}
       />
       <Composer
         value={draft}

@@ -1,25 +1,26 @@
 import type { ReactNode } from 'react';
-import type { NodeName } from '../api/generated/NodeName';
+import type { HostKind } from '../api/generated/HostKind';
+import type { HostName } from '../api/generated/HostName';
 
 export type DialogState =
   | { kind: 'edit'; sessionId: string; messageId: number; text: string }
   | { kind: 'retry'; sessionId: string; messageId: number }
   | { kind: 'register-workspace'; host: string; path: string }
   | { kind: 'remove-workspace'; host: string; path: string }
-  | { kind: 'register-node'; name: string; url: string }
-  | { kind: 'rename-node'; name: NodeName; next: string }
-  | { kind: 'remove-node'; name: NodeName };
+  | { kind: 'register-host'; name: string; hostKind: HostKind; target: string }
+  | { kind: 'rename-host'; name: HostName; next: string }
+  | { kind: 'remove-host'; name: HostName };
 
-type NodeDialog = Extract<
+type HostDialog = Extract<
   DialogState,
-  { kind: 'register-node' | 'rename-node' | 'remove-node' }
+  { kind: 'register-host' | 'rename-host' | 'remove-host' }
 >;
 
-export function isNodeDialog(dialog: DialogState): dialog is NodeDialog {
+export function isHostDialog(dialog: DialogState): dialog is HostDialog {
   return (
-    dialog.kind === 'register-node' ||
-    dialog.kind === 'rename-node' ||
-    dialog.kind === 'remove-node'
+    dialog.kind === 'register-host' ||
+    dialog.kind === 'rename-host' ||
+    dialog.kind === 'remove-host'
   );
 }
 
@@ -27,14 +28,17 @@ export function dialogConfirmDisabled(dialog: DialogState): boolean {
   switch (dialog.kind) {
     case 'register-workspace':
       return dialog.host.trim().length === 0 || dialog.path.trim().length === 0;
-    case 'register-node':
-      return dialog.name.trim().length === 0 || dialog.url.trim().length === 0;
-    case 'rename-node':
+    case 'register-host':
+      return (
+        dialog.name.trim().length === 0 ||
+        (dialog.hostKind === 'ssh' && dialog.target.trim().length === 0)
+      );
+    case 'rename-host':
       return dialog.next.trim().length === 0;
     case 'edit':
     case 'retry':
     case 'remove-workspace':
-    case 'remove-node':
+    case 'remove-host':
       return false;
   }
 }
@@ -49,12 +53,12 @@ export function dialogTitle(dialog: DialogState): string {
       return '注册 workspace';
     case 'remove-workspace':
       return '移除 workspace';
-    case 'register-node':
-      return '注册节点';
-    case 'rename-node':
-      return '重命名节点';
-    case 'remove-node':
-      return '删除节点';
+    case 'register-host':
+      return '注册 host';
+    case 'rename-host':
+      return '重命名 host';
+    case 'remove-host':
+      return '删除 host';
     default: {
       const unhandled: never = dialog;
       throw new Error(`未处理的对话框: ${JSON.stringify(unhandled)}`);
@@ -72,11 +76,11 @@ export function dialogConfirmLabel(dialog: DialogState): string {
       return '注册';
     case 'remove-workspace':
       return '移除';
-    case 'register-node':
+    case 'register-host':
       return '注册';
-    case 'rename-node':
+    case 'rename-host':
       return '重命名';
-    case 'remove-node':
+    case 'remove-host':
       return '删除';
     default: {
       const unhandled: never = dialog;
@@ -131,40 +135,54 @@ export function renderDialogBody(
           session 时 server 会拒绝并说明原因，此操作不可撤销。
         </p>
       );
-    case 'register-node':
+    case 'register-host':
       return (
         <>
           <input
             value={dialog.name}
-            aria-label="节点名"
-            placeholder="macbook-air-02"
+            aria-label="host 名"
+            placeholder="studio"
             autoFocus
             onChange={(event) => { setDialog({ ...dialog, name: event.target.value }); }}
           />
-          <input
-            value={dialog.url}
-            aria-label="节点 URL"
-            placeholder="http://127.0.0.1:8081"
-            onChange={(event) => { setDialog({ ...dialog, url: event.target.value }); }}
-          />
+          <select
+            value={dialog.hostKind}
+            aria-label="host 种类"
+            onChange={(event) => {
+              setDialog({ ...dialog, hostKind: event.target.value === 'ssh' ? 'ssh' : 'local' });
+            }}
+          >
+            <option value="local">本机</option>
+            <option value="ssh">SSH</option>
+          </select>
+          {dialog.hostKind === 'ssh' ? (
+            <input
+              value={dialog.target}
+              aria-label="SSH 目标"
+              placeholder="studio"
+              onChange={(event) => { setDialog({ ...dialog, target: event.target.value }); }}
+            />
+          ) : null}
+          <p>本机 host 直接拉起 executor 子进程；SSH 目标可以写 `~/.ssh/config` 里的别名。</p>
         </>
       );
-    case 'rename-node':
+    case 'rename-host':
       return (
         <>
           <input
             value={dialog.next}
-            aria-label="新节点名"
+            aria-label="新 host 名"
             autoFocus
             onChange={(event) => { setDialog({ ...dialog, next: event.target.value }); }}
           />
-          <p>改名后旧链接失效，指向旧名的页面会显示「未知节点」。</p>
+          <p>改名后旧名立即变成未知 host，指向旧名的书签与命令会失效。</p>
         </>
       );
-    case 'remove-node':
+    case 'remove-host':
       return (
         <p>
-          删除只移除节点表登记，不触碰那台机器上的 agent、SQLite 与在跑的 run。此操作不可撤销。
+          删除只移除 host 登记，不触碰那台机器上的文件与进程。仍有 workspace 时 server
+          会拒绝并说明原因，此操作不可撤销。
         </p>
       );
     default: {

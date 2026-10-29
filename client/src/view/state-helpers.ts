@@ -1,15 +1,15 @@
-//! node 分片的删除与合并助手：session、workspace 与 host 的移除与去重。
-//! 事实归约本身在 `node-state`，派生在 `derived`。
-
-import type { HostMetadata } from '../api/generated/HostMetadata';
 import type { HostSnapshot } from '../api/generated/HostSnapshot';
+import type { HostMetadata } from '../api/generated/HostMetadata';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { forgetBodies } from './bodies';
-import type { NodeState } from './node-state';
+import type { ClientState } from './state';
 import type { RetryState } from './types';
 
-export function removeSession(state: NodeState, sessionId: string): NodeState {
+/// 本模块负责客户端状态的删除与合并助手：session、workspace 与 host 的移除与去重。
+/// 事实归约本身在 `state`，派生在 `derived`。
+
+export function removeSession(state: ClientState, sessionId: string): ClientState {
   const removed = forgetBodies(state, messageIds(state, sessionId));
   return {
     ...removed,
@@ -22,11 +22,11 @@ export function removeSession(state: NodeState, sessionId: string): NodeState {
 }
 
 /// 该 session 树里全部消息 id。
-export function messageIds(state: NodeState, sessionId: string): number[] {
+export function messageIds(state: ClientState, sessionId: string): number[] {
   return (state.trees[sessionId]?.nodes ?? []).map((node) => node.id);
 }
 
-export function removeWorkspace(state: NodeState, host: string, path: string): NodeState {
+export function removeWorkspace(state: ClientState, host: string, path: string): ClientState {
   const removed = state.sessions
     .filter((session) => session.host === host && session.workspace === path)
     .map((session) => session.id);
@@ -101,10 +101,12 @@ export function upsertWorkspace(
   return [...workspaces, incoming];
 }
 
-export function upsertSession(sessions: SessionMetadata[], incoming: SessionMetadata): SessionMetadata[] {
+export function upsertSession(
+  sessions: SessionMetadata[],
+  incoming: SessionMetadata,
+): SessionMetadata[] {
   if (!sessions.some((session) => session.id === incoming.id)) {
     return [...sessions, incoming];
   }
   return sessions.map((session) => (session.id === incoming.id ? incoming : session));
 }
-

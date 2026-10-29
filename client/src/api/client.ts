@@ -3,18 +3,15 @@ import type { CreateSessionRequest } from './generated/CreateSessionRequest';
 import type { EditMessageRequest } from './generated/EditMessageRequest';
 import type { ErrorCode } from './generated/ErrorCode';
 import type { ErrorResponse } from './generated/ErrorResponse';
-import type { HubBootstrap } from './generated/HubBootstrap';
-import type { HubErrorCode } from './generated/HubErrorCode';
-import type { HubErrorResponse } from './generated/HubErrorResponse';
+import type { HostKind } from './generated/HostKind';
+import type { HostName } from './generated/HostName';
+import type { HostSnapshot } from './generated/HostSnapshot';
 import type { MessageBodiesRequest } from './generated/MessageBodiesRequest';
 import type { MessageBodiesResponse } from './generated/MessageBodiesResponse';
 import type { MessageSkeleton } from './generated/MessageSkeleton';
-import type { NodeName } from './generated/NodeName';
-import type { NodeSnapshot } from './generated/NodeSnapshot';
 import type { QueueItem } from './generated/QueueItem';
-import type { RegisterNodeRequest } from './generated/RegisterNodeRequest';
+import type { RegisterHostRequest } from './generated/RegisterHostRequest';
 import type { RegisterWorkspaceRequest } from './generated/RegisterWorkspaceRequest';
-import type { UpdateNodeRequest } from './generated/UpdateNodeRequest';
 import type { RemoveWorkspaceRequest } from './generated/RemoveWorkspaceRequest';
 import type { RenameSessionRequest } from './generated/RenameSessionRequest';
 import type { SessionMetadata } from './generated/SessionMetadata';
@@ -22,17 +19,16 @@ import type { SessionTreeSnapshot } from './generated/SessionTreeSnapshot';
 import type { SubmitMessageRequest } from './generated/SubmitMessageRequest';
 import type { SubmitMode } from './generated/SubmitMode';
 import type { SwitchActiveLeafRequest } from './generated/SwitchActiveLeafRequest';
+import type { UpdateHostRequest } from './generated/UpdateHostRequest';
 import type { WorkspaceMetadata } from './generated/WorkspaceMetadata';
 
-/// hub 或节点拒绝请求、或 socket 失败时的失败类别。
+/// agent 拒绝请求、或 socket 失败时的失败类别。
 export type ApiFailure = {
-  code: ErrorCode | HubErrorCode | 'network';
+  code: ErrorCode | 'network';
   message: string;
 };
 
 export type ApiResult<T> = { ok: true; value: T } | { ok: false; error: ApiFailure };
-
-type FailureBody = ErrorResponse | HubErrorResponse;
 
 async function request<T>(
   method: string,
@@ -50,7 +46,7 @@ async function request<T>(
   }
   const response = await fetch(path, init).catch(() => null);
   if (response === null) {
-    return { ok: false, error: { code: 'network', message: `请求 hub 失败: ${method} ${path}` } };
+    return { ok: false, error: { code: 'network', message: `请求 agent 失败: ${method} ${path}` } };
   }
   if (!response.ok) {
     return { ok: false, error: await readFailure(response) };
@@ -63,121 +59,103 @@ async function request<T>(
 }
 
 async function readFailure(response: Response): Promise<ApiFailure> {
-  const body = (await response.json().catch(() => null)) as FailureBody | null;
+  const body = (await response.json().catch(() => null)) as ErrorResponse | null;
   if (body === null) {
-    return { code: 'network', message: `hub 返回 ${response.status}` };
+    return { code: 'network', message: `agent 返回 ${response.status}` };
   }
   return { code: body.code, message: body.message };
 }
 
-/// 节点作用域请求。hub 剥掉前缀后原样转发给该节点。
-function nodePath(node: NodeName, rest: string): string {
-  return `/api/n/${encodeURIComponent(node)}/${rest}`;
-}
-
-function sessionPath(node: NodeName, id: string): string {
-  return nodePath(node, `sessions/${encodeURIComponent(id)}`);
+function sessionPath(id: string): string {
+  return `/api/sessions/${encodeURIComponent(id)}`;
 }
 
 export const api = {
-  bootstrap(): Promise<ApiResult<HubBootstrap>> {
+  bootstrap(): Promise<ApiResult<BootstrapResponse>> {
     return request('GET', '/api/bootstrap');
   },
-  nodeBootstrap(node: NodeName): Promise<ApiResult<BootstrapResponse>> {
-    return request('GET', nodePath(node, 'bootstrap'));
+  registerHost(
+    name: string,
+    kind: HostKind,
+    target: string | null,
+  ): Promise<ApiResult<HostSnapshot>> {
+    const body: RegisterHostRequest = { name, kind, target };
+    return request('POST', '/api/hosts', body);
   },
-  registerNode(name: string, url: string): Promise<ApiResult<NodeSnapshot>> {
-    const body: RegisterNodeRequest = { name, url };
-    return request('POST', '/api/nodes', body);
+  updateHost(
+    name: HostName,
+    update: { name?: string | null; target?: string | null; enabled?: boolean | null },
+  ): Promise<ApiResult<HostSnapshot>> {
+    const body: UpdateHostRequest = {
+      name: update.name ?? null,
+      target: update.target ?? null,
+      enabled: update.enabled ?? null,
+    };
+    return request('PATCH', `/api/hosts/${encodeURIComponent(name)}`, body);
   },
-  renameNode(name: NodeName, next: string): Promise<ApiResult<NodeSnapshot>> {
-    const body: UpdateNodeRequest = { name: next, url: null, enabled: null };
-    return request('PATCH', `/api/nodes/${encodeURIComponent(name)}`, body);
+  removeHost(name: HostName): Promise<ApiResult<void>> {
+    return request('DELETE', `/api/hosts/${encodeURIComponent(name)}`);
   },
-  removeNode(name: NodeName): Promise<ApiResult<void>> {
-    return request('DELETE', `/api/nodes/${encodeURIComponent(name)}`);
+  reconnectHost(name: HostName): Promise<ApiResult<HostSnapshot>> {
+    return request('POST', `/api/hosts/${encodeURIComponent(name)}/reconnect`);
   },
-  sessionTree(node: NodeName, id: string): Promise<ApiResult<SessionTreeSnapshot>> {
-    return request('GET', `${sessionPath(node, id)}/tree`);
+  sessionTree(id: string): Promise<ApiResult<SessionTreeSnapshot>> {
+    return request('GET', `${sessionPath(id)}/tree`);
   },
-  registerWorkspace(
-    node: NodeName,
-    host: string,
-    path: string,
-  ): Promise<ApiResult<WorkspaceMetadata>> {
+  registerWorkspace(host: HostName, path: string): Promise<ApiResult<WorkspaceMetadata>> {
     const body: RegisterWorkspaceRequest = { host, path };
-    return request('POST', nodePath(node, 'workspaces'), body);
+    return request('POST', '/api/workspaces', body);
   },
-  removeWorkspace(node: NodeName, host: string, path: string): Promise<ApiResult<void>> {
+  removeWorkspace(host: HostName, path: string): Promise<ApiResult<void>> {
     const body: RemoveWorkspaceRequest = { host, path };
-    return request('POST', nodePath(node, 'workspaces/remove'), body);
+    return request('POST', '/api/workspaces/remove', body);
   },
   createSession(
-    node: NodeName,
-    host: string,
+    host: HostName,
     workspace: string,
     title: string | null,
   ): Promise<ApiResult<SessionMetadata>> {
     const body: CreateSessionRequest = { host, workspace, title };
-    return request('POST', nodePath(node, 'sessions'), body);
+    return request('POST', '/api/sessions', body);
   },
-  renameSession(node: NodeName, id: string, title: string): Promise<ApiResult<SessionMetadata>> {
+  renameSession(id: string, title: string): Promise<ApiResult<SessionMetadata>> {
     const body: RenameSessionRequest = { title };
-    return request('POST', `${sessionPath(node, id)}/rename`, body);
+    return request('POST', `${sessionPath(id)}/rename`, body);
   },
-  deleteSession(node: NodeName, id: string): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(node, id)}/delete`);
+  deleteSession(id: string): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(id)}/delete`);
   },
-  submitMessage(
-    node: NodeName,
-    id: string,
-    text: string,
-    mode: SubmitMode,
-  ): Promise<ApiResult<QueueItem>> {
+  submitMessage(id: string, text: string, mode: SubmitMode): Promise<ApiResult<QueueItem>> {
     const body: SubmitMessageRequest = { text, mode };
-    return request('POST', `${sessionPath(node, id)}/messages`, body);
+    return request('POST', `${sessionPath(id)}/messages`, body);
   },
   editUserMessage(
-    node: NodeName,
     id: string,
     messageId: number,
     text: string,
   ): Promise<ApiResult<MessageSkeleton>> {
     const body: EditMessageRequest = { text };
-    return request('POST', `${sessionPath(node, id)}/messages/${messageId}/edit`, body);
+    return request('POST', `${sessionPath(id)}/messages/${messageId}/edit`, body);
   },
   messageBodies(
-    node: NodeName,
     id: string,
     messageIds: number[],
     signal?: AbortSignal,
   ): Promise<ApiResult<MessageBodiesResponse>> {
     const body: MessageBodiesRequest = { messageIds };
-    return request('POST', `${sessionPath(node, id)}/message-bodies`, body, signal);
+    return request('POST', `${sessionPath(id)}/message-bodies`, body, signal);
   },
-  retryAssistantMessage(
-    node: NodeName,
-    id: string,
-    messageId: number,
-  ): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(node, id)}/messages/${messageId}/retry`);
+  retryAssistantMessage(id: string, messageId: number): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(id)}/messages/${messageId}/retry`);
   },
-  switchActiveLeaf(
-    node: NodeName,
-    id: string,
-    messageId: number,
-  ): Promise<ApiResult<void>> {
+  switchActiveLeaf(id: string, messageId: number): Promise<ApiResult<void>> {
     const body: SwitchActiveLeafRequest = { messageId };
-    return request('POST', `${sessionPath(node, id)}/active-leaf`, body);
+    return request('POST', `${sessionPath(id)}/active-leaf`, body);
   },
-  removeQueueItem(
-    node: NodeName,
-    id: string,
-    itemId: number,
-  ): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(node, id)}/queue/${itemId}/remove`);
+  removeQueueItem(id: string, itemId: number): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(id)}/queue/${itemId}/remove`);
   },
-  cancelRun(node: NodeName, id: string): Promise<ApiResult<void>> {
-    return request('POST', `${sessionPath(node, id)}/cancel`);
+  cancelRun(id: string): Promise<ApiResult<void>> {
+    return request('POST', `${sessionPath(id)}/cancel`);
   },
 };

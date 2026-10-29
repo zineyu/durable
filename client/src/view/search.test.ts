@@ -5,7 +5,8 @@ import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import { sessionView } from './derived';
 import { stepHit, searchTranscript } from './search';
-import type { NodeState } from './node-state';
+import { emptyClientState } from './state';
+import type { ClientState } from './state';
 import type { SessionView } from './types';
 
 const session: SessionMetadata = {
@@ -26,11 +27,10 @@ function text(value: string): ContentPart[] {
   return [{ kind: 'text', text: value, providerMeta: null }];
 }
 
-function state(bodies: Record<number, ContentPart[]>): NodeState {
+function state(bodies: Record<number, ContentPart[]>): ClientState {
   return {
+    ...emptyClientState,
     modelName: 'm',
-    hosts: [],
-    workspaces: [],
     sessions: [session],
     trees: {
       's-1': {
@@ -40,18 +40,11 @@ function state(bodies: Record<number, ContentPart[]>): NodeState {
         runs: [],
       },
     },
-    retries: {},
     bodies,
-    bodyRequests: [],
-    bodyFailures: [],
-    placeholders: {},
-    lastSeenAt: {},
-    lastEventId: null,
-    applied: [],
   };
 }
 
-function viewOf(value: NodeState): SessionView {
+function viewOf(value: ClientState): SessionView {
   const view = sessionView(value, 's-1');
   if (view === null) {
     throw new Error('缺少 session 视图');
@@ -92,7 +85,7 @@ describe('session 内搜索', () => {
   });
 
   it('压缩消息的摘要也参与搜索', () => {
-    const compacted: NodeState = {
+    const compacted: ClientState = {
       ...state({ 5: text('此前的迁移摘要') }),
       trees: {
         's-1': {

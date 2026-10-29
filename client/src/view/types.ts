@@ -1,8 +1,7 @@
 import type { HostName } from '../api/generated/HostName';
+import type { HostSnapshot } from '../api/generated/HostSnapshot';
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
-import type { NodeName } from '../api/generated/NodeName';
-import type { NodeStatus } from '../api/generated/NodeStatus';
 import type { RunStatus } from '../api/generated/RunStatus';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { ToolResultState } from '../api/generated/ToolResultState';
@@ -32,8 +31,18 @@ export type RetryState = {
 
 export type ToolState = 'running' | 'succeeded' | 'failed' | 'unknown';
 
+export type ClientError = {
+  code: string;
+  message: string;
+};
+
+/// 侧栏、host 面板与命令面板共用的一项 host。运行状态不落库，来自一次 bootstrap。
+export type HostRecord = HostSnapshot;
+
 export type SessionSummary = {
   id: SessionId;
+  /// session 的 host 来自它所属的 workspace。
+  host: HostName;
   title: string;
   state: SessionState;
   queuedCount: number;
@@ -111,36 +120,21 @@ export type SessionView = {
   idle: boolean;
 };
 
-/// 节点级摘要：模型名与按 workspace 分组的 session 摘要。
-export type NodeSummary = {
-  modelName: string;
-  workspaces: WorkspaceSummary[];
-};
-
-/// 命令面板里的一项 session。节点名写明来源，跨节点列表靠它区分。
+/// 命令面板里的一项 session。host 名写明来源，跨 host 列表靠它区分。
 export type PaletteSession = {
-  node: NodeName;
+  host: HostName;
   sessionId: SessionId;
   title: string;
   workspace: string;
   updatedAt: number;
 };
 
-/// 跨节点运行面板的一项。
+/// 跨 host 运行面板的一项。
 export type RunningEntry = {
-  node: NodeName;
+  host: HostName;
   sessionId: SessionId;
   title: string;
   queueLength: number;
-  /// 当前 run 的开始时间；分片里还没有 run 记录时为 `null`。
+  /// 当前 run 的开始时间；树里还没有 run 记录时为 `null`。
   startedAt: number | null;
-};
-
-/// 节点表的一项。`detail` 是节点状态的具体说明。
-export type NodeRecord = {
-  name: NodeName;
-  url: string;
-  enabled: boolean;
-  status: NodeStatus;
-  detail: string | null;
 };

@@ -18,20 +18,18 @@ export function sidebar(page: Page): Locator {
   return page.getByRole('complementary');
 }
 
-export function nodeSwitcher(page: Page): Locator {
-  return page.getByRole('navigation', { name: '节点切换器' });
+/// host 面板（切换器）。注册 host 的入口也在里面。
+export function hostSwitcher(page: Page): Locator {
+  return page.getByRole('navigation', { name: 'host 切换器' });
 }
 
 export function workspaceGroup(page: Page, path: string): Locator {
-  return page.locator('section').filter({ has: page.getByText(path, { exact: true }) });
+  return page.locator('section').filter({ has: page.getByText(path, { exact: false }) });
 }
 
-/// 打开给定 session 并等待节点已选中、输入区可见。
+/// 打开给定 session 并等待输入区可见。
 export async function openSession(page: Page, app: Harness, sessionId: string): Promise<void> {
   await page.goto(app.urlFor(sessionId));
-  await expect(
-    nodeSwitcher(page).getByRole('button', { name: app.nodeName }),
-  ).toHaveAttribute('aria-pressed', 'true');
   await expect(composer(page)).toBeVisible();
 }
 

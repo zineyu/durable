@@ -4,9 +4,8 @@ import { api } from '../api/client';
 import type { ApiFailure, ApiResult } from '../api/client';
 import { openEventStream } from '../api/events';
 import type { EventStream } from '../api/events';
-import type { HubBootstrap } from '../api/generated/HubBootstrap';
-import { hasSession, missingShards } from './derived';
-import { snapshotCursor } from './node-state';
+import { hasSession } from './derived';
+import { snapshotCursor } from './state';
 import { initialClientState, reduce } from './reducer';
 import type { ClientAction, ClientState } from './reducer';
 import type { Selection } from './session-hash';
@@ -21,7 +20,9 @@ export type ClientController = {
   runCommand: (result: Promise<ApiResult<unknown>>) => void;
 };
 
-/// 客户端状态与网络接线：首屏 bootstrap、合并事件流、断线重连与正文拉取。
+/// 客户端状态与网络接线：一次 bootstrap、一条事件流与一个重连循环。
+/// 规格 user story R-43、R-49：断线续传只有一个语义，连接状态显式可见。
+/// 重新连接时重取 bootstrap 与当前 session 的树，再从已应用的事件 id 续传。
 export function useClientState(selection: Selection): ClientController {
   const [state, dispatch] = useReducer(reduce, initialClientState);
 
@@ -46,37 +47,12 @@ export function useClientState(selection: Selection): ClientController {
   const selectionRef = useRef<Selection>(selection);
 
   useEffect(() => {
-    cursorRef.current = state.hub.cursor;
-  }, [state.hub.cursor]);
+    cursorRef.current = state.lastEventId;
+  }, [state.lastEventId]);
 
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
-
-  const missingKey = missingShards(state.hub.nodes, state.nodes).join(',');
-
-  useEffect(() => {
-    if (missingKey === '') {
-      return;
-    }
-    const liveness = new AbortController();
-    void (async () => {
-      for (const name of missingKey.split(',')) {
-        const outcome = await api.nodeBootstrap(name);
-        if (liveness.signal.aborted) {
-          return;
-        }
-        if (!outcome.ok) {
-          report(outcome.error);
-          continue;
-        }
-        dispatch({ type: 'node-bootstrap', node: name, bootstrap: outcome.value });
-      }
-    })();
-    return () => {
-      liveness.abort();
-    };
-  }, [missingKey, report]);
 
   useEffect(() => {
     const liveness = new AbortController();
@@ -96,19 +72,19 @@ export function useClientState(selection: Selection): ClientController {
         report(outcome.error);
         return null;
       }
-      const cursor = snapshotCursor(cursorRef.current, outcome.value.maxHubSeq);
+      const cursor = snapshotCursor(cursorRef.current, outcome.value.maxEventId);
       dispatch({ type: 'bootstrap', bootstrap: outcome.value });
       const current = selectionRef.current;
-      if (current.node !== null && current.sessionId !== null) {
-        const tree = await api.sessionTree(current.node, current.sessionId);
+      if (current !== null) {
+        const tree = await api.sessionTree(current);
         if (liveness.signal.aborted) {
           return null;
         }
         if (!tree.ok) {
           report(tree.error);
-          return null;
+        } else {
+          dispatch({ type: 'tree', tree: tree.value });
         }
-        dispatch({ type: 'tree', node: current.node, tree: tree.value });
       }
       return cursor;
     };
@@ -130,9 +106,8 @@ export function useClientState(selection: Selection): ClientController {
       }
     };
 
-    const connect = (bootstrap: HubBootstrap) => {
-      const cursor = snapshotCursor(cursorRef.current, bootstrap.maxHubSeq);
-      dispatch({ type: 'bootstrap', bootstrap });
+    const connect = (maxEventId: number) => {
+      const cursor = snapshotCursor(cursorRef.current, maxEventId);
       streamRef.current = openEventStream(cursor, {
         onEvent: (event) => { dispatch({ type: 'stream', event }); },
         onState: (connection) => { dispatch({ type: 'connection', connection }); },
@@ -152,7 +127,9 @@ export function useClientState(selection: Selection): ClientController {
         dispatch({ type: 'connection', connection: 'disconnected' });
         return;
       }
-      connect(outcome.value);
+      const cursor = snapshotCursor(cursorRef.current, outcome.value.maxEventId);
+      dispatch({ type: 'bootstrap', bootstrap: outcome.value });
+      connect(cursor);
     })();
 
     return () => {
@@ -165,21 +142,16 @@ export function useClientState(selection: Selection): ClientController {
     };
   }, [report]);
 
-  const shard = selection.node === null ? undefined : state.nodes[selection.node];
-  const sessionExists =
-    shard !== undefined &&
-    selection.sessionId !== null &&
-    hasSession(shard, selection.sessionId);
+  const sessionExists = selection !== null && hasSession(state, selection);
 
   useEffect(() => {
-    if (selection.node === null || selection.sessionId === null || !sessionExists) {
+    if (selection === null || !sessionExists) {
       return;
     }
-    const node = selection.node;
-    const id = selection.sessionId;
+    const id = selection;
     const liveness = new AbortController();
     void (async () => {
-      const outcome = await api.sessionTree(node, id);
+      const outcome = await api.sessionTree(id);
       if (liveness.signal.aborted) {
         return;
       }
@@ -187,17 +159,16 @@ export function useClientState(selection: Selection): ClientController {
         report(outcome.error);
         return;
       }
-      dispatch({ type: 'tree', node, tree: outcome.value });
+      dispatch({ type: 'tree', tree: outcome.value });
     })();
     return () => {
       liveness.abort();
     };
-  }, [selection.node, selection.sessionId, sessionExists, report]);
+  }, [selection, sessionExists, report]);
 
   useMessageBodies({
-    node: selection.node,
-    sessionId: selection.sessionId,
-    shard,
+    sessionId: selection,
+    state,
     dispatch,
     onFailure: report,
   });

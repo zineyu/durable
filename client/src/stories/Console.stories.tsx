@@ -12,7 +12,7 @@ import { Sidebar } from '../components/Sidebar';
 import { ToolCard } from '../components/ToolCard';
 import { Transcript } from '../components/Transcript';
 import { UserMessage } from '../components/UserMessage';
-import { codeSample, modelName, nodes, queueItems, workspaces } from '../fixtures/view';
+import { codeSample, hosts, modelName, queueItems, workspaces } from '../fixtures/view';
 import { toSessionId, toWorkspacePath } from '../view/ids';
 
 const meta = {
@@ -24,10 +24,13 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
+const allSessions = workspaces.flatMap((workspace) => workspace.sessions);
+
 const sidebar = (
   <Sidebar
-    nodes={nodes}
-    selectedNode="macbook-air-01"
+    hosts={hosts}
+    selectedHost="macbook-air-01"
+    sessions={allSessions}
     modelName={modelName}
     workspaces={workspaces}
     selectedSessionId={toSessionId('s-1')}
@@ -36,8 +39,9 @@ const sidebar = (
 
 const emptySidebar = (
   <Sidebar
-    nodes={nodes}
-    selectedNode="macbook-air-01"
+    hosts={hosts}
+    selectedHost="macbook-air-01"
+    sessions={allSessions}
     modelName={modelName}
     workspaces={workspaces}
     selectedSessionId={null}
@@ -48,8 +52,8 @@ export const Running: Story = {
   render: () => (
     <AppShell sidebar={sidebar}>
       <MainHeader
-        node="macbook-air-01"
-        nodeStatus="ok"
+        host="macbook-air-01"
+        hostStatus="ok"
         title="双二进制骨架与工程基线"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="running"
@@ -88,8 +92,8 @@ export const Idle: Story = {
   render: () => (
     <AppShell sidebar={sidebar}>
       <MainHeader
-        node="macbook-air-01"
-        nodeStatus="ok"
+        host="macbook-air-01"
+        hostStatus="ok"
         title="类型生成一致性检查"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="idle"
@@ -111,8 +115,8 @@ export const SearchOpen: Story = {
   render: () => (
     <AppShell sidebar={sidebar}>
       <MainHeader
-        node="macbook-air-01"
-        nodeStatus="ok"
+        host="macbook-air-01"
+        hostStatus="ok"
         title="SQLite 迁移与恢复"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="idle"
@@ -148,8 +152,8 @@ export const Failed: Story = {
         message="session 有 run 进行中：分支操作需要 session 空闲且队列为空。"
       />
       <MainHeader
-        node="macbook-air-01"
-        nodeStatus="ok"
+        host="macbook-air-01"
+        hostStatus="ok"
         title="SQLite 迁移与恢复"
         workspacePath={toWorkspacePath('/Users/zine/space/project/agent-lab')}
         state="idle"
@@ -174,8 +178,8 @@ export const NoSession: Story = {
   render: () => (
     <AppShell sidebar={emptySidebar}>
       <MainHeader
-        node="macbook-air-01"
-        nodeStatus="ok"
+        host="macbook-air-01"
+        hostStatus="ok"
         title="未选择 session"
         workspacePath={toWorkspacePath('/Users/zine/space/project/durable')}
         state="idle"
@@ -191,14 +195,15 @@ export const NoSession: Story = {
   ),
 };
 
-export const UnavailableNode: Story = {
+export const UnavailableHost: Story = {
   render: () => (
     <AppShell
       sidebar={
         <Sidebar
-          nodes={nodes}
-          selectedNode="studio"
-          notice="连接节点失败: 隧道已断开"
+          hosts={hosts}
+          selectedHost="studio"
+          sessions={[]}
+          notice="连接 host 失败: 隧道已断开"
           commandsDisabled
           modelName=""
           workspaces={[]}
@@ -206,41 +211,30 @@ export const UnavailableNode: Story = {
         />
       }
     >
-      <EmptyState title="节点不可用" description="连接节点失败: 隧道已断开" />
+      <EmptyState title="host 不可用" description="连接 host 失败: 隧道已断开" />
     </AppShell>
   ),
 };
 
-export const UnknownNode: Story = {
+export const UnknownSession: Story = {
   render: () => (
-    <AppShell
-      sidebar={
-        <Sidebar
-          nodes={nodes}
-          selectedNode="retired-studio"
-          notice="未知节点，节点表里没有这个名字"
-          commandsDisabled
-          modelName=""
-          workspaces={[]}
-          selectedSessionId={null}
-        />
-      }
-    >
+    <AppShell sidebar={emptySidebar}>
       <EmptyState
-        title="未知节点"
-        description="节点 retired-studio 不在节点表里。它可能已被删除或改名。"
+        title="未知 session"
+        description="session s-404 不在当前状态里。它可能已被删除，或属于尚未连上的 host。"
       />
     </AppShell>
   ),
 };
 
-export const NoNodes: Story = {
+export const NoHosts: Story = {
   render: () => (
     <AppShell
       sidebar={
         <Sidebar
-          nodes={[]}
-          selectedNode={null}
+          hosts={[]}
+          selectedHost={null}
+          sessions={[]}
           modelName=""
           workspaces={[]}
           selectedSessionId={null}
@@ -248,7 +242,10 @@ export const NoNodes: Story = {
         />
       }
     >
-      <EmptyState title="选择一个节点" description="在左侧节点切换器中选择一台机器。" />
+      <EmptyState
+        title="选择一个 session"
+        description="从左侧选择 session，或者注册新的 host 与 workspace。"
+      />
     </AppShell>
   ),
 };

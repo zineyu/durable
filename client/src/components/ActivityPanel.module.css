@@ -96,3 +96,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+}
+
+.host {
+  margin: 0;
+  padding: 0 var(--space-2);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+}

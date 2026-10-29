@@ -1,4 +1,4 @@
-import type { NodeName } from '../api/generated/NodeName';
+import type { HostName } from '../api/generated/HostName';
 import { bodyText } from './content';
 import { toolStateLabel } from './labels';
 import { toolCardModel } from './tools';
@@ -6,7 +6,7 @@ import type { ToolCallPart } from './tools';
 import type { SessionView } from './types';
 
 /// 把 session 派生视图的活动链渲染为 Markdown。工具调用折叠为引用块。
-export function sessionMarkdown(view: SessionView, node: NodeName): string {
+export function sessionMarkdown(view: SessionView, host: HostName): string {
   const results = view.toolResults;
   const sections: string[] = [];
   for (const entry of view.transcript) {
@@ -37,7 +37,7 @@ export function sessionMarkdown(view: SessionView, node: NodeName): string {
   }
   const header = [
     `# ${view.session.title}`,
-    [`- 节点：${node}`, `- workspace：${view.session.workspace}`].join('\n'),
+    [`- host：${host}`, `- workspace：${view.session.workspace}`].join('\n'),
   ];
   return `${[...header, ...sections].join('\n\n')}\n`;
 }

@@ -1,11 +1,14 @@
 import type { BootstrapResponse } from '../api/generated/BootstrapResponse';
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { FactEvent } from '../api/generated/FactEvent';
+import type { HostSnapshot } from '../api/generated/HostSnapshot';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { QueueItem } from '../api/generated/QueueItem';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
+import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
+import { dropFinished, dropPlaceholder, invalidateBody } from './bodies';
 import {
   removeSession,
   removeWorkspace,
@@ -13,11 +16,16 @@ import {
   upsertSession,
   upsertWorkspace,
   withoutRetryKey,
-} from './node-state-helpers';
-import type { HostSnapshot } from '../api/generated/HostSnapshot';
-import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
-import { dropFinished, dropPlaceholder, invalidateBody } from './bodies';
-import type { MessagePlaceholder, RetryState } from './types';
+} from './state-helpers';
+import type {
+  ClientError,
+  ConnectionState,
+  MessagePlaceholder,
+  RetryState,
+} from './types';
+
+/// 本模块负责客户端唯一一份状态与事实归约：host 表、workspace、session、树、正文缓存与游标。
+/// 动作分派在 `reducer`，派生视图在 `derived`，正文缓存的状态迁移在 `bodies`。
 
 /// 一条事实事件的信封：事件 id、事实提交后的 session 视图与事实本体。
 export type FactEnvelope = {
@@ -26,14 +34,15 @@ export type FactEnvelope = {
   event: FactEvent;
 };
 
-/// 每节点保留的已应用事实条数。快照与已应用尾部之间的差距远小于它。
+/// 保留的已应用事实条数。快照与已应用尾部之间的差距远小于它。
 const APPLIED_FACT_LIMIT = 128;
 
-/// 分片内的树状态。除快照信封的两个字段外全部保留，因此协议新增字段会自动流入。
+/// 树状态。除快照信封的两个字段外全部保留，因此协议新增字段会自动流入。
 export type SessionTreeState = Omit<SessionTreeSnapshot, 'session' | 'maxEventId'>;
 
-/// 单个节点的分片。一个节点的事件只归约到自己的分片，分片之间互不影响。
-export type NodeState = {
+/// 客户端全部状态。事件流只有一个游标，事实只归约到这一份状态。
+/// 规格 user story R-43：只面对一条事件流与一个游标。
+export type ClientState = {
   modelName: string;
   hosts: HostSnapshot[];
   workspaces: WorkspaceMetadata[];
@@ -55,9 +64,11 @@ export type NodeState = {
   lastEventId: number | null;
   /// 已应用的事实。快照可能比已应用的尾部旧，用它补齐快照水位之后的事实。
   applied: FactEnvelope[];
+  connection: ConnectionState;
+  error: ClientError | null;
 };
 
-export const emptyNodeState: NodeState = {
+export const emptyClientState: ClientState = {
   modelName: '',
   hosts: [],
   workspaces: [],
@@ -71,6 +82,8 @@ export const emptyNodeState: NodeState = {
   lastSeenAt: {},
   lastEventId: null,
   applied: [],
+  connection: 'reconnecting',
+  error: null,
 };
 
 /// 应用快照后的水位。尚无基线时取快照水位；已有基线时回退到较老水位，
@@ -79,7 +92,7 @@ export function snapshotCursor(cursor: number | null, watermark: number): number
   return cursor === null ? watermark : Math.min(cursor, watermark);
 }
 
-export function loadNodeBootstrap(state: NodeState, bootstrap: BootstrapResponse): NodeState {
+export function loadBootstrap(state: ClientState, bootstrap: BootstrapResponse): ClientState {
   return rebase(state, bootstrap.maxEventId, {
     ...state,
     modelName: bootstrap.model,
@@ -91,7 +104,7 @@ export function loadNodeBootstrap(state: NodeState, bootstrap: BootstrapResponse
   });
 }
 
-export function applyNodeFact(state: NodeState, fact: FactEnvelope): NodeState {
+export function applyFact(state: ClientState, fact: FactEnvelope): ClientState {
   if (state.lastEventId !== null && fact.id <= state.lastEventId) {
     return state;
   }
@@ -113,7 +126,7 @@ function sessionOf(fact: FactEnvelope): SessionMetadata {
   return session;
 }
 
-export function applyFactEvent(state: NodeState, fact: FactEnvelope): NodeState {
+export function applyFactEvent(state: ClientState, fact: FactEnvelope): ClientState {
   const event = fact.event;
   switch (event.kind) {
     case 'host_registered':
@@ -142,7 +155,7 @@ export function applyFactEvent(state: NodeState, fact: FactEnvelope): NodeState 
       return dropPlaceholder(
         withSession(state, session, (tree) => ({
           ...tree,
-          nodes: upsertNode(tree.nodes, event.message),
+          nodes: upsertMessage(tree.nodes, event.message),
         })),
         session.id,
         event.message.id,
@@ -152,7 +165,7 @@ export function applyFactEvent(state: NodeState, fact: FactEnvelope): NodeState 
       const session = sessionOf(fact);
       const updated = withSession(state, session, (tree) => ({
         ...tree,
-        nodes: upsertNode(tree.nodes, event.message),
+        nodes: upsertMessage(tree.nodes, event.message),
       }));
       return dropPlaceholder(
         invalidateBody(updated, event.message.id),
@@ -229,11 +242,15 @@ export function applyFactEvent(state: NodeState, fact: FactEnvelope): NodeState 
 }
 
 /// 记录一次限流重试等待。
-export function applyRetry(state: NodeState, sessionId: string, retry: RetryState): NodeState {
+export function applyRetry(
+  state: ClientState,
+  sessionId: string,
+  retry: RetryState,
+): ClientState {
   return { ...state, retries: { ...state.retries, [sessionId]: retry } };
 }
 
-export function loadSessionTree(state: NodeState, tree: SessionTreeSnapshot): NodeState {
+export function loadSessionTree(state: ClientState, tree: SessionTreeSnapshot): ClientState {
   const loaded = rebase(state, tree.maxEventId, {
     ...state,
     lastEventId: snapshotCursor(state.lastEventId, tree.maxEventId),
@@ -250,7 +267,7 @@ export function loadSessionTree(state: NodeState, tree: SessionTreeSnapshot): No
   return clearRetry(loaded, tree.session.id);
 }
 
-export function storeSession(state: NodeState, session: SessionMetadata): NodeState {
+export function storeSession(state: ClientState, session: SessionMetadata): ClientState {
   return {
     ...state,
     sessions: upsertSession(state.sessions, session),
@@ -259,7 +276,7 @@ export function storeSession(state: NodeState, session: SessionMetadata): NodeSt
 }
 
 /// 记录某个 session 已被查看。时间只前进，不回退。
-export function markSeen(state: NodeState, sessionId: string, at: number): NodeState {
+export function markSeen(state: ClientState, sessionId: string, at: number): ClientState {
   const seen = state.lastSeenAt[sessionId];
   if (seen !== undefined && seen >= at) {
     return state;
@@ -278,22 +295,22 @@ function seedSeenAt(
   return { ...lastSeenAt, [session.id]: session.updatedAt };
 }
 
-export function sessionById(state: NodeState, id: string): SessionMetadata | undefined {
+export function sessionById(state: ClientState, id: string): SessionMetadata | undefined {
   return state.sessions.find((session) => session.id === id);
 }
 
 /// 快照替换视图后重放水位之后已应用的事实，使快照不覆盖更新的尾部。
-function rebase(state: NodeState, watermark: number, base: NodeState): NodeState {
+function rebase(state: ClientState, watermark: number, base: ClientState): ClientState {
   return state.applied
     .filter((fact) => fact.id > watermark)
-    .reduce((current, fact) => applyNodeFact(current, fact), base);
+    .reduce((current, fact) => applyFact(current, fact), base);
 }
 
 function withSession(
-  state: NodeState,
+  state: ClientState,
   session: SessionMetadata,
   update: (tree: SessionTreeState) => SessionTreeState,
-): NodeState {
+): ClientState {
   const sessions = upsertSession(state.sessions, session);
   const tree = state.trees[session.id] ?? emptyTree();
   return {
@@ -308,21 +325,24 @@ function emptyTree(): SessionTreeState {
   return { activeLeaf: null, nodes: [], queue: [], runs: [] };
 }
 
-/// 去掉快照信封的 session 视图与水位；其余字段整体进入分片。
+/// 去掉快照信封的 session 视图与水位；其余字段整体进入状态。
 function treeState(tree: SessionTreeSnapshot): SessionTreeState {
   const { session, maxEventId, ...rest } = tree;
   return rest;
 }
 
 /// 清除某个 session 的重试等待。其它 session 不受影响。
-export function clearRetry(state: NodeState, sessionId: string): NodeState {
+export function clearRetry(state: ClientState, sessionId: string): ClientState {
   if (state.retries[sessionId] === undefined) {
     return state;
   }
   return { ...state, retries: withoutRetryKey(state.retries, sessionId) };
 }
 
-function upsertNode(nodes: MessageSkeleton[], incoming: MessageSkeleton): MessageSkeleton[] {
+function upsertMessage(
+  nodes: MessageSkeleton[],
+  incoming: MessageSkeleton,
+): MessageSkeleton[] {
   if (!nodes.some((node) => node.id === incoming.id)) {
     return [...nodes, incoming];
   }

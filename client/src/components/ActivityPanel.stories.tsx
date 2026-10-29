@@ -5,21 +5,21 @@ import type { RunningEntry } from '../view/types';
 
 const entries: RunningEntry[] = [
   {
-    node: 'macbook-air-01',
+    host: 'macbook-air-01',
     sessionId: toSessionId('s-1'),
     title: '双二进制骨架与工程基线',
     queueLength: 0,
     startedAt: 1,
   },
   {
-    node: 'macbook-air-02',
-    sessionId: toSessionId('s-4'),
-    title: 'SQLite 迁移与恢复',
+    host: 'macbook-air-01',
+    sessionId: toSessionId('s-3'),
+    title: '类型生成一致性检查',
     queueLength: 2,
     startedAt: 2,
   },
   {
-    node: 'studio',
+    host: 'studio',
     sessionId: toSessionId('s-5'),
     title: '把 ui 的静态资源改为内嵌并确认 SSE 在反代中不被缓冲',
     queueLength: 0,
@@ -37,6 +37,6 @@ export default meta;
 
 type Story = StoryObj<typeof meta>;
 
-export const MultipleNodes: Story = { args: { entries } };
+export const MultipleHosts: Story = { args: { entries } };
 
 export const Empty: Story = { args: { entries: [] } };

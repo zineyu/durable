@@ -1,46 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ContentPart } from '../api/generated/ContentPart';
+import type { HostSnapshot } from '../api/generated/HostSnapshot';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import {
+  hasSession,
+  hostAvailable,
   missingBodyIds,
-  missingShards,
-  nodeSummary,
   orderedSessions,
   paletteSessions,
-  hasSession,
   runningEntries,
   sessionSummaries,
   sessionView,
   workspaceSummaries,
 } from './derived';
 import { toQueueItemId, toSessionId } from './ids';
-import { emptyNodeState } from './node-state';
-import type { NodeState, SessionTreeState } from './node-state';
-import type { NodeRecord, SessionView, TranscriptEntry } from './types';
+import { emptyClientState } from './state';
+import type { ClientState, SessionTreeState } from './state';
+import type { SessionView, TranscriptEntry } from './types';
 
-/// 派生层用例直接构造分片，不经过 reducer。
+/// 派生层用例直接构造状态，不经过 reducer。
 
 const workspaceA: WorkspaceMetadata = { host: 'local', path: '/work/a', registeredAt: 10 };
-const workspaceB: WorkspaceMetadata = { host: 'local', path: '/work/b', registeredAt: 20 };
+const workspaceB: WorkspaceMetadata = { host: 'studio', path: '/work/b', registeredAt: 20 };
 
-const nodeA: NodeRecord = {
-  name: 'macbook-air-01',
-  url: 'http://a',
-  enabled: true,
-  status: 'ok',
-  detail: null,
-};
-const nodeB: NodeRecord = {
-  name: 'studio',
-  url: 'http://b',
-  enabled: true,
-  status: 'ok',
-  detail: null,
-};
+function host(name: string, status: HostSnapshot['status'] = 'ok'): HostSnapshot {
+  return {
+    name,
+    kind: name === 'local' ? 'local' : 'ssh',
+    target: name === 'local' ? null : name,
+    enabled: true,
+    status,
+    detail: status === 'ok' ? null : '隧道已断开',
+    latencyMs: null,
+  };
+}
 
 function session(
   id: string,
@@ -50,7 +47,7 @@ function session(
 ): SessionMetadata {
   return {
     id,
-    host: 'local',
+    host: workspace === '/work/b' ? 'studio' : 'local',
     workspace,
     title: `标题 ${id}`,
     busy: false,
@@ -98,16 +95,18 @@ function tree(
   return { activeLeaf, nodes, queue: [], runs: [], ...extra };
 }
 
-/// 默认带一个 session `s-1`，使 `sessionView(分片, 's-1')` 有对象可查。
-function shard(overrides: Partial<NodeState> = {}): NodeState {
+/// 默认带一个 session `s-1`，使 `sessionView(状态, 's-1')` 有对象可查。
+function state(overrides: Partial<ClientState> = {}): ClientState {
   return {
-    ...emptyNodeState,
+    ...emptyClientState,
+    hosts: [host('local'), host('studio')],
+    workspaces: [workspaceA, workspaceB],
     sessions: [session('s-1', '/work/a', 10)],
     ...overrides,
   };
 }
 
-function viewOf(value: NodeState, sessionId = 's-1'): SessionView {
+function viewOf(value: ClientState, sessionId = 's-1'): SessionView {
   const view = sessionView(value, sessionId);
   if (view === null) {
     throw new Error(`缺少 session 视图: ${sessionId}`);
@@ -125,7 +124,7 @@ function entryOf(view: SessionView, id: number): TranscriptEntry {
 
 describe('session 摘要', () => {
   it('状态由忙碌标志与队列长度推导', () => {
-    const value = shard({
+    const value = state({
       sessions: [
         session('s-running', '/work/a', 100, { busy: true }),
         session('s-queued', '/work/a', 200, { queueLength: 2 }),
@@ -141,9 +140,9 @@ describe('session 摘要', () => {
     expect(sessionSummaries(value).map((summary) => summary.queuedCount)).toEqual([0, 2, 0]);
   });
 
-  it('未读取已查看时间，结局取最近一次 run', () => {
-    const value = shard({
-      sessions: [session('s-1', '/work/a', 30), session('s-2', '/work/a', 10)],
+  it('摘要带 session 的 host，未读看已查看时间，结局取最近一次 run', () => {
+    const value = state({
+      sessions: [session('s-1', '/work/a', 30), session('s-2', '/work/b', 10)],
       lastSeenAt: { 's-1': 20, 's-2': 10 },
       trees: {
         's-1': tree([], null, {
@@ -157,14 +156,16 @@ describe('session 摘要', () => {
     });
 
     const summaries = sessionSummaries(value);
+    expect(summaries[0]?.host).toBe('local');
     expect(summaries[0]?.unread).toBe(true);
     expect(summaries[0]?.outcome).toBe('succeeded');
+    expect(summaries[1]?.host).toBe('studio');
     expect(summaries[1]?.unread).toBe(false);
     expect(summaries[1]?.outcome).toBeNull();
   });
 
-  it('按 workspace 注册顺序与 session 最近更新时间分组', () => {
-    const value = shard({
+  it('按 host 与 workspace 注册顺序分组，session 最近更新的在前', () => {
+    const value = state({
       workspaces: [workspaceB, workspaceA],
       sessions: [
         session('s-old', '/work/a', 100),
@@ -188,16 +189,24 @@ describe('session 摘要', () => {
     ]);
   });
 
-  it('节点摘要带模型名，快捷键顺序沿用侧栏顺序', () => {
-    const value = shard({
-      modelName: 'gpt-5-codex',
-      workspaces: [workspaceA, workspaceB],
+  it('不可用 host 的 workspace 会话列表为空', () => {
+    const value = state({
+      hosts: [host('local'), host('studio', 'unreachable')],
       sessions: [session('s-a', '/work/a', 100), session('s-b', '/work/b', 200)],
     });
 
-    const summary = nodeSummary(value);
-    expect(summary.modelName).toBe('gpt-5-codex');
-    expect(orderedSessions(summary.workspaces).map((entry) => entry.id)).toEqual([
+    expect(hostAvailable(value, 'local')).toBe(true);
+    expect(hostAvailable(value, 'studio')).toBe(false);
+    expect(hostAvailable(value, 'missing')).toBe(false);
+    expect(workspaceSummaries(value).map((workspace) => workspace.sessions.length)).toEqual([1, 0]);
+  });
+
+  it('快捷键顺序沿用侧栏顺序', () => {
+    const value = state({
+      sessions: [session('s-a', '/work/a', 100), session('s-b', '/work/b', 200)],
+    });
+
+    expect(orderedSessions(workspaceSummaries(value)).map((entry) => entry.id)).toEqual([
       toSessionId('s-a'),
       toSessionId('s-b'),
     ]);
@@ -213,14 +222,14 @@ describe('session 派生视图', () => {
       message(4, 2, 'user'),
     ];
 
-    expect(viewOf(shard({ trees: { 's-1': tree(nodes, 4) } })).transcript.map(
+    expect(viewOf(state({ trees: { 's-1': tree(nodes, 4) } })).transcript.map(
       (entry) => entry.message.id,
     )).toEqual([1, 2, 4]);
-    expect(viewOf(shard({ trees: { 's-1': tree(nodes, 2) } })).transcript.map(
+    expect(viewOf(state({ trees: { 's-1': tree(nodes, 2) } })).transcript.map(
       (entry) => entry.message.id,
     )).toEqual([1, 2]);
-    expect(viewOf(shard({ trees: { 's-1': tree(nodes, null) } })).transcript).toEqual([]);
-    expect(sessionView(shard(), 'missing')).toBeNull();
+    expect(viewOf(state({ trees: { 's-1': tree(nodes, null) } })).transcript).toEqual([]);
+    expect(sessionView(state(), 'missing')).toBeNull();
   });
 
   it('分支序号取兄弟按 id 升序的位置，压缩节点不算兄弟', () => {
@@ -233,7 +242,7 @@ describe('session 派生视图', () => {
       message(6, 5, 'assistant'),
       message(7, 2, 'compaction'),
     ];
-    const view = viewOf(shard({ trees: { 's-1': tree(nodes, 6) } }));
+    const view = viewOf(state({ trees: { 's-1': tree(nodes, 6) } }));
 
     expect(view.transcript.map((entry) => entry.message.id)).toEqual([1, 2, 5, 6]);
     expect(entryOf(view, 5).branch).toEqual({
@@ -252,11 +261,11 @@ describe('session 派生视图', () => {
       message(2, 1, 'assistant'),
       message(3, 2, 'tool'),
     ];
-    const unloaded = viewOf(shard({ trees: { 's-1': tree(nodes, 3) } }));
+    const unloaded = viewOf(state({ trees: { 's-1': tree(nodes, 3) } }));
     expect(unloaded.toolResults).toEqual({});
 
     const loaded = viewOf(
-      shard({
+      state({
         trees: { 's-1': tree(nodes, 3) },
         bodies: {
           3: [
@@ -276,7 +285,7 @@ describe('session 派生视图', () => {
   it('正文未到时 parts 为空，已拉到的正文原样给出', () => {
     const nodes = [message(1, null, 'user'), message(2, 1, 'assistant')];
     const view = viewOf(
-      shard({ trees: { 's-1': tree(nodes, 2) }, bodies: { 2: text('回答') } }),
+      state({ trees: { 's-1': tree(nodes, 2) }, bodies: { 2: text('回答') } }),
     );
 
     expect(entryOf(view, 1).parts).toBeNull();
@@ -285,9 +294,9 @@ describe('session 派生视图', () => {
 
   it('由 run 状态推导消息状态与说明', () => {
     const nodes = [message(1, null, 'user'), message(2, 1, 'assistant', { runId: 1 })];
-    const running = (extra: Partial<NodeState>) =>
+    const running = (extra: Partial<ClientState>) =>
       viewOf(
-        shard({
+        state({
           trees: { 's-1': tree(nodes, 2, { runs: [run(1, 'running')] }) },
           ...extra,
         }),
@@ -300,7 +309,7 @@ describe('session 派生视图', () => {
     ).toBe('供应商限流，第 1/3 次重试，等待 2 秒');
 
     const failed = viewOf(
-      shard({
+      state({
         trees: {
           's-1': tree(nodes, 2, {
             runs: [run(1, 'failed', { failure: { code: 'model_upstream', message: '上游 502' } })],
@@ -314,7 +323,7 @@ describe('session 派生视图', () => {
     });
 
     const cancelled = viewOf(
-      shard({ trees: { 's-1': tree(nodes, 2, { runs: [run(1, 'cancelled')] }) } }),
+      state({ trees: { 's-1': tree(nodes, 2, { runs: [run(1, 'cancelled')] }) } }),
     );
     expect(entryOf(cancelled, 2)).toMatchObject({ state: 'cancelled', note: null });
     expect(entryOf(cancelled, 1)).toMatchObject({ state: 'complete', note: null });
@@ -328,7 +337,7 @@ describe('session 派生视图', () => {
       message(3, 2, 'assistant', { runId: 1 }),
     ];
     const viewOfStatus = (status: RunRecord['status']) =>
-      viewOf(shard({ trees: { 's-1': tree(nodes, 3, { runs: [run(1, status)] }) } }));
+      viewOf(state({ trees: { 's-1': tree(nodes, 3, { runs: [run(1, status)] }) } }));
 
     expect(entryOf(viewOfStatus('running'), 2)).toMatchObject({
       state: 'interrupted',
@@ -341,7 +350,7 @@ describe('session 派生视图', () => {
 
   it('队列与占位随视图给出，空闲判定同时看 run 与队列', () => {
     const nodes = [message(1, null, 'user')];
-    const value = shard({
+    const value = state({
       sessions: [session('s-1', '/work/a', 30, { busy: true, queueLength: 1 })],
       trees: {
         's-1': tree(nodes, 1, {
@@ -357,7 +366,7 @@ describe('session 派生视图', () => {
     ]);
     expect(view.placeholders).toEqual([{ id: 9, parts: text('部分') }]);
     expect(view.idle).toBe(false);
-    expect(viewOf(shard({ sessions: [session('s-1', '/work/a', 30)] })).idle).toBe(true);
+    expect(viewOf(state({ sessions: [session('s-1', '/work/a', 30)] })).idle).toBe(true);
   });
 
   it('已发送的用户正文按链上顺序成为输入框历史', () => {
@@ -368,14 +377,14 @@ describe('session 派生视图', () => {
       message(4, 3, 'user'),
     ];
     const view = viewOf(
-      shard({
+      state({
         trees: { 's-1': tree(nodes, 3) },
         bodies: { 1: text('第一条'), 2: text('回答'), 3: text('   ') },
       }),
     );
 
     expect(view.history).toEqual(['第一条']);
-    expect(viewOf(shard({ trees: { 's-1': tree(nodes, 4) } })).history).toEqual([]);
+    expect(viewOf(state({ trees: { 's-1': tree(nodes, 4) } })).history).toEqual([]);
   });
 
   it('主面板所需的顺序、分支、工具结局与占位来自同一份派生', () => {
@@ -387,7 +396,7 @@ describe('session 派生视图', () => {
       message(5, 4, 'assistant'),
     ];
     const view = viewOf(
-      shard({
+      state({
         trees: {
           's-1': tree(nodes, 5, {
             runs: [run(1, 'succeeded')],
@@ -428,7 +437,7 @@ describe('session 派生视图', () => {
 describe('缺失正文', () => {
   it('只列出既无缓存也不在途、也没有失败的消息', () => {
     const nodes = [message(1, null, 'user'), message(2, 1, 'tool'), message(3, 1, 'user')];
-    const value = shard({
+    const value = state({
       trees: { 's-1': tree(nodes, 3) },
       bodies: { 1: [] },
       bodyRequests: [2],
@@ -441,35 +450,36 @@ describe('缺失正文', () => {
 });
 
 describe('session 存在判定', () => {
-  it('分片里有该 session 才算存在', () => {
-    expect(hasSession(shard(), 's-1')).toBe(true);
-    expect(hasSession(shard(), 'missing')).toBe(false);
-    expect(hasSession(shard({ sessions: [] }), 's-1')).toBe(false);
+  it('状态里有该 session 才算存在', () => {
+    expect(hasSession(state(), 's-1')).toBe(true);
+    expect(hasSession(state(), 'missing')).toBe(false);
+    expect(hasSession(state({ sessions: [] }), 's-1')).toBe(false);
   });
 });
 
-describe('跨节点列表', () => {
-  it('运行中面板跨节点列出运行中的 session 与队列长度', () => {
-    const entries = runningEntries([nodeA, nodeB], {
-      'macbook-air-01': shard({
-        sessions: [session('s-1', '/work/a', 10, { busy: true }), session('s-2', '/work/a', 9)],
+describe('跨 host 列表', () => {
+  it('运行中面板按 host 列出运行中的 session 与队列长度', () => {
+    const entries = runningEntries(
+      state({
+        sessions: [
+          session('s-1', '/work/a', 10, { busy: true }),
+          session('s-2', '/work/a', 9),
+          session('s-3', '/work/b', 12, { busy: true, queueLength: 2 }),
+        ],
         trees: { 's-1': tree([], null, { runs: [run(3, 'running')] }) },
       }),
-      studio: shard({
-        sessions: [session('s-3', '/work/a', 12, { busy: true, queueLength: 2 })],
-      }),
-    });
+    );
 
     expect(entries).toEqual([
       {
-        node: 'macbook-air-01',
+        host: 'local',
         sessionId: toSessionId('s-1'),
         title: '标题 s-1',
         queueLength: 0,
         startedAt: 3,
       },
       {
-        node: 'studio',
+        host: 'studio',
         sessionId: toSessionId('s-3'),
         title: '标题 s-3',
         queueLength: 2,
@@ -479,7 +489,7 @@ describe('跨节点列表', () => {
   });
 
   it('run 结束或失败后不再出现在运行中面板', () => {
-    const value = shard({
+    const value = state({
       sessions: [session('s-1', '/work/a', 10)],
       trees: {
         's-1': tree([], null, {
@@ -487,38 +497,31 @@ describe('跨节点列表', () => {
         }),
       },
     });
-    expect(runningEntries([nodeA], { 'macbook-air-01': value })).toEqual([]);
+    expect(runningEntries(value)).toEqual([]);
   });
 
-  it('命令面板列出全部节点的 session 与来源节点', () => {
-    const sessions = paletteSessions([nodeA, nodeB], {
-      'macbook-air-01': shard({ sessions: [session('s-1', '/work/a', 20)] }),
-      studio: shard({ sessions: [session('s-2', '/work/a', 30)] }),
-    });
+  it('命令面板列出全部 session 与来源 host', () => {
+    const sessions = paletteSessions(
+      state({
+        sessions: [session('s-1', '/work/a', 20), session('s-2', '/work/b', 30)],
+      }),
+    );
 
     expect(sessions).toEqual([
       {
-        node: 'macbook-air-01',
+        host: 'local',
         sessionId: toSessionId('s-1'),
         title: '标题 s-1',
         workspace: '/work/a',
         updatedAt: 20,
       },
       {
-        node: 'studio',
+        host: 'studio',
         sessionId: toSessionId('s-2'),
         title: '标题 s-2',
-        workspace: '/work/a',
+        workspace: '/work/b',
         updatedAt: 30,
       },
     ]);
-  });
-
-  it('缺失分片只列可用节点', () => {
-    const value = missingShards([nodeA, nodeB], { studio: shard() });
-    expect(value).toEqual(['macbook-air-01']);
-
-    const unreachable: NodeRecord = { ...nodeA, status: 'unreachable' };
-    expect(missingShards([unreachable], {})).toEqual([]);
   });
 });

@@ -23,6 +23,7 @@ test('注册 workspace 后创建 session，回答流式写入 transcript 并在�
 
   await expect(composer(page)).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('新 session');
+  await expect(page).toHaveURL(/#\/s\/[^/]+$/);
 
   await sendMessage(page, '检查 workspace 根目录');
 

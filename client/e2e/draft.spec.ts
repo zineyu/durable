@@ -1,7 +1,7 @@
 import { expect, test } from './support/fixtures';
 import { composer } from './support/ui';
 
-test('草稿按 session 保留，回到节点时恢复上次打开的 session', async ({ page, app }) => {
+test('草稿按 session 保留，回到入口时恢复上次打开的 session', async ({ page, app }) => {
   const first = await app.createSession(app.workspace);
   const second = await app.createSession(app.workspace);
 
@@ -15,5 +15,5 @@ test('草稿按 session 保留，回到节点时恢复上次打开的 session', 
   await expect(composer(page)).toHaveValue('半截草稿');
 
   await page.goto(app.urlFor());
-  await expect(page).toHaveURL(new RegExp(`#/n/${app.nodeName}/s/${first}`));
+  await expect(page).toHaveURL(new RegExp(`#/s/${first}$`));
 });

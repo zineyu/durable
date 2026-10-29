@@ -76,22 +76,13 @@ const isConsolePage = (id) => id.startsWith('pages-console');
 const switcherStories = (id) =>
   id.startsWith('pages-console') ||
   id.startsWith('components-sidebar') ||
-  id.startsWith('components-nodeswitcher') ||
+  id.startsWith('components-hostswitcher') ||
   id.startsWith('components-appshell');
 
-const emptyNodeStories = new Set([
-  'components-nodeswitcher--empty',
-  'components-sidebar--no-nodes',
-  'pages-console--no-nodes',
-]);
-
 const noSelectionStories = new Set([
-  'components-nodeswitcher--empty',
-  'components-nodeswitcher--unknown-selection',
-  'components-sidebar--unknown-node',
-  'components-sidebar--no-nodes',
-  'pages-console--no-nodes',
-  'pages-console--unknown-node',
+  'components-hostswitcher--empty',
+  'components-sidebar--no-hosts',
+  'pages-console--no-hosts',
 ]);
 
 async function assertNoHorizontalOverflow(page) {
@@ -213,72 +204,65 @@ async function assertWorkspaceRemoveRevealsOnHover(page) {
   await page.mouse.move(0, 0);
 }
 
-async function assertNodeSwitcher(page, story) {
-  const switcher = page.getByRole('navigation', { name: '节点切换器' });
+async function assertHostSwitcher(page, story) {
+  const switcher = page.getByRole('navigation', { name: 'host 切换器' });
   if ((await switcher.count()) === 0) {
-    throw new Error('缺少节点切换器');
+    throw new Error('缺少 host 切换器');
   }
 
-  const pills = switcher.locator('button[aria-pressed]');
-  const pillCount = await pills.count();
-  if (emptyNodeStories.has(story.id) && pillCount !== 0) {
-    throw new Error(`空节点表仍渲染了 ${pillCount} 个节点`);
-  }
-  if (!emptyNodeStories.has(story.id) && pillCount === 0) {
-    throw new Error('节点切换器没有节点');
-  }
-
-  const switcherBox = await switcher.boundingBox();
-  if (switcherBox === null) {
-    throw new Error('未取得节点切换器尺寸');
-  }
-  for (let index = 0; index < pillCount; index += 1) {
-    const box = await pills.nth(index).boundingBox();
-    if (box === null) {
-      throw new Error('未取得节点按钮尺寸');
-    }
-    if (box.x < switcherBox.x - 1 || box.x + box.width > switcherBox.x + switcherBox.width + 1) {
-      throw new Error(`节点按钮溢出切换器: ${box.x}..${box.x + box.width}`);
-    }
-  }
-
-  const register = switcher.getByRole('button', { name: '注册节点' });
+  const register = switcher.getByRole('button', { name: '注册 host' });
   if ((await register.count()) === 0) {
-    throw new Error('节点切换器缺少注册节点入口');
+    throw new Error('host 切换器缺少注册 host 入口');
   }
 
-  const selected = await switcher.locator('button[aria-pressed="true"]').count();
-  const expected = noSelectionStories.has(story.id) ? 0 : 1;
-  if (selected !== expected) {
-    throw new Error(`选中节点数量不是 ${expected}: ${selected}`);
+  const trigger = switcher.locator('button[aria-haspopup]').first();
+  const triggerBox = await trigger.boundingBox();
+  const switcherBox = await switcher.boundingBox();
+  if (triggerBox === null || switcherBox === null) {
+    throw new Error('未取得 host 切换器尺寸');
+  }
+  if (
+    triggerBox.x < switcherBox.x - 1 ||
+    triggerBox.x + triggerBox.width > switcherBox.x + switcherBox.width + 1
+  ) {
+    throw new Error(`host 按钮溢出切换器: ${triggerBox.x}..${triggerBox.x + triggerBox.width}`);
+  }
+
+  const label = (await trigger.textContent())?.trim() ?? '';
+  const expected = noSelectionStories.has(story.id) ? 'host' : null;
+  if (expected !== null && label !== expected) {
+    throw new Error(`未选中 host 时切换器应显示「${expected}」: ${label}`);
+  }
+  if (expected === null && (label.length === 0 || label === 'host')) {
+    throw new Error(`选中 host 时切换器应显示 host 名: ${label}`);
   }
 }
 
-const nodeStateHeadings = new Map([
-  ['pages-console--unavailable-node', '节点不可用'],
-  ['pages-console--unknown-node', '未知节点'],
-  ['pages-console--no-nodes', '选择一个节点'],
+const hostStateHeadings = new Map([
+  ['pages-console--unavailable-host', 'host 不可用'],
+  ['pages-console--unknown-session', '未知 session'],
+  ['pages-console--no-hosts', '选择一个 session'],
 ]);
 
-async function assertNodeStates(page, story) {
-  const expected = nodeStateHeadings.get(story.id);
+async function assertHostStates(page, story) {
+  const expected = hostStateHeadings.get(story.id);
   if (expected === undefined) {
     return;
   }
   const heading = page.locator('main h2').first();
   if ((await heading.count()) === 0) {
-    throw new Error(`节点状态页缺少标题: ${story.id}`);
+    throw new Error(`host 状态页缺少标题: ${story.id}`);
   }
   const text = await heading.textContent();
   if (text !== expected) {
-    throw new Error(`节点状态页标题不是「${expected}」: ${text}`);
+    throw new Error(`host 状态页标题不是「${expected}」: ${text}`);
   }
   const add = page.getByRole('button', { name: '注册 workspace' });
   if ((await add.count()) === 0) {
-    throw new Error('节点不可用的侧栏缺少注册 workspace 按钮');
+    throw new Error('host 不可用的侧栏缺少注册 workspace 按钮');
   }
-  if (!(await add.isDisabled())) {
-    throw new Error('节点不可用时未禁用注册 workspace 命令');
+  if (story.id !== 'pages-console--unknown-session' && !(await add.isDisabled())) {
+    throw new Error('host 不可用时未禁用注册 workspace 命令');
   }
 }
 
@@ -293,9 +277,9 @@ async function capture(page, target, story, theme, prefix = '') {
     await assertNoHorizontalOverflow(page);
     await assertBranchSwitcherPlacement(page);
     if (switcherStories(story.id)) {
-      await assertNodeSwitcher(page, story);
+      await assertHostSwitcher(page, story);
     }
-    await assertNodeStates(page, story);
+    await assertHostStates(page, story);
     const hasComposer = (await page.locator('[class*="composer"]').count()) > 0;
     if (isConsolePage(story.id) && hasComposer) {
       await assertChromeInViewport(page);

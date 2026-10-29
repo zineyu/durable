@@ -1,62 +1,43 @@
-import type { NodeName } from '../api/generated/NodeName';
-import { nodeStatusLabel } from './labels';
+import type { HostName } from '../api/generated/HostName';
+import { hostStatusLabel } from './labels';
+import type { HostRecord, PaletteSession, SessionSummary } from './types';
 import type { SessionId } from './ids';
-import type { NodeRecord, PaletteSession, SessionSummary } from './types';
 
 /// 面板条目的执行语义。组件只按 `kind` 分派，不解析文本。
 export type PaletteAction =
-  | { kind: 'session'; node: NodeName; sessionId: SessionId }
-  | { kind: 'node'; node: NodeName }
-  | { kind: 'register-node' }
+  | { kind: 'session'; sessionId: SessionId }
+  | { kind: 'host'; host: HostName }
+  | { kind: 'register-host' }
   | { kind: 'register-workspace' }
-  | { kind: 'cancel-run'; node: NodeName; sessionId: SessionId };
+  | { kind: 'cancel-run'; sessionId: SessionId };
 
-export type PaletteGroup = 'session' | 'action' | 'node';
+export type PaletteGroup = 'session' | 'action' | 'host';
 
 export type PaletteEntry = {
   id: string;
   group: PaletteGroup;
+  /// 条目所在的分组标题。session 用 host 名，动作与 host 组用固定标题。
+  heading: string;
   label: string;
   detail: string;
   action: PaletteAction;
 };
 
 export type PaletteInput = {
-  nodes: NodeRecord[];
-  /// 跨节点的 session 列表，由派生层给出。
+  hosts: HostRecord[];
+  /// 跨 host 的 session 列表，由派生层给出。
   sessions: PaletteSession[];
-  selectedNode: NodeName | null;
+  selectedHost: HostName | null;
   /// 选中 session 的摘要；未选中 session 时为 `null`。
   selectedSession: SessionSummary | null;
 };
 
-const groupOrder: PaletteGroup[] = ['session', 'action', 'node'];
+const groupOrder: PaletteGroup[] = ['session', 'action', 'host'];
 
-/// 组装面板条目：跨节点的 session、动作与节点。
+/// 组装面板条目：按 host 分组的 session、动作与 host 列表。
+/// 规格 user story R-48：命令面板按 host 分组。
 export function buildPalette(input: PaletteInput): PaletteEntry[] {
-  const sessions = [...input.sessions].sort(
-    (left, right) => right.updatedAt - left.updatedAt,
-  );
-  return [
-    ...sessions.map((session) => ({
-      id: `session:${session.node}:${session.sessionId}`,
-      group: 'session' as const,
-      label: session.title,
-      detail: `${session.node} · ${session.workspace}`,
-      action: { kind: 'session' as const, node: session.node, sessionId: session.sessionId },
-    })),
-    ...actions(input),
-    ...input.nodes.map((record) => ({
-      id: `node:${record.name}`,
-      group: 'node' as const,
-      label: record.name,
-      detail:
-        record.detail === null
-          ? nodeStatusLabel[record.status]
-          : `${nodeStatusLabel[record.status]} · ${record.detail}`,
-      action: { kind: 'node' as const, node: record.name },
-    })),
-  ];
+  return [...sessionsOf(input), ...actions(input), ...hostEntries(input)];
 }
 
 /// 模糊过滤。空查询保持原顺序；组内按匹配度排序，组顺序不变。
@@ -86,39 +67,81 @@ export function stepPaletteIndex(current: number, delta: number, total: number):
   return (current + delta + total) % total;
 }
 
+/// session 按 host 分组：host 顺序沿用 host 表，组内最近更新的在前。
+function sessionsOf(input: PaletteInput): PaletteEntry[] {
+  const order = new Map(input.hosts.map((host, index) => [host.name, index]));
+  return [...input.sessions]
+    .sort(
+      (left, right) =>
+        (order.get(left.host) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(right.host) ?? Number.MAX_SAFE_INTEGER) ||
+        right.updatedAt - left.updatedAt,
+    )
+    .map((session) => ({
+      id: `session:${session.host}:${session.sessionId}`,
+      group: 'session' as const,
+      heading: session.host,
+      label: session.title,
+      detail: `${session.host} · ${session.workspace}`,
+      action: { kind: 'session' as const, sessionId: session.sessionId },
+    }));
+}
+
+function hostEntries(input: PaletteInput): PaletteEntry[] {
+  return input.hosts.map((record) => ({
+    id: `host:${record.name}`,
+    group: 'host' as const,
+    heading: 'host',
+    label: record.name,
+    detail: hostDetail(record),
+    action: { kind: 'host' as const, host: record.name },
+  }));
+}
+
+function hostDetail(record: HostRecord): string {
+  const status =
+    record.detail === null
+      ? hostStatusLabel[record.status]
+      : `${hostStatusLabel[record.status]} · ${record.detail}`;
+  return record.latencyMs === null ? status : `${status} · ${record.latencyMs} ms`;
+}
+
 function actions(input: PaletteInput): PaletteEntry[] {
   const entries: PaletteEntry[] = [
     {
-      id: 'action:register-node',
+      id: 'action:register-host',
       group: 'action',
-      label: '注册节点',
-      detail: '把一台机器加入节点表',
-      action: { kind: 'register-node' },
+      heading: '动作',
+      label: '注册 host',
+      detail: '把一台机器加入 host 表',
+      action: { kind: 'register-host' },
     },
   ];
-  const node = input.selectedNode;
-  if (node === null) {
+  const host = input.selectedHost;
+  if (host === null) {
     return entries;
   }
-  const record = input.nodes.find((entry) => entry.name === node);
+  const record = input.hosts.find((entry) => entry.name === host);
   if (record?.status !== 'ok') {
     return entries;
   }
   entries.push({
     id: 'action:register-workspace',
     group: 'action',
+    heading: '动作',
     label: '注册 workspace',
-    detail: `在 ${node} 上注册目录`,
+    detail: `在 ${host} 上注册目录`,
     action: { kind: 'register-workspace' },
   });
   const session = input.selectedSession;
   if (session?.state === 'running') {
     entries.push({
-      id: `action:cancel-run:${node}:${session.id}`,
+      id: `action:cancel-run:${session.id}`,
       group: 'action',
+      heading: '动作',
       label: '停止 run',
-      detail: `${session.title} · ${node}`,
-      action: { kind: 'cancel-run', node, sessionId: session.id },
+      detail: `${session.title} · ${host}`,
+      action: { kind: 'cancel-run', sessionId: session.id },
     });
   }
   return entries;

@@ -1,9 +1,9 @@
-import type { NodeName } from '../api/generated/NodeName';
+import type { HostName } from '../api/generated/HostName';
 import type { RunStatus } from '../api/generated/RunStatus';
 import type { SessionState } from './types';
 
 export type TitleSession = {
-  node: NodeName;
+  host: HostName;
   title: string;
   state: SessionState;
   lastRun: RunStatus | null;
@@ -14,7 +14,7 @@ export function documentTitle(session: TitleSession | null): string {
   if (session === null) {
     return 'durable';
   }
-  return `${statePrefix(session)}${session.title} · ${session.node}`;
+  return `${statePrefix(session)}${session.title} · ${session.host}`;
 }
 
 function statePrefix(session: TitleSession): string {

@@ -2,17 +2,17 @@ import type { ReactElement } from 'react';
 import styles from './MainHeader.module.css';
 import { ConnectionChip } from './ConnectionChip';
 import { IconButton } from './IconButton';
-import { NodeStatusBadge } from './NodeStatusBadge';
-import type { NodeName } from '../api/generated/NodeName';
-import type { NodeStatus } from '../api/generated/NodeStatus';
+import { HostStatusBadge } from './HostStatusBadge';
+import type { HostName } from '../api/generated/HostName';
+import type { HostStatus } from '../api/generated/HostStatus';
 import { sessionStateLabel } from '../view/labels';
 import type { WorkspacePath } from '../view/ids';
 import type { ConnectionState, SessionState } from '../view/types';
 
 export type MainHeaderProps = {
-  node: NodeName;
-  nodeStatus: NodeStatus;
-  nodeDetail?: string | null;
+  host: HostName;
+  hostStatus: HostStatus;
+  hostDetail?: string | null;
   title: string;
   workspacePath: WorkspacePath;
   state: SessionState;
@@ -23,9 +23,9 @@ export type MainHeaderProps = {
 };
 
 export function MainHeader({
-  node,
-  nodeStatus,
-  nodeDetail = null,
+  host,
+  hostStatus,
+  hostDetail = null,
   title,
   workspacePath,
   state,
@@ -43,7 +43,7 @@ export function MainHeader({
             {title}
           </h1>
           <p className={styles.workspace} title={workspacePath}>
-            <span className={styles.node}>{node}</span>
+            <span className={styles.host}>{host}</span>
             <span className={styles.separator} aria-hidden="true">
               ·
             </span>
@@ -66,7 +66,7 @@ export function MainHeader({
               ) : null}
             </span>
           ) : null}
-          <NodeStatusBadge status={nodeStatus} detail={nodeDetail} />
+          <HostStatusBadge status={hostStatus} detail={hostDetail} />
           <span className={styles.state} data-state={state}>
             {sessionStateLabel[state]}
           </span>

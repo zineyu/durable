@@ -54,13 +54,13 @@ describe('快捷键', () => {
     expect(resolveShortcut(key('ArrowDown', { altKey: true }), { editable: true })).toBeNull();
   });
 
-  it('Alt+数字按物理键位切换节点', () => {
+  it('Alt+数字按物理键位切换 host', () => {
     expect(
       resolveShortcut(key('¡', { altKey: true, code: 'Digit1' }), { editable: false }),
-    ).toEqual({ type: 'select-node', index: 0 });
+    ).toEqual({ type: 'select-host', index: 0 });
     expect(
       resolveShortcut(key('9', { altKey: true, code: 'Numpad9' }), { editable: false }),
-    ).toEqual({ type: 'select-node', index: 8 });
+    ).toEqual({ type: 'select-host', index: 8 });
     expect(
       resolveShortcut(key('0', { altKey: true, code: 'Digit0' }), { editable: false }),
     ).toBeNull();

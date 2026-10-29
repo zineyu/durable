@@ -1,17 +1,22 @@
 import { expect, test } from './support/fixtures';
-import { nodeSwitcher, sidebar } from './support/ui';
+import { composer, hostSwitcher } from './support/ui';
 
-test('未选择节点时提示选择节点，节点未知时提示未知节点', async ({ page, app }) => {
-  await page.goto(app.hubUrl);
-  await expect(page.getByRole('heading', { name: '选择一个节点' })).toBeVisible();
-
-  await page.goto(`${app.hubUrl}/#/n/missing-node`);
-
-  await expect(page.getByRole('heading', { name: '未知节点' })).toBeVisible();
-  await expect(page.getByText('节点 missing-node 不在节点表里。它可能已被删除或改名。')).toBeVisible();
-  await expect(sidebar(page).getByRole('button', { name: '注册 workspace' })).toBeDisabled();
-
-  await nodeSwitcher(page).getByRole('button', { name: app.nodeName }).click();
+test('没有选中 session 时提示选择，未知 session 显示独立状态', async ({ page, app }) => {
+  await page.goto(app.urlFor());
   await expect(page.getByRole('heading', { name: '选择一个 session' })).toBeVisible();
-  await expect(sidebar(page).getByRole('button', { name: '注册 workspace' })).toBeEnabled();
+  await expect(composer(page)).toHaveCount(0);
+
+  await page.goto(`${app.agentUrl}/#/s/missing-session`);
+
+  await expect(page.getByRole('heading', { name: '未知 session' })).toBeVisible();
+  await expect(page.getByText('session missing-session 不在当前状态里。')).toBeVisible();
+  await expect(composer(page)).toHaveCount(0);
+
+  const sessionId = await app.createSession(app.workspace);
+  await page.goto(app.urlFor(sessionId));
+
+  await expect(composer(page)).toBeVisible();
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('新 session');
+  await expect(hostSwitcher(page).getByRole('button', { name: 'local' })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`#/s/${sessionId}$`));
 });

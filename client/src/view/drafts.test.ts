@@ -24,58 +24,55 @@ function storage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { entr
   };
 }
 
-const nodeA = 'macbook-air-01';
-const nodeB = 'studio';
 const sessionA = toSessionId('s-1');
 const sessionB = toSessionId('s-2');
 
 describe('草稿', () => {
-  it('按节点与 session 隔离', () => {
+  it('按 session id 隔离', () => {
     const store = storage();
-    writeDraft(store, nodeA, sessionA, { text: '节点 A 的草稿', pastes: {} });
-    writeDraft(store, nodeA, sessionB, { text: '另一个 session', pastes: {} });
-    writeDraft(store, nodeB, sessionA, { text: '节点 B 的草稿', pastes: {} });
+    writeDraft(store, sessionA, { text: '第一个 session 的草稿', pastes: {} });
+    writeDraft(store, sessionB, { text: '另一个 session', pastes: {} });
 
-    expect(readDraft(store, nodeA, sessionA).text).toBe('节点 A 的草稿');
-    expect(readDraft(store, nodeA, sessionB).text).toBe('另一个 session');
-    expect(readDraft(store, nodeB, sessionA).text).toBe('节点 B 的草稿');
-    expect(draftKey(nodeA, sessionA)).not.toBe(draftKey(nodeB, sessionA));
+    expect(readDraft(store, sessionA).text).toBe('第一个 session 的草稿');
+    expect(readDraft(store, sessionB).text).toBe('另一个 session');
+    expect(draftKey(sessionA)).not.toBe(draftKey(sessionB));
   });
 
   it('写入空文本时移除键', () => {
     const store = storage();
-    writeDraft(store, nodeA, sessionA, { text: '要丢弃', pastes: {} });
-    writeDraft(store, nodeA, sessionA, emptyDraft);
-    expect(readDraft(store, nodeA, sessionA)).toEqual(emptyDraft);
-    expect(store.entries.has(draftKey(nodeA, sessionA))).toBe(false);
+    writeDraft(store, sessionA, { text: '要丢弃', pastes: {} });
+    writeDraft(store, sessionA, emptyDraft);
+    expect(readDraft(store, sessionA)).toEqual(emptyDraft);
+    expect(store.entries.has(draftKey(sessionA))).toBe(false);
   });
 
   it('折叠的粘贴块随草稿一起保存', () => {
     const store = storage();
     const pastes = { '[粘贴内容 1：900 字符]': 'x'.repeat(900) };
-    writeDraft(store, nodeA, sessionA, { text: '看这个 [粘贴内容 1：900 字符]', pastes });
-    expect(readDraft(store, nodeA, sessionA)).toEqual({ text: '看这个 [粘贴内容 1：900 字符]', pastes });
+    writeDraft(store, sessionA, { text: '看这个 [粘贴内容 1：900 字符]', pastes });
+    expect(readDraft(store, sessionA)).toEqual({ text: '看这个 [粘贴内容 1：900 字符]', pastes });
   });
 
   it('兼容旧格式的纯文本草稿', () => {
     const store = storage();
-    store.setItem(draftKey(nodeA, sessionA), '旧草稿');
-    expect(readDraft(store, nodeA, sessionA)).toEqual({ text: '旧草稿', pastes: {} });
+    store.setItem(draftKey(sessionA), '旧草稿');
+    expect(readDraft(store, sessionA)).toEqual({ text: '旧草稿', pastes: {} });
   });
 
   it('没有选中 session 时返回空草稿', () => {
     const store = storage();
-    expect(readDraft(store, null, null)).toEqual(emptyDraft);
-    writeDraft(store, null, null, { text: '不写', pastes: {} });
+    expect(readDraft(store, null)).toEqual(emptyDraft);
+    writeDraft(store, null, { text: '不写', pastes: {} });
     expect(store.entries.size).toBe(0);
   });
 
-  it('每节点只记一个上次打开的 session', () => {
+  it('只记一条上次打开的 session', () => {
     const store = storage();
-    expect(readLastSession(store, nodeA)).toBeNull();
-    writeLastSession(store, nodeA, sessionA);
-    writeLastSession(store, nodeB, sessionB);
-    expect(readLastSession(store, nodeA)).toBe(sessionA);
-    expect(readLastSession(store, nodeB)).toBe(sessionB);
+    expect(readLastSession(store)).toBeNull();
+    writeLastSession(store, sessionA);
+    expect(readLastSession(store)).toBe(sessionA);
+    writeLastSession(store, sessionB);
+    expect(readLastSession(store)).toBe(sessionB);
+    expect(store.entries.size).toBe(1);
   });
 });

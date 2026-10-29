@@ -2,17 +2,17 @@
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { DeltaKind } from '../api/generated/DeltaKind';
 import type { MessageBody } from '../api/generated/MessageBody';
-import type { NodeState } from './node-state';
+import type { ClientState } from './state';
 import type { MessagePlaceholder } from './types';
 
 /// 累加一次实时增量。定型前的输出不进树，因此这里只写本地占位。
 export function applyDelta(
-  state: NodeState,
+  state: ClientState,
   sessionId: string,
   messageId: number,
   kind: DeltaKind,
   text: string,
-): NodeState {
+): ClientState {
   const tree = state.trees[sessionId];
   if (tree === undefined) {
     return state;
@@ -35,7 +35,7 @@ export function applyDelta(
 }
 
 /// 标记这些消息的正文正在拉取。
-export function requestMessageBodies(state: NodeState, ids: number[]): NodeState {
+export function requestMessageBodies(state: ClientState, ids: number[]): ClientState {
   const requests = [...state.bodyRequests];
   for (const id of ids) {
     if (!requests.includes(id)) {
@@ -48,7 +48,7 @@ export function requestMessageBodies(state: NodeState, ids: number[]): NodeState
 }
 
 /// 正文拉取失败：移出在途列表并记住失败，避免立即重试。
-export function failMessageBodies(state: NodeState, ids: number[]): NodeState {
+export function failMessageBodies(state: ClientState, ids: number[]): ClientState {
   const failures = [...state.bodyFailures];
   for (const id of ids) {
     if (!failures.includes(id)) {
@@ -63,7 +63,7 @@ export function failMessageBodies(state: NodeState, ids: number[]): NodeState {
 }
 
 /// 允许重试这些失败的消息。
-export function retryMessageBodies(state: NodeState, ids: number[]): NodeState {
+export function retryMessageBodies(state: ClientState, ids: number[]): ClientState {
   const failures = state.bodyFailures.filter((id) => !ids.includes(id));
   return failures.length === state.bodyFailures.length
     ? state
@@ -72,10 +72,10 @@ export function retryMessageBodies(state: NodeState, ids: number[]): NodeState {
 
 /// 写入批量拉取的正文。只接受仍在在途列表里的 id：已失效或快照重载丢弃的响应不写缓存。
 export function applyMessageBodies(
-  state: NodeState,
+  state: ClientState,
   ids: number[],
   bodies: MessageBody[],
-): NodeState {
+): ClientState {
   const accepted = ids.filter((id) => state.bodyRequests.includes(id));
   if (accepted.length === 0) {
     return state;
@@ -97,7 +97,7 @@ export function applyMessageBodies(
 }
 
 /// 丢弃这些消息的正文与请求记录，用于 session 删除。
-export function forgetBodies(state: NodeState, ids: number[]): NodeState {
+export function forgetBodies(state: ClientState, ids: number[]): ClientState {
   if (ids.length === 0) {
     return state;
   }
@@ -111,7 +111,7 @@ export function forgetBodies(state: NodeState, ids: number[]): NodeState {
 }
 
 /// 丢掉该消息的正文缓存并取消在途请求，使下一次渲染重新拉取。
-export function invalidateBody(state: NodeState, id: number): NodeState {
+export function invalidateBody(state: ClientState, id: number): ClientState {
   const pending = state.bodyRequests.includes(id);
   const failed = state.bodyFailures.includes(id);
   if (state.bodies[id] === undefined && !pending && !failed) {
@@ -128,7 +128,7 @@ export function invalidateBody(state: NodeState, id: number): NodeState {
 }
 
 /// 丢掉一个已定型的占位。
-export function dropPlaceholder(state: NodeState, sessionId: string, id: number): NodeState {
+export function dropPlaceholder(state: ClientState, sessionId: string, id: number): ClientState {
   const current = state.placeholders[sessionId];
   if (current === undefined) {
     return state;
@@ -146,7 +146,7 @@ export function dropPlaceholder(state: NodeState, sessionId: string, id: number)
 }
 
 /// run 结束：未定型的输出不落库，占位一并丢弃。
-export function dropFinished(state: NodeState, sessionId: string): NodeState {
+export function dropFinished(state: ClientState, sessionId: string): ClientState {
   const current = state.placeholders[sessionId];
   if (current === undefined || current.length === 0) {
     return state;

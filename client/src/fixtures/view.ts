@@ -1,49 +1,70 @@
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from '../view/ids';
-import type { NodeRecord, QueueItem, WorkspaceSummary } from '../view/types';
+import type { HostRecord, QueueItem, WorkspaceSummary } from '../view/types';
 
 export const modelName = 'gpt-5-codex';
 
-export const nodes: NodeRecord[] = [
-  { name: 'macbook-air-01', url: 'http://127.0.0.1:8081', enabled: true, status: 'ok', detail: null },
-  { name: 'macbook-air-02', url: 'http://127.0.0.1:9081', enabled: true, status: 'ok', detail: null },
+export const hosts: HostRecord[] = [
+  {
+    name: 'macbook-air-01',
+    kind: 'local',
+    target: null,
+    enabled: true,
+    status: 'ok',
+    detail: null,
+    latencyMs: 4,
+  },
+  {
+    name: 'macbook-air-02',
+    kind: 'ssh',
+    target: 'macbook-air-02',
+    enabled: true,
+    status: 'ok',
+    detail: null,
+    latencyMs: 32,
+  },
   {
     name: 'studio',
-    url: 'http://127.0.0.1:10081',
+    kind: 'ssh',
+    target: 'studio',
     enabled: true,
     status: 'unreachable',
-    detail: '连接节点失败: 隧道已断开',
+    detail: '连接 host 失败: 隧道已断开',
+    latencyMs: null,
   },
 ];
 
-export const unreachableNode: NodeRecord = {
+export const unreachableHost: HostRecord = {
   name: 'studio',
-  url: 'http://127.0.0.1:10081',
+  kind: 'ssh',
+  target: 'studio',
   enabled: true,
   status: 'unreachable',
-  detail: '连接节点失败: 隧道已断开',
+  detail: '连接 host 失败: 隧道已断开',
+  latencyMs: null,
 };
 
-export const incompatibleNode: NodeRecord = {
+export const incompatibleHost: HostRecord = {
   name: 'legacy-lab',
-  url: 'http://127.0.0.1:7081',
+  kind: 'ssh',
+  target: 'legacy-lab',
   enabled: true,
   status: 'incompatible',
-  detail: 'agent 协议版本 0 与 hub 要求的 1 不一致',
+  detail: 'executor 构建 0 与 agent 要求的 1 不一致',
+  latencyMs: null,
 };
-
-export const unknownNodeName = 'retired-studio';
 
 const updated = (hours: number, minutes: number): number =>
   new Date(2026, 9, 19, hours, minutes).getTime();
 
 export const workspaces: WorkspaceSummary[] = [
   {
-    id: toWorkspaceId('studio', '/Users/zine/space/project/durable'),
-    host: 'studio',
+    id: toWorkspaceId('macbook-air-01', '/Users/zine/space/project/durable'),
+    host: 'macbook-air-01',
     path: toWorkspacePath('/Users/zine/space/project/durable'),
     sessions: [
       {
         id: toSessionId('s-1'),
+        host: 'macbook-air-01',
         title: '双二进制骨架与工程基线',
         state: 'running',
         unread: false,
@@ -53,6 +74,7 @@ export const workspaces: WorkspaceSummary[] = [
       },
       {
         id: toSessionId('s-2'),
+        host: 'macbook-air-01',
         title: 'UI 反代与静态资源内嵌',
         state: 'queued',
         unread: false,
@@ -62,6 +84,7 @@ export const workspaces: WorkspaceSummary[] = [
       },
       {
         id: toSessionId('s-3'),
+        host: 'macbook-air-01',
         title: '类型生成一致性检查',
         state: 'idle',
         unread: false,
@@ -72,12 +95,13 @@ export const workspaces: WorkspaceSummary[] = [
     ],
   },
   {
-    id: toWorkspaceId('macbook-air-01', '/Users/zine/space/agent'),
-    host: 'macbook-air-01',
+    id: toWorkspaceId('macbook-air-02', '/Users/zine/space/project/agent-lab'),
+    host: 'macbook-air-02',
     path: toWorkspacePath('/Users/zine/space/project/agent-lab'),
     sessions: [
       {
         id: toSessionId('s-4'),
+        host: 'macbook-air-02',
         title: 'SQLite 迁移与恢复',
         state: 'idle',
         unread: false,

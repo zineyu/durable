@@ -4,7 +4,7 @@ export type ShortcutCommand =
   | { type: 'toggle-help' }
   | { type: 'escape' }
   | { type: 'cycle-session'; delta: number }
-  | { type: 'select-node'; index: number };
+  | { type: 'select-host'; index: number };
 
 export type ShortcutEvent = {
   key: string;
@@ -30,7 +30,7 @@ export const shortcutHelp: ShortcutHelpEntry[] = [
   { keys: '?', description: '查看全部快捷键' },
   { keys: 'Esc', description: '取消当前 session 的运行' },
   { keys: 'Alt + ↑ / ↓', description: '切换上一个或下一个 session' },
-  { keys: 'Alt + 1…9', description: '切换到第 n 个节点' },
+  { keys: 'Alt + 1…9', description: '切换到第 n 个 host 最近的 session' },
   { keys: '↑ / ↓', description: '在输入框里回溯已发送的消息' },
 ];
 
@@ -57,9 +57,9 @@ export function resolveShortcut(
     if (event.key === 'ArrowDown') {
       return { type: 'cycle-session', delta: 1 };
     }
-    const index = nodeDigit(event.code);
+    const index = hostDigit(event.code);
     if (index !== null) {
-      return { type: 'select-node', index };
+      return { type: 'select-host', index };
     }
   }
   return null;
@@ -84,7 +84,7 @@ function isPaletteKey(event: ShortcutEvent): boolean {
   );
 }
 
-function nodeDigit(code: string): number | null {
+function hostDigit(code: string): number | null {
   const match = /^(?:Digit|Numpad)([1-9])$/.exec(code);
   if (match === null) {
     return null;

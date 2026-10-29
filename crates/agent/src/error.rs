@@ -40,6 +40,12 @@ impl ApiError {
         Self::new(ErrorCode::InvalidRequest, status, message)
     }
 
+    /// 未知路径。API 作用域的未知路径以 JSON 信封返回 404，而不是回落静态资源。
+    #[must_use]
+    pub fn not_found(message: String) -> Self {
+        Self::new(ErrorCode::InvalidRequest, StatusCode::NOT_FOUND, message)
+    }
+
     /// 请求里的 host 不在 host 表中。
     #[must_use]
     pub fn host_not_found(message: String) -> Self {

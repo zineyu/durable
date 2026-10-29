@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactElement } from 'react';
 import { Icon } from './Icon';
 import styles from './CommandPalette.module.css';
-import type { PaletteEntry, PaletteGroup } from '../view/command-palette';
+import type { PaletteEntry } from '../view/command-palette';
 
 export type CommandPaletteProps = {
   entries: PaletteEntry[];
@@ -13,12 +13,6 @@ export type CommandPaletteProps = {
   onHover: (index: number) => void;
   onSelect: (entry: PaletteEntry) => void;
   onClose: () => void;
-};
-
-const groupLabels: Record<PaletteGroup, string> = {
-  session: 'session',
-  action: '动作',
-  node: '节点',
 };
 
 export function CommandPalette({
@@ -77,7 +71,7 @@ export function CommandPalette({
           <input
             className={styles.input}
             aria-label="搜索命令"
-            placeholder="搜索 session、动作或节点"
+            placeholder="搜索 session、动作或 host"
             role="combobox"
             aria-expanded="true"
             aria-controls="command-palette-list"
@@ -101,8 +95,8 @@ export function CommandPalette({
           ) : (
             entries.map((entry, index) => (
               <Fragment key={entry.id}>
-                {index === 0 || entries[index - 1]?.group !== entry.group ? (
-                  <p className={styles.group}>{groupLabels[entry.group]}</p>
+                {index === 0 || entries[index - 1]?.heading !== entry.heading ? (
+                  <p className={styles.group}>{entry.heading}</p>
                 ) : null}
                 <button
                   type="button"

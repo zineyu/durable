@@ -1,14 +1,19 @@
 import type { ReactElement } from 'react';
 import { ActivityPanel } from './ActivityPanel';
 import { Button } from './Button';
-import { NodeSwitcher } from './NodeSwitcher';
+import { HostSwitcher } from './HostSwitcher';
 import { SessionListItem } from './SessionListItem';
 import { WorkspaceGroup } from './WorkspaceGroup';
 import styles from './Sidebar.module.css';
 import type { SessionItemView } from './SessionListItem';
-import type { NodeName } from '../api/generated/NodeName';
+import type { HostName } from '../api/generated/HostName';
 import type { SessionId, WorkspacePath } from '../view/ids';
-import type { NodeRecord, RunningEntry, WorkspaceSummary } from '../view/types';
+import type {
+  HostRecord,
+  RunningEntry,
+  SessionSummary,
+  WorkspaceSummary,
+} from '../view/types';
 
 export type SessionEditing = {
   sessionId: SessionId;
@@ -16,21 +21,25 @@ export type SessionEditing = {
 };
 
 export type SidebarProps = {
-  nodes: NodeRecord[];
-  selectedNode: NodeName | null;
-  onSelectNode?: (node: NodeName) => void;
-  onRegisterNode?: () => void;
-  onRenameNode?: (node: NodeName) => void;
-  onRemoveNode?: (node: NodeName) => void;
-  /// 节点不可用或未知时的说明，替换空列表提示。
+  hosts: HostRecord[];
+  selectedHost: HostName | null;
+  selectedSessionId: SessionId | null;
+  /// host 切换器里按 host 分组的 session，顺序沿用侧栏。
+  sessions: SessionSummary[];
+  onSelectHostSession?: (sessionId: SessionId) => void;
+  onRegisterHost?: () => void;
+  onRenameHost?: (host: HostName) => void;
+  onRemoveHost?: (host: HostName) => void;
+  onToggleHost?: (host: HostRecord) => void;
+  onReconnectHost?: (host: HostName) => void;
+  /// host 不可用或未知时的说明，替换空列表提示。
   notice?: string | null;
   commandsDisabled?: boolean;
   running?: RunningEntry[];
-  onSelectRunning?: (node: NodeName, sessionId: SessionId) => void;
-  onCancelRunning?: (node: NodeName, sessionId: SessionId) => void;
+  onSelectRunning?: (sessionId: SessionId) => void;
+  onCancelRunning?: (sessionId: SessionId) => void;
   modelName: string;
   workspaces: WorkspaceSummary[];
-  selectedSessionId: SessionId | null;
   editing?: SessionEditing | null;
   onSelectSession?: (id: SessionId) => void;
   onRenameRequest?: (id: SessionId) => void;
@@ -44,12 +53,16 @@ export type SidebarProps = {
 };
 
 export function Sidebar({
-  nodes,
-  selectedNode,
-  onSelectNode,
-  onRegisterNode,
-  onRenameNode,
-  onRemoveNode,
+  hosts,
+  selectedHost,
+  selectedSessionId,
+  sessions,
+  onSelectHostSession,
+  onRegisterHost,
+  onRenameHost,
+  onRemoveHost,
+  onToggleHost,
+  onReconnectHost,
   notice = null,
   commandsDisabled = false,
   running = [],
@@ -57,7 +70,6 @@ export function Sidebar({
   onCancelRunning,
   modelName,
   workspaces,
-  selectedSessionId,
   editing,
   onSelectSession,
   onRenameRequest,
@@ -75,13 +87,17 @@ export function Sidebar({
         <span className={styles.brandName}>durable</span>
         <span className={styles.model}>{modelName}</span>
       </header>
-      <NodeSwitcher
-        nodes={nodes}
-        selected={selectedNode}
-        {...(onSelectNode ? { onSelect: onSelectNode } : {})}
-        {...(onRegisterNode ? { onRegister: onRegisterNode } : {})}
-        {...(onRenameNode ? { onRename: onRenameNode } : {})}
-        {...(onRemoveNode ? { onRemove: onRemoveNode } : {})}
+      <HostSwitcher
+        hosts={hosts}
+        selectedHost={selectedHost}
+        selectedSessionId={selectedSessionId}
+        sessions={sessions}
+        {...(onSelectHostSession ? { onSelectSession: onSelectHostSession } : {})}
+        {...(onRegisterHost ? { onRegister: onRegisterHost } : {})}
+        {...(onRenameHost ? { onRename: onRenameHost } : {})}
+        {...(onRemoveHost ? { onRemove: onRemoveHost } : {})}
+        {...(onToggleHost ? { onToggleEnabled: onToggleHost } : {})}
+        {...(onReconnectHost ? { onReconnect: onReconnectHost } : {})}
       />
       <ActivityPanel
         entries={running}

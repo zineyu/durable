@@ -1,4 +1,3 @@
-import type { NodeName } from '../api/generated/NodeName';
 import { toSessionId } from './ids';
 import type { SessionId } from './ids';
 
@@ -14,25 +13,17 @@ export type Draft = {
 export const emptyDraft: Draft = { text: '', pastes: {} };
 
 const DRAFT_PREFIX = 'durable:draft';
-const LAST_SESSION_PREFIX = 'durable:last-session';
+const LAST_SESSION_KEY = 'durable:last-session';
 
-export function draftKey(node: NodeName, sessionId: SessionId): string {
-  return `${DRAFT_PREFIX}:${node}:${sessionId}`;
+export function draftKey(sessionId: SessionId): string {
+  return `${DRAFT_PREFIX}:${sessionId}`;
 }
 
-function lastSessionKey(node: NodeName): string {
-  return `${LAST_SESSION_PREFIX}:${node}`;
-}
-
-export function readDraft(
-  storage: DraftStorage,
-  node: NodeName | null,
-  sessionId: SessionId | null,
-): Draft {
-  if (node === null || sessionId === null) {
+export function readDraft(storage: DraftStorage, sessionId: SessionId | null): Draft {
+  if (sessionId === null) {
     return emptyDraft;
   }
-  const raw = storage.getItem(draftKey(node, sessionId));
+  const raw = storage.getItem(draftKey(sessionId));
   if (raw === null) {
     return emptyDraft;
   }
@@ -41,14 +32,13 @@ export function readDraft(
 
 export function writeDraft(
   storage: DraftStorage,
-  node: NodeName | null,
   sessionId: SessionId | null,
   draft: Draft,
 ): void {
-  if (node === null || sessionId === null) {
+  if (sessionId === null) {
     return;
   }
-  const key = draftKey(node, sessionId);
+  const key = draftKey(sessionId);
   if (draft.text.length === 0 && Object.keys(draft.pastes).length === 0) {
     storage.removeItem(key);
     return;
@@ -56,20 +46,17 @@ export function writeDraft(
   storage.setItem(key, JSON.stringify(draft));
 }
 
-export function readLastSession(storage: DraftStorage, node: NodeName): SessionId | null {
-  const raw = storage.getItem(lastSessionKey(node));
+/// 上次打开的 session。session id 全局唯一，因此所有 host 共用一条记录。
+export function readLastSession(storage: DraftStorage): SessionId | null {
+  const raw = storage.getItem(LAST_SESSION_KEY);
   if (raw === null || raw.trim().length === 0) {
     return null;
   }
   return toSessionId(raw);
 }
 
-export function writeLastSession(
-  storage: DraftStorage,
-  node: NodeName,
-  sessionId: SessionId,
-): void {
-  storage.setItem(lastSessionKey(node), sessionId);
+export function writeLastSession(storage: DraftStorage, sessionId: SessionId): void {
+  storage.setItem(LAST_SESSION_KEY, sessionId);
 }
 
 function parseDraft(raw: string): Draft {
