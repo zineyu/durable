@@ -111,14 +111,16 @@ impl Store {
             if updated.name == host.name {
                 command.changes().update_host(updated.clone());
                 if updated.target != host.target {
-                    // 换目标可能就是换了一台机器：已安装的构建不再可信，下次连接重新安装。
+                    // 更换目标可能就是更换了一台机器：已安装的构建不再可信，下次连接重新安装。
                     command
                         .changes()
                         .set_host_installed_build(updated.name.clone(), None);
                 }
             } else {
-                command.changes().delete_host(host.name);
-                command.changes().insert_host(updated.clone());
+                command
+                    .changes()
+                    .rename_host(host.name.clone(), updated.name.clone());
+                command.changes().update_host(updated.clone());
             }
             command.changes().append_event(
                 FactEvent::HostUpdated {

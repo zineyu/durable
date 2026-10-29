@@ -20,7 +20,7 @@ use durable::{
 };
 use tokio::sync::{Mutex, watch};
 
-use crate::link::{LinkClosed, LinkHandle, Transport};
+use crate::link::{LinkClosed, LinkHandle};
 use crate::protocol::HostSnapshot;
 
 /// 心跳间隔。往返毫秒数写进 host 快照的延迟字段。
@@ -59,7 +59,7 @@ impl HostRuntime {
 
 /// host 注册表：host 的运行状态与 link 的唯一持有者。
 ///
-/// 状态迁移只有三条来源：启动或重连时的一次连接、link 关闭通知、停用与改目标。
+/// 状态迁移只有三条来源：启动或重连时的一次连接、link 关闭通知、停用与更改目标。
 /// 每次状态或说明变化都写一条 `host_status_changed` 事实；延迟不写事实。
 pub struct HostRegistry {
     store: Arc<Store>,
@@ -161,7 +161,7 @@ impl HostRegistry {
         Ok(self.snapshot_of_now(host).await)
     }
 
-    /// 更新 host：改名、换目标、启用或停用，随后重建它的 link。
+    /// 更新 host：改名、更换目标、启用或停用，随后重建它的 link。
     ///
     /// 改名后旧名立即成为未知 host；旧 link 随改名关闭。
     ///
@@ -225,6 +225,17 @@ impl HostRegistry {
             .await
             .get(name)
             .map_or(HostStatus::Unreachable, |runtime| runtime.status)
+    }
+
+    /// 等 host 变成 `ok`，最多等到 `timeout`。启动参数里的 workspace 依赖它在登记前就绪。
+    pub async fn await_ready(&self, name: &HostName, timeout: Duration) {
+        let deadline = tokio::time::Instant::now() + timeout;
+        while tokio::time::Instant::now() < deadline {
+            if self.status(name).await == HostStatus::Ok {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     /// 请求因 host 不可用而失败时的说明：优先用状态说明，没有时给通用文案。
@@ -317,8 +328,8 @@ impl HostRegistry {
 
     /// 按 host 行重建 link。停用的 host 只写状态，不拉子进程。
     ///
-    /// 本机 transport 同步拉起子进程；ssh 的探测、安装与重试都在后台任务里，
-    /// 因此注册或改目标不会阻塞在网络上。
+    /// 两种传输都由后台任务建立并保持：本机拉起子进程，ssh 先探测再安装。
+    /// 注册或更改目标因此不会阻塞在网络上。
     async fn connect(self: &Arc<Self>, name: &HostName) {
         let host = match self.store.host(name).await {
             Ok(Some(host)) => host,
@@ -338,50 +349,7 @@ impl HostRegistry {
             .await;
             return;
         }
-        match host.kind {
-            HostKind::Local => self.connect_local(&host).await,
-            HostKind::Ssh => self.start_ssh(&host).await,
-        }
-    }
-
-    /// 本机传输：直接拉起 executor 子进程，失败时只写状态。
-    async fn connect_local(self: &Arc<Self>, host: &HostMetadata) {
-        self.clear_link(&host.name).await;
-        let link = match LinkHandle::spawn(
-            &Transport::Local {
-                executor: self.executor.clone(),
-            },
-            self.limits,
-            &host.name,
-        ) {
-            Ok(link) => Arc::new(link),
-            Err(error) => {
-                self.replace_link(&host.name, None).await;
-                self.set_status(
-                    &host.name,
-                    HostStatus::Unreachable,
-                    Some(format!("启动 executor 失败: {error}")),
-                )
-                .await;
-                return;
-            }
-        };
-        let generation = self.replace_link(&host.name, Some(Arc::clone(&link))).await;
-        self.set_status(&host.name, HostStatus::Ok, None).await;
-        let mut cancel = self.fresh_cancel(&host.name).await;
-        let registry = Arc::clone(self);
-        let watched = host.name.clone();
-        tokio::spawn(async move {
-            tokio::select! {
-                close = link.wait_closed() => {
-                    registry.link_closed(&watched, generation, close).await;
-                }
-                () = ssh::cancelled(&mut cancel) => {
-                    // 丢弃 handle 即关闭子进程：停用、删除与重建连接都不留孤儿 executor。
-                    drop(link);
-                }
-            }
-        });
+        self.start_link(&host).await;
     }
 
     /// 为 host 换一个新的取消通道并返回接收端。

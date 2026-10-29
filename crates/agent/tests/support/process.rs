@@ -3,11 +3,12 @@
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::Duration;
 
 use reqwest::StatusCode;
 
-use super::{ScriptedProvider, binary, read_address, serving_command};
+use super::{ScriptedProvider, binary, model_environment};
 
 /// 与 agent 二进制同目录的 executor 二进制：测试内的传输一律是本地子进程。
 pub(crate) fn executor_binary() -> PathBuf {
@@ -184,4 +185,43 @@ pub(crate) async fn text_of(
         .first()
         .map(agent::MessageBody::text)
         .expect("消息有正文")
+}
+
+/// 与给定数据库同级的日志目录，使测试不写入用户的标准日志目录。
+pub(crate) fn log_directory(database: &Path) -> PathBuf {
+    database
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("logs")
+}
+
+/// 启动 agent 二进制的命令：随机回环端口、捕获 stdout、随进程退出而结束。
+pub(crate) fn serving_command(database: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(binary());
+    command
+        .args(["--listen", "127.0.0.1:0", "--database"])
+        .arg(database)
+        .args(["--log-dir"])
+        .arg(log_directory(database))
+        .envs(model_environment())
+        .env(runtime::logging::FILTER_ENV, "warn")
+        .stdout(Stdio::piped())
+        .kill_on_drop(true);
+    command
+}
+
+/// 读取 agent 打印的监听地址。
+pub(crate) async fn read_address(child: &mut tokio::process::Child) -> String {
+    use tokio::io::AsyncBufReadExt;
+
+    let stdout = child.stdout.take().expect("取得启动输出");
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+    let line = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
+        .await
+        .expect("等待启动输出")
+        .expect("读取启动输出")
+        .expect("agent 打印监听地址");
+    line.strip_prefix("agent listening on http://")
+        .expect("启动输出包含监听地址")
+        .to_owned()
 }

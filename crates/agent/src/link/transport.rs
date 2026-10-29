@@ -42,6 +42,8 @@ impl Transport {
                 command
                     .arg("--link-protocol")
                     .arg(LINK_PROTOCOL_VERSION.to_string())
+                    .arg("--build")
+                    .arg(BUILD_ID)
                     .arg("--read-bytes")
                     .arg(limits.read_bytes.to_string())
                     .arg("--bash-output-bytes")
@@ -68,6 +70,7 @@ impl Transport {
 pub(crate) fn launch_script(limits: ToolLimits) -> String {
     format!(
         "d={REMOTE_DATA_DIR}; exec \"$d/executor-{BUILD_ID}\" --link-protocol {LINK_PROTOCOL_VERSION} \
+         --build {BUILD_ID} \
          --read-bytes {} --bash-output-bytes {} --bash-timeout-ms {}",
         limits.read_bytes,
         limits.bash_output_bytes,

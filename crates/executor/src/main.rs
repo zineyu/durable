@@ -29,11 +29,17 @@ const FRAME_QUEUE: usize = 64;
 /// 退出日志里保留的最近帧数。
 const RECENT_FRAMES: usize = 8;
 
+/// 本二进制的构建 id。`agent` 启动时把期望值放在 `--build` 上传过来。
+const BUILD_ID: &str = env!("DURABLE_BUILD_ID");
+
 #[derive(Debug, Parser)]
 struct Arguments {
     /// link 帧协议版本。
     #[arg(long = "link-protocol")]
     link_protocol: u32,
+    /// `agent` 期望的构建 id。与本二进制不同说明对照的两侧不同版本。
+    #[arg(long = "build")]
+    build: String,
     /// `read_file` 的字节上限。
     #[arg(long = "read-bytes")]
     read_bytes: Option<usize>,
@@ -67,6 +73,14 @@ async fn main() -> ExitCode {
             expected = LINK_PROTOCOL_VERSION,
             received = arguments.link_protocol,
             "link 帧协议版本不符"
+        );
+        return ExitCode::from(INCOMPATIBLE_EXIT_CODE);
+    }
+    if arguments.build != BUILD_ID {
+        tracing::error!(
+            expected = BUILD_ID,
+            received = %arguments.build,
+            "executor 构建与 agent 期望的不符"
         );
         return ExitCode::from(INCOMPATIBLE_EXIT_CODE);
     }

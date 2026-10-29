@@ -295,3 +295,87 @@ async fn heartbeat_records_latency() {
         .await;
     assert!(host.latency_ms.is_some(), "心跳后记录往返毫秒数");
 }
+
+#[tokio::test]
+async fn renaming_a_host_moves_its_workspaces_and_sessions() {
+    let harness = Harness::start().await;
+    let raw = "/tmp/durable-host-rename";
+    std::fs::create_dir_all(raw).expect("创建目录");
+    let canonical = std::fs::canonicalize(raw).expect("规范化目录");
+    let path = canonical.to_str().expect("路径是 UTF-8");
+
+    assert_eq!(
+        harness
+            .register_host("before", "local", None)
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        harness.register_on("before", path).await.status(),
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        harness
+            .create_session_on("before", path, None)
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+
+    assert_eq!(
+        harness
+            .update_host("before", serde_json::json!({ "name": "after" }))
+            .await
+            .status(),
+        StatusCode::OK
+    );
+
+    let bootstrap = harness.bootstrap().await;
+    assert!(
+        bootstrap
+            .hosts
+            .iter()
+            .all(|host| host.name.as_str() != "before"),
+        "旧名立即成为未知 host"
+    );
+    let workspace = bootstrap
+        .workspaces
+        .iter()
+        .find(|workspace| workspace.path.as_str() == path)
+        .expect("workspace 仍在");
+    assert_eq!(workspace.host.as_str(), "after", "workspace 跟着改名");
+    let session = bootstrap
+        .sessions
+        .iter()
+        .find(|entry| entry.workspace.as_str() == path)
+        .expect("session 仍在");
+    assert_eq!(session.host.as_str(), "after", "session 的 host 也跟着改名");
+}
+
+#[tokio::test]
+async fn the_local_host_reconnects_without_a_manual_click() {
+    let harness = Harness::start().await;
+    harness
+        .host_snapshot("local", |host| host.status == agent::HostStatus::Ok)
+        .await;
+    kill_executor(harness.executor_pid());
+
+    harness
+        .host_snapshot("local", |host| {
+            host.status == agent::HostStatus::Unreachable
+        })
+        .await;
+    harness
+        .host_snapshot("local", |host| host.status == agent::HostStatus::Ok)
+        .await;
+}
+
+/// 强杀 executor 子进程。进程组在强杀时不保证清理，见 ADR 0048。
+fn kill_executor(pid: u32) {
+    let status = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .status()
+        .expect("执行 kill");
+    assert!(status.success(), "kill 命令成功");
+}

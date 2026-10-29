@@ -30,6 +30,8 @@ mod test_agent;
 pub(crate) use event_stream::{EventStream, error_code, error_envelope};
 pub(crate) use test_agent::TestAgent;
 pub(crate) mod process;
+
+pub(crate) use process::{log_directory, read_address, serving_command};
 pub(crate) mod provider;
 
 pub(crate) use db::{
@@ -72,45 +74,6 @@ pub(crate) fn command_without_paths() -> std::process::Command {
         .envs(model_environment())
         .env(runtime::logging::FILTER_ENV, "warn");
     command
-}
-
-/// 与给定数据库同级的日志目录，使测试不写入用户的标准日志目录。
-pub(crate) fn log_directory(database: &Path) -> PathBuf {
-    database
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join("logs")
-}
-
-/// 启动 agent 二进制的命令：随机回环端口、捕获 stdout、随进程退出而结束。
-pub(crate) fn serving_command(database: &Path) -> tokio::process::Command {
-    let mut command = tokio::process::Command::new(binary());
-    command
-        .args(["--listen", "127.0.0.1:0", "--database"])
-        .arg(database)
-        .args(["--log-dir"])
-        .arg(log_directory(database))
-        .envs(model_environment())
-        .env(runtime::logging::FILTER_ENV, "warn")
-        .stdout(Stdio::piped())
-        .kill_on_drop(true);
-    command
-}
-
-/// 读取 agent 打印的监听地址。
-pub(crate) async fn read_address(child: &mut tokio::process::Child) -> String {
-    use tokio::io::AsyncBufReadExt;
-
-    let stdout = child.stdout.take().expect("取得启动输出");
-    let mut lines = tokio::io::BufReader::new(stdout).lines();
-    let line = tokio::time::timeout(Duration::from_secs(10), lines.next_line())
-        .await
-        .expect("等待启动输出")
-        .expect("读取启动输出")
-        .expect("agent 打印监听地址");
-    line.strip_prefix("agent listening on http://")
-        .expect("启动输出包含监听地址")
-        .to_owned()
 }
 
 /// 临时目录中的 agent、脚本化 provider 与可复用的 HTTP 客户端。
@@ -201,7 +164,7 @@ impl Harness {
             config,
         )
         .await;
-        let executor_pid = local_executor_pid(&hosts).await;
+        let executor_pid = await_local_executor_pid(&hosts).await;
         Harness {
             directory,
             database,
@@ -565,9 +528,10 @@ impl Harness {
     }
 }
 
-/// 本机 host 的 executor 子进程 pid。断链用例据它杀进程。
-async fn local_executor_pid(hosts: &agent::HostRegistry) -> Option<u32> {
+/// 本机 host 的 executor 子进程 pid。link 由后台任务建立，先等它到 `ok`。
+async fn await_local_executor_pid(hosts: &agent::HostRegistry) -> Option<u32> {
     let local = agent::HostName::parse(agent::LOCAL_HOST).expect("内置 host 名合法");
+    hosts.await_ready(&local, Duration::from_secs(2)).await;
     hosts.link(&local).await.and_then(|link| link.pid())
 }
 

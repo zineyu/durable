@@ -11,7 +11,7 @@
 
 ## 决策
 
-- **编号带前缀。** `docs/specs/rust-react-coding-agent.md` 用 `A-`，`docs/specs/multi-node-hub.md` 用 `H-`。
+- **编号带前缀。** 每份规格一个前缀，登记在 `scripts/check-spec-links.sh`。当前 `docs/specs/rust-react-coding-agent.md` 用 `A-`，`docs/specs/remote-ssh-process-model.md` 用 `R-`；`H-` 随 ADR 0048 删除。
 - **编号写进条目本身。** 条目写成 `- **A-1** 作为用户，…` 的无序列表，不依赖 Markdown 有序列表自动编号。插入条目时只有被插入位置之后的编号需要改，渲染不会再与文字里的编号错位。
 - **引用写全编号。** `规格 user story A-16`；一行引用多条写 `规格 user story A-16 与 A-19`。
 - **归属按目录判定。** `crates/hub/**` 只允许引用 `H-`，其余路径只允许引用 `A-`。把主规格的需求写进 `hub` 的代码，或反过来，都是失败。跨规格同句引用因此不允许。

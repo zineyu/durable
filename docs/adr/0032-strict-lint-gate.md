@@ -39,19 +39,16 @@
 - `#[expect]` 在 lint 不再触发时自身报错。过时的抑制无法留在代码里。
 - ESLint 的 `reportUnusedDisableDirectives` 设为 `error`，`--max-warnings=0`，`clippy` 用 `-D warnings`。失效的 `eslint-disable` 是错误，任何告警都阻断。
 
-### 生产代码的七处抑制
+### 生产代码的四处置信
 
-`crates/*/src/` 只有七处 `#[expect]`，全部与运行环境边界有关。逐条列出，便于审查：
+`crates/*/src/` 只有四处 `#[expect]`，全部与运行环境边界有关。逐条列出，便于审查（`crates/hub` 删除后原有三处随 crate 消失，见 ADR 0048）：
 
 | 位置 | lint | 理由 |
 | --- | --- | --- |
 | `runtime/src/logging.rs` `parse_filter` | `print_stderr` | 过滤器在订阅者建立之前校验，此时日志不可用。 |
 | `agent/src/main.rs` `report_startup_failure` | `print_stderr` | 启动失败时日志尚未初始化。 |
 | `agent/src/main.rs` `report_listen_address` | `print_stdout` | 监听地址是启动协议，启动测试与浏览器端到端测试从标准输出读取。 |
-| `hub/src/main.rs` `startup_failure` | `print_stderr` | 启动路径上日志尚未可用。 |
-| `hub/src/main.rs` `run` | `print_stdout` | 同上，就绪信号写标准输出。 |
 | `executor/src/tools/bash.rs` `ProcessGroup::kill` | `unsafe_code` | 标准库没有杀进程组的接口，只能调 `libc::kill`；块上有 `// SAFETY:` 说明前提。 |
-| `hub/src/bus/watch.rs` `jitter` | `cast_precision_loss` | 取模 1001 后小于 1001，`f64` 可精确表示。 |
 
 测试脚手架是另一类。集成测试的共享模块不是 `#[test]` 函数，`clippy` 不把它算作测试代码。这些模块在文件头用一条 `#![expect(...)]` 覆盖 `expect_used`、`panic`、`indexing_slicing` 与 `let_underscore_must_use`，并写明理由：夹具失败必须立刻可见。禁止逐行散放抑制。
 

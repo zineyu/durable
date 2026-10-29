@@ -31,6 +31,11 @@ impl Changeset {
         self.push(Change::UpdateHost(host));
     }
 
+    /// 改名只改主键；`ON UPDATE CASCADE` 让 workspace 与 session 跟着换。
+    pub fn rename_host(&mut self, from: HostName, to: HostName) {
+        self.push(Change::RenameHost { from, to });
+    }
+
     pub fn delete_host(&mut self, name: HostName) {
         self.push(Change::DeleteHost(name));
     }
@@ -156,6 +161,10 @@ pub(crate) enum Change {
     },
     InsertHost(HostMetadata),
     UpdateHost(HostMetadata),
+    RenameHost {
+        from: HostName,
+        to: HostName,
+    },
     DeleteHost(HostName),
     SetHostInstalledBuild {
         name: HostName,

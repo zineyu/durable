@@ -219,6 +219,10 @@ async fn register_startup_workspaces(
             )
             .into());
         }
+        // 本机 link 在后台建立；等它就绪再校验路径，避免启动参数被当成「host 不可用」跳过。
+        hosts
+            .await_ready(host, std::time::Duration::from_secs(2))
+            .await;
         match hosts.check_workspace(host, path.as_str()).await {
             Some(Ok(canonical)) => {
                 accepted.push((host.clone(), agent::WorkspacePath::parse(&canonical)?));

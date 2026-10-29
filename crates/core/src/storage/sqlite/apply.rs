@@ -26,6 +26,7 @@ pub(super) async fn apply_change(
         Change::DeleteWorkspace { host, path } => delete_workspace(connection, host, path).await,
         Change::InsertHost(host) => insert_host(connection, host).await,
         Change::UpdateHost(host) => update_host(connection, host).await,
+        Change::RenameHost { from, to } => rename_host(connection, from, to).await,
         Change::DeleteHost(name) => delete_host(connection, name).await,
         Change::SetHostInstalledBuild { name, build } => {
             set_host_installed_build(connection, name, build.as_deref()).await
@@ -142,6 +143,20 @@ async fn update_host(
     .execute(&mut *connection)
     .await?;
     ensure_written(&result, "更新 host")
+}
+
+/// 改主键。workspace 与 session 的外键带 `ON UPDATE CASCADE`，因此它们随主键一起换名。
+async fn rename_host(
+    connection: &mut SqliteConnection,
+    from: &HostName,
+    to: &HostName,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("UPDATE host SET name = ?2 WHERE name = ?1")
+        .bind(from.as_str())
+        .bind(to.as_str())
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "重命名 host")
 }
 
 async fn delete_host(connection: &mut SqliteConnection, name: &HostName) -> Result<(), StoreError> {

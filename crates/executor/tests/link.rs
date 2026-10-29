@@ -22,6 +22,8 @@ fn command(protocol: u32) -> Command {
     command
         .arg("--link-protocol")
         .arg(protocol.to_string())
+        .arg("--build")
+        .arg(env!("DURABLE_BUILD_ID"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -43,7 +45,7 @@ async fn receive(child: &mut Child) -> Option<Frame> {
     read_frame(stdout).await.expect("读取帧")
 }
 
-/// 规格 user story R-53：帧协议版本不符即退出，调用方据此判定 `incompatible`。
+/// 规格 user story R-53：帧协议版本不符立即退出，调用方据此判定 `incompatible`。
 #[tokio::test]
 async fn incompatible_protocol_exits_with_code_three() {
     let child = spawn(LINK_PROTOCOL_VERSION + 1);

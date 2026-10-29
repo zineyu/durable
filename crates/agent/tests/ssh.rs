@@ -168,7 +168,7 @@ async fn changing_the_target_reinstalls_the_executor() {
         .json(&serde_json::json!({ "target": "other-host" }))
         .send()
         .await
-        .expect("改目标");
+        .expect("更改目标");
     assert_eq!(response.status(), StatusCode::OK);
     let host = wait_host(&process, HOST, |host| {
         host.target.as_deref() == Some("other-host") && host.status.is_ok()

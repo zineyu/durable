@@ -37,7 +37,7 @@
 | [0031](0031-provider-rate-limit-retry.md) | 供应商限流用独立失败类别并有限重试 | 已接受。细化 ADR 0014 的失败类别与 ADR 0018 的实时事件 | 新增 model_rate_limited 类别，在单次模型调用内有限重试，只发实时提示。 |
 | [0032](0032-strict-lint-gate.md) | 严格 lint 门禁 | 已接受 | durable-lint 统一跑十类检查，抑制须带理由且失效即报错。 |
 | [0033](0033-gate-second-layer-and-navigation.md) | 门禁第二层：规模、依赖、PR 自锁与仓库导航 | 已接受 | 门禁进版本库并分快慢两 lane，加规模与依赖预算、PR 自锁提醒和文档一致性检查。 |
-| [0034](0034-spec-number-prefixes.md) | 规格编号加前缀并按目录归属校验 | 已接受。细化 ADR 0033 的契约一致性 | 两份规格分别用 A- 与 H- 前缀，引用按目录归属校验，非规格决定改引 ADR。 |
+| [0034](0034-spec-number-prefixes.md) | 规格编号加前缀并按目录归属校验 | 已接受。细化 ADR 0033 的契约一致性；`H` 前缀随 ADR 0048 删除 | 规格按前缀归属校验，非规格决定改引 ADR；现有前缀为 `A-` 与 `R-`。 |
 | [0035](0035-message-content-blocks.md) | 消息历史存完整内容，节点正文为内容块数组 | 已接受。取代 ADR 0004 中节点正文的形状 | 节点是一条消息，正文为有序内容块；工具结果独立成节点；落库为 message 与 message_part 两表。 |
 | [0036](0036-compaction-message.md) | 压缩消息在链上，装配回溯到它为止 | 已接受 | 压缩是链上的 `compaction` 节点，装配从 active leaf 回溯到它即停，压缩不属于任何 run。 |
 | [0037](0037-crash-recovery.md) | 崩溃恢复的续跑点从树推导 | 已接受。取代 ADR 0014 的节流落库部分输出；「assistant 消息只在定型时入树」由 ADR 0047 取代 | tool 节点先入树再执行，续跑点由树尾推导，非幂等工具崩后结局记为未知。 |

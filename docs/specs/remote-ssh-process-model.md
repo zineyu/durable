@@ -75,7 +75,7 @@
 - **R-38** 作为用户，我想让断链后的队列继续执行下一项，以便一次抖动不冻结整个 session。
 - **R-39** 作为用户，我想让链路恢复后的新消息照常可用，以便我不必重启。
 - **R-40** 作为用户，我想让 `agent` 重启后仍按树尾续跑未完成的 run，以便重启不丢进度。
-- **R-41** 作为用户，我想让重启后续跑在 host 离线时以 `host_unreachable` 失败，以便我不等一个不会来的结果。
+- **R-41** 作为用户，我想让重启后续跑在 host 离线时以 `host_unreachable` 失败，以便我不等一个不会来的结果。「离线」指续跑时拿不到 link；此时工具调用立即以 `host_unreachable` 失败。若断链已经发生、工具结局已记为「结果未知」之后进程才崩溃，续跑按「结果未知」的既有语义继续，不重复失败。
 - **R-42** 作为用户，我想让 `executor` 在标准输入收到 EOF 时杀掉自己启动的进程组并退出，以便链路消失后主机上不留孤儿命令。
 
 ### 客户端
@@ -121,18 +121,18 @@
 - 删除节点作用域前缀 `/api/n/<node>/...` 与合并 bootstrap。
 - 新增 host 管理端点：注册、`PATCH`（名、目标、启用）、删除、手动重连。读取面由 bootstrap 一次给出 host 表与每个 host 的快照（状态、说明、延迟）。
 - workspace 注册请求体变为 `{ host, path }`。
-- 新增错误码：`host_not_found`、`host_name_taken`、`host_name_invalid`、`host_invalid_target`、`host_unavailable`。新增 run 失败类别 `host_unreachable`。
+- 新增错误码：`host_not_found`、`host_name_taken`、`host_name_invalid`、`host_invalid_target`、`host_unavailable`、`host_in_use`（仍有 workspace 时拒绝删除）。新增 run 失败类别 `host_unreachable`。
 - 导出类型：`HostName`、`HostKind`、`HostSnapshot`、`HostStatus`。删除 `Hub` 前缀的类型与节点类型。
 - 对外协议版本升一版，客户端与 `agent` 同源发布，不做跨版本兼容。
 
 ### link 与帧
 
-- 帧格式为长度前缀（4 字节大端）加 UTF-8 JSON。帧只有四种：`request`、`result`、`cancel`、`ping`。
+- 帧格式为长度前缀（4 字节大端）加 UTF-8 JSON。帧的种类是：`request`、`result`、`cancel`、`ping`、`pong`。心跳是 `ping` 与 `pong` 一对；`request` 的操作有两种，工具执行与 workspace 校验，`result` 的答复种类与请求操作一一对应。
 - `request` 带请求 id、工具名与参数 JSON。`result` 带同一 id、结局（成功、工具失败、取消）与内容。多个请求按 id 多路复用，一个 host 只有一条 link。
-- `agent` 与 `executor` 的帧协议版本通过启动参数传递：`agent` 启动 `executor` 时带上协议版本与期望的构建 id。`executor` 发现不符即退出并在标准错误写出原因，`agent` 据此把 host 置为 `incompatible`。
+- `agent` 与 `executor` 的帧协议版本与构建 id 通过启动参数传递：`agent` 启动 `executor` 时带上 `--link-protocol` 与 `--build`。`executor` 发现不符立即以退出码 3 结束并在标准错误写出原因，`agent` 据此把 host 置为 `incompatible`。
 - 远端传输：`agent` 启动 `ssh <target> executor --protocol <n> --build <id>`，以 ssh 子进程的标准输入输出为 link。远端不监听端口。
 - 本机传输：`agent` 直接启动 `executor` 子进程，参数相同，标准输入输出为 link。
-- 安装：`agent` 记录每个 host 的 `installed_build`。首次连接或构建变化时，把内嵌的对应平台 `executor` 二进制经 SSH 的标准输入写入 host 的标准数据目录下的 `executor-<build>`，加可执行位，然后启动。平台与架构按远端输出选择；不支持的组合直接 `incompatible`。
+- 安装：`agent` 记录每个 host 的 `installed_build`。首次连接或构建变化时，按远端 `uname -sm` 选择执行端二进制，经 SSH 的标准输入写入 host 的标准数据目录下的 `executor-<build>`，加可执行位，然后启动。载荷来源是环境变量 `DURABLE_EXECUTOR_<平台>`（发布钩子），省略时用与 `agent` 同目录的 `executor`，要求平台一致；没有可用载荷的组合直接 `incompatible`。更改 SSH 目标会清空 `installed_build`，下次连接重新安装。
 - 心跳：每 15 秒一次 `ping`，往返毫秒数写入 host 快照的延迟字段。
 - 断链：link 读侧结束即视为断开。正在等待结果的 run 以 `host_unreachable` 结束，该工具调用的结局记为「结果未知」，队列继续。`executor` 侧在标准输入 EOF 时杀掉自己启动的全部进程组后退出。
 
@@ -187,13 +187,14 @@ SSH 传输与安装不做自动化测试。发布检查清单里有一条手工�
 - 跨 host 的工具调用：一次 run 的工具全部在 session 所属 workspace 的 host 上执行。
 - host 侧的模型调用、离线执行、结果缓存与断链重跑。
 - 工具输出的流式传输与流式工具卡片。
+- 多平台执行端的内置构建矩阵：首版只提供与 `agent` 同平台的载荷，跨平台安装靠发布钩子提供的二进制。
 - 多个 `agent` 实例共享一个 host，或一个 `agent` 连多台 host 的负载均衡。
 - 容器或沙箱隔离、命令审批、网络限制。
 
 ## Further Notes
 
 - 决策记录：ADR 0048（进程模型反转为 remote-ssh 形状）取代 ADR 0001 的二进制划分与 ADR 0021 至 ADR 0024 的总线与分片决策。ADR 0015 的工具契约、ADR 0037 的「结果未知」、ADR 0047 的续跑全部保留。
-- 规格编号新增 `R-` 前缀。`scripts/check-spec-links.sh` 需要把 `R-` 映射到本文件，并把 `crates/executor` 归到 `R-`，其余 crate 允许 `A-` 与 `R-`。
-- 主规格 `docs/specs/rust-react-coding-agent.md` 与 `docs/specs/multi-node-hub.md` 在本规格落地后需要修订：前者关于工具执行位置、`hub` 与 URL 的段落要改，后者整体失效并可删除。
+- 规格编号新增 `R-` 前缀。`scripts/check-spec-links.sh` 已把 `R-` 映射到本文件，并把 `crates/executor` 归到 `R-`，其余 crate 允许 `A-` 与 `R-`。
+- 主规格 `docs/specs/rust-react-coding-agent.md` 已按本规格修订；`multi-node-hub.md` 已删除，规格追溯脚本不再有 `H` 前缀。
 - 建议的纵向切片顺序，每片独立通过 `durable-test`：① 内核收敛迁移基线并新增 host 表与 workspace 的 host 列；② `agent` 吸收静态资源与路由，host 表命令上线，客户端 URL 与分组改造；③ 新增 `executor` crate 与本地传输，工具调用改走帧；④ 删除 `hub` crate 与节点相关代码；⑤ 安装与 SSH 传输；⑥ 文档同步与手工验证清单。
 - 默认数据库文件名仍是 `agent.sqlite`，而旧 `agent` 二进制用过同一个名字。旧库因此会以显式错误被拒绝；升级路径是删除旧库或改用 `--database` 指向新路径。

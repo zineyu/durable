@@ -12,7 +12,7 @@ CREATE TABLE host (
 );
 
 CREATE TABLE workspace (
-    host TEXT NOT NULL REFERENCES host(name),
+    host TEXT NOT NULL REFERENCES host(name) ON UPDATE CASCADE,
     path TEXT NOT NULL,
     registered_at INTEGER NOT NULL,
     PRIMARY KEY (host, path)
@@ -27,7 +27,7 @@ CREATE TABLE session (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     active_leaf INTEGER,
-    FOREIGN KEY (workspace_host, workspace) REFERENCES workspace(host, path)
+    FOREIGN KEY (workspace_host, workspace) REFERENCES workspace(host, path) ON UPDATE CASCADE
 );
 
 CREATE INDEX session_workspace ON session (workspace_host, workspace);
