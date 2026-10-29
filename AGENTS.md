@@ -1,6 +1,6 @@
 # durable
 
-本机单用户的 coding agent：`agent` 只提供 HTTP API，`hub` 托管内嵌的 React 客户端并把 `/api/*` 原样反代给 `agent`。
+本机单用户的 coding agent：`agent` 提供 HTTP API 与内嵌的 React 客户端，工具在 host 上由 `executor` 执行。
 
 - 规格：`docs/specs/rust-react-coding-agent.md`（主 issue 的正文即该规格）。
 - 架构决策：`docs/adr/`。
@@ -13,9 +13,8 @@
 | --- | --- |
 | `crates/core` | 领域与持久化内核（包名 `durable`）；领域类型、`ts-rs` 派生、单一写入线与 SQLite 存储 |
 | `crates/runtime` | 进程级支撑（包名 `runtime`）；平台标准目录解析与日志初始化 |
-| `crates/agent` | agent 二进制；HTTP/SSE 协议与 `ts-rs` 导出入口 |
+| `crates/agent` | agent 二进制；HTTP/SSE 协议、编译期内嵌的 `client/dist` 与 `ts-rs` 导出入口 |
 | `crates/executor` | host 上的工具执行端；经 link 帧执行四个工具，不持有数据库 |
-| `crates/hub` | hub 二进制；编译期内嵌 `client/dist` |
 | `client` | React + Vite + TypeScript 客户端 |
 | `docs` | 规格、ADR（索引见 `docs/adr/README.md`）、术语表 |
 | `scripts` | 门禁与检查脚本；编辑时跑 `bash scripts/lint-fast.sh` |
@@ -35,7 +34,6 @@
 | `link.rs`、`cancel.rs` | link 帧类型与读写；两侧共享的取消信号 |
 | `workspace.rs` | workspace 元数据 |
 | `tree.rs` | 消息树的问题：transcript、子树叶子与祖先；存储只返回行，链上顺序由它回答 |
-| `node.rs` | 节点名与节点元数据 |
 | `event.rs` | `FactEvent` 领域事实枚举 |
 | `change.rs` | 一次事务内的变更清单 |
 | `stream.rs` | `StreamEvent` 与进程内广播 |
@@ -58,8 +56,6 @@
 
 `executor`：`main.rs` 读帧、派发请求与请求生命周期；`tools/` 四个工具，`paths.rs` 管 workspace 边界。
 
-`hub`：`lib.rs` 路由、节点作用域转发与静态资源；`nodes.rs` 节点表命令与节点快照；`bus/` 广播序号、回放窗口、节点视图、进程内计数与上游 watcher；`sse.rs` 合并事件流；`node_probe.rs` 上游探测；`protocol.rs` 与 `error.rs`。
-
 `client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer、派生视图与状态推导；`components/`、`stories/`、`styles/`。
 
 ## 模块头
@@ -76,10 +72,9 @@
 | 新的 LLM 工具 | `crates/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
 | link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `crates/agent/src/link/mod.rs`，executor 侧在 `crates/executor/src/main.rs` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
-| hub 转发与多节点行为 | `crates/hub/src/lib.rs` 的 `forward_node` 与 `bus/watch.rs` |
-| 节点表命令或节点快照 | `crates/hub/src/nodes.rs`，路由在 `lib.rs` |
-| 协议类型与 TS 生成 | `crates/agent/src/lib.rs`、`crates/hub/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
-| 客户端状态推导 | 事实归约在 `client/src/view/reducer.ts` 与 `node-state.ts`，呈现所需的派生在 `derived.ts` |
+| host 表命令或 host 快照 | `crates/agent/src/hosts/`，路由在 `api.rs` |
+| 协议类型与 TS 生成 | `crates/agent/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
+| 客户端状态推导 | 事实归约在 `client/src/view/reducer.ts` 与 `state.ts`，呈现所需的派生在 `derived.ts` |
 | 客户端写命令与对话框 | `client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
 | 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
 | 集成测试 | `crates/*/tests/`，脚手架在 `tests/support/` |
@@ -95,7 +90,7 @@
 | `devenv shell -- durable-lint` | 全部静态检查，不含测试 |
 | `devenv shell -- durable-lint-fast` | 只含秒级静态检查，编辑时反复运行 |
 | `devenv shell -- durable-test` | 提交前的全部检查：lint 与测试 |
-| `devenv shell -- durable-e2e` | 端到端测试：构建后由 Playwright 驱动真实 agent、hub 与浏览器 |
+| `devenv shell -- durable-e2e` | 端到端测试：构建后由 Playwright 驱动真实 agent 与浏览器 |
 | `devenv shell -- durable-typegen` | 重新生成 TS 协议类型 |
 | `devenv shell -- storybook` | Storybook 开发服务器 |
 
@@ -117,7 +112,7 @@
 - 测试脚手架在文件头用一条 `#![expect(…, reason = "…")]`，不逐行散放。
 - TS 侧 `reportUnusedDisableDirectives` 为错误；新代码不应需要 `eslint-disable`。
 
-`durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 hub 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
+`durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 agent 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
 
 ## 规模与依赖预算
 
@@ -130,7 +125,7 @@
 
 ## 契约一致性
 
-- 规格追溯：代码与测试里的 `规格 user story A-16`（`crates/hub` 写 `H-16`）必须对应 `docs/specs/` 里存在的编号，且前缀与所在目录匹配；不属于规格的决定写 `ADR 00NN：…`。未被引用的编号只打印清单，不阻断。脚本 `scripts/check-spec-links.sh`。
+- 规格追溯：代码与测试里的 `规格 user story A-16` 或 `规格 user story R-16` 必须对应 `docs/specs/` 里存在的编号，且前缀与所在目录匹配；不属于规格的决定写 `ADR 00NN：…`。未被引用的编号只打印清单，不阻断。脚本 `scripts/check-spec-links.sh`。
 - 类型清单：`docs/api/types.md` 与 TS 类型同一来源、同一命令生成，`durable-test` 比对两者，见「生成物」。
 - 术语表：`docs/glossary.md` 里标识符形状的反引号术语必须能在 `crates/` 或 `client/` 里找到，否则视为过时。脚本 `scripts/check-glossary.sh`。
 
@@ -140,7 +135,7 @@
 
 ## 构建顺序
 
-`hub` 在编译期读取 `client/dist`，缺失或过期时行为不可预期。任何 Rust 构建之前先构建 client；`durable-build` 已按此顺序执行。
+`agent` 在编译期读取 `client/dist`，缺失或过期时行为不可预期。任何 Rust 构建之前先构建 client；`durable-build` 已按此顺序执行。
 
 ## 生成物
 

@@ -1,5 +1,5 @@
 //! agent 的单一全局事件流：回放、实时转发与 resync。
-//! hub 的合并流在 `crates/hub/src/sse`。
+//! 工具结果不经此流，经 link 帧回到 run 引擎。
 
 use std::time::Duration;
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 规格追溯：代码里引用的 user story 编号必须在 docs/specs 里存在，
-# 且前缀与所在目录匹配：crates/hub 引用 H-，crates/executor 引用 R-，
+# 且前缀与所在目录匹配：crates/executor 引用 R-，
 # 其余 crate 允许 A- 与 R-。
 # 未被任何代码引用的编号只打印清单，不阻断。
 set -euo pipefail
@@ -13,12 +13,11 @@ trap 'rm -rf "$work"' EXIT
 spec_of() {
   case "$1" in
     A) printf 'docs/specs/rust-react-coding-agent.md' ;;
-    H) printf 'docs/specs/multi-node-hub.md' ;;
     R) printf 'docs/specs/remote-ssh-process-model.md' ;;
   esac
 }
 
-for prefix in A H R; do
+for prefix in A R; do
   spec=$(spec_of "$prefix")
   if [ ! -f "$spec" ]; then
     printf '规格追溯：找不到 %s（前缀 %s）。\n' "$spec" "$prefix" >&2
@@ -33,9 +32,9 @@ done
 
 for spec in docs/specs/*.md; do
   case "$spec" in
-    docs/specs/rust-react-coding-agent.md | docs/specs/multi-node-hub.md | docs/specs/remote-ssh-process-model.md) ;;
+    docs/specs/rust-react-coding-agent.md | docs/specs/remote-ssh-process-model.md) ;;
     *)
-      printf '规格追溯：%s 未分配前缀。在 scripts/check-spec-links.sh 的 spec_of 里为它指定 A- 或 H-。\n' "$spec" >&2
+      printf '规格追溯：%s 未分配前缀。在 scripts/check-spec-links.sh 的 spec_of 里为它指定 A- 或 R-。\n' "$spec" >&2
       exit 1
       ;;
   esac
@@ -47,13 +46,12 @@ done
 git grep -nE '规格 user story' -- crates client |
   while IFS=: read -r file line rest; do
     case "$file" in
-      crates/hub/*) prefix=H ;;
       crates/executor/*) prefix=R ;;
       *) prefix=AR ;;
     esac
-    found=$(printf '%s\n' "$rest" | sed 's/.*规格 user story//' | grep -oE '[AHR]-[0-9]+' || true)
+    found=$(printf '%s\n' "$rest" | sed 's/.*规格 user story//' | grep -oE '[AR]-[0-9]+' || true)
     if [ -z "$found" ]; then
-      printf '%s:%s 写了「规格 user story」，但后面没有 A-N、H-N 或 R-N 编号\n' "$file" "$line" >> "$work/problems.txt"
+      printf '%s:%s 写了「规格 user story」，但后面没有 A-N 或 R-N 编号\n' "$file" "$line" >> "$work/problems.txt"
       continue
     fi
     for id in $found; do
@@ -82,7 +80,7 @@ fi
 
 awk '{ print $3 }' "$work/refs.txt" | sort -u > "$work/referenced.txt"
 
-for prefix in A H R; do
+for prefix in A R; do
   unreferenced=$(comm -23 "$work/defined-${prefix}.txt" "$work/referenced.txt" | sort -t- -k2,2n | tr '\n' ' ')
   if [ -n "$unreferenced" ]; then
     printf '%s 未被引用的编号：%s\n' "$(spec_of "$prefix")" "$unreferenced"

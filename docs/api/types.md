@@ -156,68 +156,6 @@ latencyMs: number | null, };
 export type HostStatus = "ok" | "unreachable" | "incompatible";
 ```
 
-## HubBootstrap
-
-```ts
-/**
- * 合并 bootstrap。节点级失败体现在各自的 `status` 与 `detail` 里。
- */
-export type HubBootstrap = { nodes: Array<NodeSnapshot>, 
-/**
- * 当前最大广播序号。客户端用它作为续传游标的起点。
- */
-maxHubSeq: number, };
-```
-
-## HubErrorCode
-
-```ts
-export type HubErrorCode = "node_name_invalid" | "node_name_taken" | "node_not_found" | "node_unavailable" | "invalid_request" | "internal";
-```
-
-## HubErrorResponse
-
-```ts
-export type HubErrorResponse = { code: HubErrorCode, message: string, };
-```
-
-## HubHealth
-
-```ts
-export type HubHealth = { status: HubStatus, version: string, protocolVersion: number, };
-```
-
-## HubStatus
-
-```ts
-export type HubStatus = "ok";
-```
-
-## HubStreamEvent
-
-```ts
-/**
- * 广播流中的一条事件。带 `hub_seq` 的进入回放窗口；增量与 resync 不带。
- */
-export type HubStreamEvent = { "type": "fact", hubSeq: number, node: NodeName, id: number, sessionId: SessionId | null, 
-/**
- * 事实提交后的 session 视图；不属于任何 session 或删除 session 时为空。
- */
-session: SessionMetadata | null, timestamp: number, event: FactEvent, } | { "type": "delta", node: NodeName, sessionId: SessionId, messageId: number, kind: DeltaKind, text: string, timestamp: number, } | { "type": "retry", node: NodeName, sessionId: SessionId, 
-/**
- * 即将进行的重试序号，从 1 开始。
- */
-attempt: number, 
-/**
- * 重试次数上限。
- */
-maxAttempts: number, 
-/**
- * 本次等待时长。
- */
-delayMs: number, } | { "type": "node_registered", hubSeq: number, node: NodeMetadata, } | { "type": "node_removed", hubSeq: number, name: NodeName, } | { "type": "node_updated", hubSeq: number, node: NodeMetadata, } | { "type": "node_status_changed", hubSeq: number, name: NodeName, status: NodeStatus, detail: string | null, } | { "type": "resync", reason: ResyncReason, };
-```
-
 ## MessageBodiesRequest
 
 ```ts
@@ -268,58 +206,6 @@ interrupted: boolean, runId: number | null, createdAt: number, parts: Array<Part
  * 用户输入正文。保留原始内容，只要求去掉空白后非空。
  */
 export type MessageText = string;
-```
-
-## NodeMetadata
-
-```ts
-/**
- * 节点表中的一行。`url` 是 hub 连接该节点 `agent` 的基地址。
- */
-export type NodeMetadata = { name: NodeName, url: string, 
-/**
- * 停用的节点不建上游订阅，命令一律返回不可用。
- */
-enabled: boolean, createdAt: number, updatedAt: number, };
-```
-
-## NodeName
-
-```ts
-/**
- * 节点名。节点名即身份，也是 URL 路径段，因此限制为路径安全字符。
- */
-export type NodeName = string;
-```
-
-## NodeSnapshot
-
-```ts
-/**
- * 侧栏与 bootstrap 看到的单个节点。`bootstrap` 只有 `ok` 的节点才有。
- */
-export type NodeSnapshot = { name: NodeName, url: string, 
-/**
- * 停用的节点不建上游订阅，命令一律返回不可用。
- */
-enabled: boolean, status: NodeStatus, detail: string | null, 
-/**
- * 最后一条事实事件自带的时间戳。进程内计数，不落库。
- */
-lastEventAt: number | null, 
-/**
- * 最近一次 health 的往返延迟。进程内计数，不落库。
- */
-latencyMs: number | null, bootstrap: BootstrapResponse | null, };
-```
-
-## NodeStatus
-
-```ts
-/**
- * 节点状态。只有 `ok` 的节点接受命令。
- */
-export type NodeStatus = "ok" | "unreachable" | "incompatible";
 ```
 
 ## PartSkeleton
@@ -373,12 +259,6 @@ export type QueueItem = { id: number, text: MessageText, anchor: number | null, 
  * 注册 host。`kind` 为 `ssh` 时 `target` 必填。
  */
 export type RegisterHostRequest = { name: string, kind: HostKind, target: string | null, };
-```
-
-## RegisterNodeRequest
-
-```ts
-export type RegisterNodeRequest = { name: string, url: string, };
 ```
 
 ## RegisterWorkspaceRequest
@@ -593,24 +473,6 @@ export type ToolResultState = { "status": "running" } | { "status": "finished", 
  * 局部更新 host。`None` 表示保留原值；`name` 是改名后的 host 名。
  */
 export type UpdateHostRequest = { name: string | null, target: string | null, enabled: boolean | null, };
-```
-
-## UpdateNodeRequest
-
-```ts
-export type UpdateNodeRequest = { 
-/**
- * 改名后的节点名。省略表示保留原名。
- */
-name: string | null, 
-/**
- * 新的上游基地址。省略表示保留原 URL。
- */
-url: string | null, 
-/**
- * 是否启用上游订阅。省略表示保留原状态。
- */
-enabled: boolean | null, };
 ```
 
 ## WorkspaceMetadata

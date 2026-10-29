@@ -8,7 +8,7 @@ async fn creates_missing_database_directory() {
         .path()
         .join("state")
         .join("durable")
-        .join("hub.sqlite");
+        .join("agent.sqlite");
 
     let store = Store::open(&path).await.expect("打开嵌套路径的数据库");
     assert!(path.exists(), "数据库文件应被建立");

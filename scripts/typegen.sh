@@ -9,7 +9,6 @@ manifest=docs/api/types.md
 
 rm -f "$generated"/*.ts
 cargo run --quiet -p agent --bin export-types-agent
-cargo run --quiet -p hub --bin export-types-hub
 
 mkdir -p "$(dirname "$manifest")"
 {

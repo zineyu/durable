@@ -54,7 +54,7 @@ devenv shell -- bash -c 'cd client && npx playwright install chromium'
 devenv shell -- bash -c 'cd client && npm run test:e2e'
 ```
 
-- `e2e/` 下的用例独享一套栈：脚本化 OpenAI 兼容 SSE 服务、真实 `agent`、临时 SQLite 与临时 workspace。页面由 `agent` 自己提供，没有 `hub`。
+- `e2e/` 下的用例独享一套栈：脚本化 OpenAI 兼容 SSE 服务、真实 `agent`、临时 SQLite 与临时 workspace。页面由 `agent` 自己提供。
 - `palette.spec.ts` 覆盖命令面板按 host 跳转与快捷键；`draft.spec.ts` 覆盖草稿隔离与上次 session 恢复；`reconnect.spec.ts` 覆盖 `agent` 重启后的重连与续传。
 - 断言只用用户可见文本与可访问名称；前置数据经 `agent` 的 HTTP API 准备。
 - 模型回答由 `e2e/support/model-server.ts` 的脚本队列决定。`hold` 脚本先流式返回文本再挂起，用于观察运行中的 run，测试调用 `release()` 收尾。

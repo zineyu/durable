@@ -24,10 +24,10 @@
 | [0018](0018-sse-resync.md) | SSE 落后检测与快照回放恢复 | 已接受。客户端游标部分由 ADR 0024 取代 | 落后时发 Resync 事件，快照带水位，落地快照时回退游标并重开事件流。 |
 | [0019](0019-tool-call-facts.md) | 工具调用以事实事件增量广播 | 已接受 | 每个工具执行完成后追加 tool_call_recorded 事实事件。 |
 | [0020](0020-chromatic-optional.md) | Chromatic 门禁按 token 存在启用 | 已接受 | Chromatic 步骤仅在存在项目 token 时执行，无 token 时跳过不阻塞。 |
-| [0021](0021-hub-as-multi-node-bus.md) | hub 作为多节点总线 | 已接受 | ui 改名 hub 并升级为总线：持有节点表、合并协议、广播事实事件。 |
-| [0022](0022-node-name-as-identity.md) | 节点名即身份 | 已接受 | 节点名即节点身份，全局 session 键为节点名加 session id。 |
-| [0023](0023-remove-concurrency-slots.md) | 移除并发槽位 | 已接受 | 删除全局并发槽位与相关配置，取出队首即启动 run。 |
-| [0024](0024-client-node-shards.md) | 客户端分片状态与广播游标 | 已接受 | 客户端状态按节点分片，广播游标与分片水位分开，快照在分片内补尾部。 |
+| [0021](0021-hub-as-multi-node-bus.md) | hub 作为多节点总线 | 已取代。见 ADR 0048 | ui 改名 hub 并升级为总线：持有节点表、合并协议、广播事实事件。 |
+| [0022](0022-node-name-as-identity.md) | 节点名即身份 | 已取代。见 ADR 0048 | 节点名即节点身份，全局 session 键为节点名加 session id。 |
+| [0023](0023-remove-concurrency-slots.md) | 移除并发槽位 | 已接受。ADR 0048 未改变并发决定 | 删除全局并发槽位与相关配置，取出队首即启动 run。 |
+| [0024](0024-client-node-shards.md) | 客户端分片状态与广播游标 | 已取代。见 ADR 0048 | 客户端状态按节点分片，广播游标与分片水位分开，快照在分片内补尾部。 |
 | [0025](0025-browser-e2e.md) | 浏览器端到端测试 | 已接受 | 新增 Seam 4 浏览器端到端测试，用真实进程栈加 Playwright 驱动。 |
 | [0026](0026-logging-and-default-paths.md) | 日志与默认路径 | 已接受 | 数据库与日志目录均可省略，日志同时输出标准错误与按天轮转文件。 |
 | [0027](0027-upstream-subscription-starts-at-node-watermark.md) | 上游订阅起点取节点快照水位 | 已接受。细化 ADR 0021 | 上游订阅起点取该节点快照水位，不持久化上游游标。 |

@@ -42,25 +42,6 @@ executor tokio # 异步运行时；标准输入输出与子进程
 executor tracing # 结构化日志
 executor tracing-subscriber # 日志过滤与格式
 
-hub agent # hub 拉起并托管 agent 进程
-hub async-stream # 转发流用 generator 拼装
-hub axum # 静态资源与 API 反向代理服务端
-hub bytes # 测试内拼装响应体
-hub clap # 命令行参数解析
-hub durable # 领域内核
-hub futures-util # 流适配与组合
-hub mime_guess # 静态资源 MIME 推断
-hub reqwest # 把 /api/* 反向代理给 agent
-hub rust-embed # 编译期内嵌 client/dist
-hub runtime # 平台标准目录与日志初始化
-hub serde # 协议结构序列化
-hub serde_json # JSON 编解码
-hub sqlx # 节点表留在 hub 自己的库里，随 hub 一起退役（ADR 0048）
-hub tempfile # 测试用临时目录
-hub tokio # 异步运行时
-hub tracing # 结构化日志
-hub ts-rs # 导出 TS 协议类型
-
 runtime serde_json # 测试内解析 JSON Lines 日志
 runtime tempfile # 测试用临时日志目录
 runtime thiserror # 错误类型

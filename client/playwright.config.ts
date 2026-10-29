@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-/// 端到端测试驱动真实二进制。每个测试独享脚本化模型服务、agent、hub 与临时目录。
+/// 端到端测试驱动真实二进制。每个测试独享脚本化模型服务、agent 与临时目录。
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,

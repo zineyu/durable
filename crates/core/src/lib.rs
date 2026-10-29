@@ -1,5 +1,5 @@
 //! 领域内核：领域类型、唯一写入线与 SQLite 存储。
-//! 进程启动、HTTP 协议与客户端在 `crates/agent`、`crates/hub` 与 `client`。
+//! 进程启动、HTTP 协议与客户端在 `crates/agent` 与 `client`，工具执行在 `crates/executor`。
 
 mod cancel;
 mod change;

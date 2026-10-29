@@ -9,11 +9,11 @@
 | 读取上限 | `read_file` 的字节上限，默认 256 KiB。超出是错误，不是截断。 |
 | 输出截断 | `bash` 输出超过上限（默认 64 KiB）时保留前段并在结果中标注。截断不是错误。 |
 | 进程组 | `bash` 子进程以自身 pid 作为进程组 id。超时或取消时杀掉整个进程组。 |
-| agent | Rust 进程。唯一权威：模型调用、run 执行、消息树、队列、事件与浏览器入口，持有 SQLite。原 `hub`。不写作 hub。 |
-| host | 一台提供 workspace 与工具执行的机器。身份为名称，连接参数是一个 SSH 目标字符串。不写作 node。 |
+| agent | Rust 进程。唯一权威：模型调用、run 执行、消息树、队列、事件与浏览器入口，持有 SQLite。 |
+| host | 一台提供 workspace 与工具执行的机器。身份为名称，连接参数是一个 `ssh` 目标字符串。 |
 | host 表 | agent 的 SQLite 中登记的 host 名单。host 名即身份。 |
-| host 启用 | `enabled`。host 表上的开关。停用时 agent 不建立 link，指向该 host 的命令返回 host_unavailable。 |
-| host 更新 | host_updated。SSH 目标或启用标志变化时写入的事实事件。 |
+| host 启用 | `enabled`。host 表上的开关。停用时 agent 不建立 link，指向该 host 的命令返回 `host_unavailable`。 |
+| host 更新 | `host_updated`。`ssh` 目标或启用标志变化时写入的事实事件。 |
 | 手动重连 | host 表命令：丢弃当前 link 并按退避起点立即重建，不改变 host 状态以外的内容。 |
 | host 状态 | `ok`、`unreachable`、`incompatible`。状态不为 `ok` 时指向该 host 的命令全部禁用。 |
 | 状态说明 | 与 host 状态同行的人读说明：该 host 为什么不是 `ok`。取失败原文；`ok` 时为空。 |
@@ -22,7 +22,7 @@
 | link | agent 与 executor 之间的帧通道。传输有两种：本地子进程与 SSH 子进程。不写作 tunnel。 |
 | 帧 | link 上的一个长度前缀 JSON 消息。只有四种：请求、结果、取消、心跳。 |
 | 本地传输 | 本机 host 的传输：agent 直接启动 executor 子进程，标准输入输出即 link。 |
-| SSH 传输 | 远端 host 的传输：agent 启动 ssh 子进程并在其中运行 executor，标准输入输出即 link。 |
+| SSH 传输 | 远端 host 的传输：agent 启动 `ssh` 子进程并在其中运行 executor，标准输入输出即 link。 |
 | 安装 | 首次连接远端 host 时，把与 agent 同版本的 executor 二进制推送到该 host 的标准数据目录，并校验构建版本。 |
 | link 延迟 | `latency_ms`。最近一次心跳往返的毫秒数。进程内计数。 |
 | session | 绑定唯一 workspace 的对话单元。含消息树、队列、active leaf。session 因而属于该 workspace 的 host。 |

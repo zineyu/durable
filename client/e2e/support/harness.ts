@@ -26,7 +26,7 @@ type HarnessInit = {
 };
 
 /// 一次端到端场景的完整栈：脚本化模型服务、真实 agent 与临时目录。
-/// agent 自己的浏览器入口就是页面地址，不再有 hub。
+/// agent 自己的浏览器入口就是页面地址。
 export class Harness {
   readonly root: string;
   readonly workspace: string;

@@ -19,7 +19,7 @@ const summary: ContentPart[] = [
     text: [
       '## 摘要',
       '',
-      '已经确认双二进制结构：`agent` 提供 HTTP API，`hub` 反代并托管客户端。',
+      '已经确认双二进制结构：`agent` 提供 HTTP API 与浏览器入口，`executor` 执行工具。',
       '',
       '- 已完成：SSE 回放与 resync、executor 的 link 帧',
       '- 未完成：浏览器端 e2e 的取消用例仍需修正',

@@ -42,7 +42,7 @@ fn falls_back_to_default_filter_when_filter_is_invalid() {
     let directory = tempfile::tempdir().expect("创建临时目录");
     let config = LogConfig {
         directory: directory.path().join("logs"),
-        prefix: "hub".to_owned(),
+        prefix: "agent".to_owned(),
         filter: "agent=notalevel".to_owned(),
     };
     with_logs(&config, || tracing::info!("无效过滤器已回退")).expect("无效过滤器不阻断启动");

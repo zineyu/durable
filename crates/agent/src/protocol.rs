@@ -1,5 +1,5 @@
 //! agent 的 HTTP 协议 DTO 与协议版本。
-//! hub 自有协议在 `crates/hub/src/protocol`。
+//! agent 与 executor 之间的帧类型在 `durable::link`。
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -17,9 +17,9 @@ pub enum HealthStatus {
 
 /// 协议版本。任何不兼容的协议改动都递增它。
 ///
-/// 4：提交消息必须写明 `mode`。不带 `mode` 的旧客户端被拒绝；旧节点忽略该字段，会把插话静默排队。
-/// 5：事实事件的载荷不再带 `session`，session 视图移到事件信封。旧 hub 读不到 `sessionId`，
-///    新 hub 读不到旧载荷的 `session`，两个方向都不兼容。
+/// 4：提交消息必须写明 `mode`。不带 `mode` 的旧客户端被拒绝；旧实现忽略该字段，会把插话静默排队。
+/// 5：事实事件的载荷不再带 `session`，session 视图移到事件信封。旧读取方读不到 `sessionId`，
+///    新读取方读不到旧载荷的 `session`，两个方向都不兼容。
 /// 6：`runFailureCode` 新增 `storage_failed`，`errorCode` 新增 `node_name_taken` 与
 ///    `node_not_found`。客户端的失败标签表是穷尽 `Record`，旧客户端遇未知键会渲染出
 ///    `undefined` 前缀的失败说明。

@@ -11,8 +11,8 @@ describe('session 位置', () => {
     );
   });
 
-  it('拒绝带 host 前缀的旧地址与单 session 参数地址', () => {
-    expect(readSelection('#/n/studio/s/s-1')).toBeNull();
+  it('拒绝多余的路径前缀与单 session 参数地址', () => {
+    expect(readSelection('#/h/studio/s/s-1')).toBeNull();
     expect(readSelection('#session=s-1')).toBeNull();
   });
 
