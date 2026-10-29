@@ -1,9 +1,12 @@
 //! host 的运行状态：每个 host 一条 link、状态、说明与心跳延迟。
 //! host 表与事实在 `durable` 的 `store/host`；link 的帧与关闭状态在 `link`；
-//! 对外快照 DTO 在 `protocol`。
+//! ssh 的探测与安装在 `link::ssh`；ssh 的后台连接与退避在 `ssh`；对外快照 DTO 在 `protocol`。
 //!
-//! 规格 user story R-11、R-17、R-18、R-35、R-46：本机 host 启动即自动注册，
-//! 状态三态显式可见，同一 host 上的多个 session 共用一条 link。
+//! 规格 user story R-8、R-11、R-12、R-14、R-15、R-16、R-17、R-18、R-35、R-46：
+//! 本机 host 启动即自动注册，状态三态显式可见，ssh host 首次连接时自动安装 executor，
+//! 断链后按退避重连，同一 host 上的多个 session 共用一条 link。
+
+mod ssh;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,9 +18,9 @@ use durable::link::WorkspaceCheckError;
 use durable::{
     HostKind, HostMetadata, HostName, HostStatus, HostUpdate, Store, StoreError, ToolLimits,
 };
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, watch};
 
-use crate::link::{LinkClosed, LinkHandle};
+use crate::link::{LinkClosed, LinkHandle, Transport};
 use crate::protocol::HostSnapshot;
 
 /// 心跳间隔。往返毫秒数写进 host 快照的延迟字段。
@@ -29,9 +32,6 @@ pub const LOCAL_HOST: &str = "local";
 /// 停用 host 的状态说明。
 pub(crate) const DISABLED_DETAIL: &str = "host 已停用";
 
-/// `ssh` 种类还没有传输：安装与 SSH 属于 ticket 62。
-const SSH_PENDING_DETAIL: &str = "SSH 传输尚未实现";
-
 /// 一个 host 的进程内状态。状态本身不落库，只经事实事件对外。
 struct HostRuntime {
     status: HostStatus,
@@ -40,6 +40,8 @@ struct HostRuntime {
     link: Option<Arc<LinkHandle>>,
     /// 每次启动 link 递增。关闭通知带上代号，过期的通知直接丢弃。
     generation: u64,
+    /// ssh host 的后台连接任务。丢弃它即让任务退出：重连、停用与删除都这样做。
+    cancel: Option<watch::Sender<()>>,
 }
 
 impl HostRuntime {
@@ -50,6 +52,7 @@ impl HostRuntime {
             latency_ms: None,
             link: None,
             generation: 0,
+            cancel: None,
         }
     }
 }
@@ -195,7 +198,9 @@ impl HostRegistry {
         Ok(())
     }
 
-    /// 手动重连：关掉当前 link 并按当前行立即重启一条。没有退避，退避属于 ticket 62。
+    /// 手动重连：关掉当前 link 并按当前行立即重启一条，退避从头开始。
+    ///
+    /// ssh host 的重连在后台完成，命令立刻返回，状态随事实事件推进。
     ///
     /// # Errors
     ///
@@ -310,7 +315,10 @@ impl HostRegistry {
         }
     }
 
-    /// 按 host 行重建 link。停用与 ssh 种类只写状态，不拉子进程。
+    /// 按 host 行重建 link。停用的 host 只写状态，不拉子进程。
+    ///
+    /// 本机 transport 同步拉起子进程；ssh 的探测、安装与重试都在后台任务里，
+    /// 因此注册或改目标不会阻塞在网络上。
     async fn connect(self: &Arc<Self>, name: &HostName) {
         let host = match self.store.host(name).await {
             Ok(Some(host)) => host,
@@ -321,7 +329,7 @@ impl HostRegistry {
             }
         };
         if !host.enabled {
-            self.replace_link(name, None).await;
+            self.clear_link(name).await;
             self.set_status(
                 name,
                 HostStatus::Unreachable,
@@ -330,22 +338,27 @@ impl HostRegistry {
             .await;
             return;
         }
-        if host.kind != HostKind::Local {
-            self.replace_link(name, None).await;
-            self.set_status(
-                name,
-                HostStatus::Unreachable,
-                Some(SSH_PENDING_DETAIL.to_owned()),
-            )
-            .await;
-            return;
+        match host.kind {
+            HostKind::Local => self.connect_local(&host).await,
+            HostKind::Ssh => self.start_ssh(&host).await,
         }
-        let link = match LinkHandle::spawn_local(&self.executor, self.limits) {
+    }
+
+    /// 本机传输：直接拉起 executor 子进程，失败时只写状态。
+    async fn connect_local(self: &Arc<Self>, host: &HostMetadata) {
+        self.clear_link(&host.name).await;
+        let link = match LinkHandle::spawn(
+            &Transport::Local {
+                executor: self.executor.clone(),
+            },
+            self.limits,
+            &host.name,
+        ) {
             Ok(link) => Arc::new(link),
             Err(error) => {
-                self.replace_link(name, None).await;
+                self.replace_link(&host.name, None).await;
                 self.set_status(
-                    name,
+                    &host.name,
                     HostStatus::Unreachable,
                     Some(format!("启动 executor 失败: {error}")),
                 )
@@ -353,14 +366,51 @@ impl HostRegistry {
                 return;
             }
         };
-        let generation = self.replace_link(name, Some(Arc::clone(&link))).await;
-        self.set_status(name, HostStatus::Ok, None).await;
+        let generation = self.replace_link(&host.name, Some(Arc::clone(&link))).await;
+        self.set_status(&host.name, HostStatus::Ok, None).await;
+        let mut cancel = self.fresh_cancel(&host.name).await;
         let registry = Arc::clone(self);
-        let watched = name.clone();
+        let watched = host.name.clone();
         tokio::spawn(async move {
-            let close = link.wait_closed().await;
-            registry.link_closed(&watched, generation, close).await;
+            tokio::select! {
+                close = link.wait_closed() => {
+                    registry.link_closed(&watched, generation, close).await;
+                }
+                () = ssh::cancelled(&mut cancel) => {
+                    // 丢弃 handle 即关闭子进程：停用、删除与重建连接都不留孤儿 executor。
+                    drop(link);
+                }
+            }
         });
+    }
+
+    /// 为 host 换一个新的取消通道并返回接收端。
+    ///
+    /// 丢弃旧发送端让上一轮后台任务退出；新任务拿到的接收端只对下一轮动作生效。
+    async fn fresh_cancel(&self, name: &HostName) -> watch::Receiver<()> {
+        let mut hosts = self.hosts.lock().await;
+        let runtime = hosts
+            .entry(name.clone())
+            .or_insert_with(HostRuntime::disconnected);
+        let (sender, receiver) = watch::channel(());
+        runtime.cancel = Some(sender);
+        receiver
+    }
+
+    /// 丢掉 link 与后台任务并返回新的代号。停用、重建连接与重连都先走这里。
+    ///
+    /// 丢弃后台任务的取消通道让它醒来；旧 link 在这里被丢弃，
+    /// 它的标准输入随之关闭。
+    async fn clear_link(&self, name: &HostName) -> u64 {
+        let mut hosts = self.hosts.lock().await;
+        let runtime = hosts
+            .entry(name.clone())
+            .or_insert_with(HostRuntime::disconnected);
+        runtime.generation += 1;
+        runtime.link = None;
+        runtime.latency_ms = None;
+        runtime.cancel = None;
+        runtime.generation
     }
 
     /// 换掉 link 并返回新的代号。旧 link 在这里被丢弃，它的标准输入随之关闭。

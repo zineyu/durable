@@ -79,7 +79,8 @@ impl Store {
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
     /// 副作用：写入 host 行与 `host_updated` 事实事件。字段与原值完全相同则不写库、
-    /// 不推进 `updated_at`，也不写事实。
+    /// 不推进 `updated_at`，也不写事实。换掉 SSH 目标会清空 `installed_build`：
+    /// 新目标可能已是另一台机器，已安装的 executor 不再可信。
     pub async fn update_host(
         &self,
         name: &HostName,
@@ -109,6 +110,12 @@ impl Store {
             };
             if updated.name == host.name {
                 command.changes().update_host(updated.clone());
+                if updated.target != host.target {
+                    // 换目标可能就是换了一台机器：已安装的构建不再可信，下次连接重新安装。
+                    command
+                        .changes()
+                        .set_host_installed_build(updated.name.clone(), None);
+                }
             } else {
                 command.changes().delete_host(host.name);
                 command.changes().insert_host(updated.clone());
@@ -181,6 +188,43 @@ impl Store {
                 },
                 now,
             );
+            Ok(())
+        })
+        .await
+    }
+
+    /// host 上已安装的 executor 构建 id。`None` 表示从未安装成功。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Database`：数据库读取失败。
+    pub async fn host_installed_build(
+        &self,
+        name: &HostName,
+    ) -> Result<Option<String>, StoreError> {
+        self.storage.host_installed_build(name).await
+    }
+
+    /// 记下 host 上已安装的 executor 构建 id。
+    ///
+    /// 安装是 link 的建立过程，不是领域事件，因此不写事实。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::HostNotFound`：该名称不在 host 表中。
+    /// - `StoreError::Database`：数据库读写失败。
+    pub async fn set_host_installed_build(
+        &self,
+        name: &HostName,
+        build: &str,
+    ) -> Result<(), StoreError> {
+        self.command_root(async |command| {
+            if self.storage.host(name).await?.is_none() {
+                return Err(StoreError::HostNotFound(name.clone()));
+            }
+            command
+                .changes()
+                .set_host_installed_build(name.clone(), Some(build.to_owned()));
             Ok(())
         })
         .await

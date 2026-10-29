@@ -1,5 +1,6 @@
 //! link 的 agent 侧：启动 executor 子进程，按请求 id 多路复用帧。
-//! `ToolBox` 实现在 `tools`；帧与工具体现在 `crates/core` 与 `crates/executor`。
+//! `ToolBox` 实现在 `tools`；帧与工具体现在 `crates/core` 与 `crates/executor`；
+//! 两种传输的组装在 `transport`，ssh 的探测与安装在 `ssh`。
 //!
 //! 规格 user story R-35：同一 host 上的多个 session 共用一条 link，请求按 id 配对。
 //! 断链时的退出码与标准错误尾部记在 [`LinkClosed`]；host 的 `ok`/`unreachable`/`incompatible`
@@ -10,24 +11,24 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io;
-use std::path::Path;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use durable::link::{
-    Frame, LINK_PROTOCOL_VERSION, Operation, Reply, WorkspaceCheckError, read_frame, write_frame,
-};
-use durable::{Cancellation, ToolErrorCode, ToolLimits, ToolOutcome};
+use durable::link::{Frame, Operation, Reply, WorkspaceCheckError, read_frame, write_frame};
+use durable::{Cancellation, HostName, ToolErrorCode, ToolLimits, ToolOutcome};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
 mod closed;
+pub(crate) mod ssh;
 mod tools;
+mod transport;
 
 pub use closed::{INCOMPATIBLE_EXIT_CODE, LinkClosed};
+pub(crate) use transport::Transport;
+pub use transport::{BUILD_ID, BUILD_PLATFORM};
 
 pub use tools::{NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
 
@@ -162,28 +163,20 @@ pub struct LinkHandle {
 }
 
 impl LinkHandle {
-    /// 启动本机传输：直接拉起 executor 子进程，标准输入输出即 link。
+    /// 启动一条 link：传输决定是本机子进程还是 `ssh`，标准输入输出是 link。
     ///
     /// 工具上限随启动参数交给 executor，因此两侧看到的截断与超时一致。
+    /// executor 的标准错误并入 agent 的日志，并标注 host 名。
     ///
     /// # Errors
     ///
-    /// - executor 无法启动或缺少标准输入输出管道时返回该错误。
-    pub fn spawn_local(executor_path: &Path, limits: ToolLimits) -> io::Result<Self> {
-        let mut child = Command::new(executor_path)
-            .arg("--link-protocol")
-            .arg(LINK_PROTOCOL_VERSION.to_string())
-            .arg("--read-bytes")
-            .arg(limits.read_bytes.to_string())
-            .arg("--bash-output-bytes")
-            .arg(limits.bash_output_bytes.to_string())
-            .arg("--bash-timeout-ms")
-            .arg(limits.bash_timeout.as_millis().to_string())
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()?;
+    /// - 传输命令无法启动或缺少标准输入输出管道时返回该错误。
+    pub(crate) fn spawn(
+        transport: &Transport,
+        limits: ToolLimits,
+        host: &HostName,
+    ) -> io::Result<Self> {
+        let mut child = transport.command(limits).spawn()?;
         let pid = child.id();
         let stdin = child
             .stdin
@@ -209,6 +202,7 @@ impl LinkHandle {
             exit,
             Arc::clone(&state),
             termination,
+            host.clone(),
         ));
         tokio::spawn(read_loop(
             stdout,
@@ -469,8 +463,9 @@ async fn watch_child(
     exit: oneshot::Sender<Option<i32>>,
     state: Arc<LinkState>,
     termination: oneshot::Receiver<()>,
+    host: HostName,
 ) {
-    let mut forward = tokio::spawn(forward_stderr(stderr, Arc::clone(&state)));
+    let mut forward = tokio::spawn(forward_stderr(stderr, Arc::clone(&state), host));
     let status = tokio::select! {
         status = child.wait() => status,
         _ = termination => {
@@ -498,13 +493,14 @@ async fn watch_child(
     }
 }
 
-/// executor 的日志只写标准错误，这里并入 agent 的日志并留下最后几行供断链说明。
-async fn forward_stderr(stderr: ChildStderr, state: Arc<LinkState>) {
+/// executor 的日志只写标准错误，这里并入 agent 的日志并注明 host 名，
+/// 同时留下最后几行供断链说明。
+async fn forward_stderr(stderr: ChildStderr, state: Arc<LinkState>, host: HostName) {
     let mut lines = BufReader::new(stderr).lines();
     loop {
         match lines.next_line().await {
             Ok(Some(line)) => {
-                tracing::info!(target: "executor", "{line}");
+                tracing::info!(target: "executor", host = %host, "{line}");
                 let mut tail = state.stderr_tail.lock().await;
                 if tail.len() == STDERR_TAIL_LINES {
                     drop(tail.pop_front());

@@ -24,6 +24,7 @@ use tempfile::TempDir;
 pub(crate) mod db;
 mod event_stream;
 mod hosts;
+pub(crate) mod ssh;
 mod test_agent;
 
 pub(crate) use event_stream::{EventStream, error_code, error_envelope};
@@ -32,11 +33,13 @@ pub(crate) mod process;
 pub(crate) mod provider;
 
 pub(crate) use db::{
-    RecordedFact, connect, corrupt_message_parts, recorded_event_ids, recorded_event_kinds,
-    recorded_event_rows, recorded_events, recorded_facts, reject_compaction_writes,
+    RecordedFact, connect, corrupt_message_parts, installed_build, recorded_event_ids,
+    recorded_event_kinds, recorded_event_rows, recorded_events, recorded_facts,
+    reject_compaction_writes,
 };
 
 pub(crate) use provider::{Script, ScriptedProvider};
+pub(crate) use ssh::FakeSsh;
 
 /// 模型配置的测试取值，用 `Command::envs` 应用到 std 或 tokio 的命令。
 pub(crate) fn model_environment() -> [(&'static str, &'static str); 3] {

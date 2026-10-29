@@ -35,6 +35,11 @@ impl Changeset {
         self.push(Change::DeleteHost(name));
     }
 
+    /// 记下或清空 host 上已安装的 executor 构建 id。它不是领域事实，不写事件。
+    pub fn set_host_installed_build(&mut self, name: HostName, build: Option<String>) {
+        self.push(Change::SetHostInstalledBuild { name, build });
+    }
+
     pub fn insert_workspace(&mut self, workspace: WorkspaceMetadata) {
         self.push(Change::InsertWorkspace(workspace));
     }
@@ -152,6 +157,10 @@ pub(crate) enum Change {
     InsertHost(HostMetadata),
     UpdateHost(HostMetadata),
     DeleteHost(HostName),
+    SetHostInstalledBuild {
+        name: HostName,
+        build: Option<String>,
+    },
     InsertSession(SessionRecord),
     UpdateSession {
         id: SessionId,

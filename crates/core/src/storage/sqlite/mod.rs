@@ -100,6 +100,19 @@ impl SqliteStorage {
         .transpose()
     }
 
+    /// 该 host 上已安装的 executor 构建 id。从未安装时为 `None`。
+    pub(crate) async fn host_installed_build(
+        &self,
+        name: &HostName,
+    ) -> Result<Option<String>, StoreError> {
+        let build: Option<Option<String>> =
+            sqlx::query_scalar("SELECT installed_build FROM host WHERE name = ?1")
+                .bind(name.as_str())
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(build.flatten())
+    }
+
     /// 该 host 名下已登记的 workspace 数量。
     pub(crate) async fn host_workspace_count(&self, name: &HostName) -> Result<i64, StoreError> {
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM workspace WHERE host = ?1")

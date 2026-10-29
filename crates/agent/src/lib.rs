@@ -39,8 +39,8 @@ pub use engine::RunEngine;
 pub use error::ApiError;
 pub use hosts::{HEARTBEAT_INTERVAL, HostRegistry, LOCAL_HOST};
 pub use link::{
-    INCOMPATIBLE_EXIT_CODE, LinkClosed, LinkHandle, NoTools, RemoteTools, ToolBox, ToolCall,
-    ToolContext,
+    BUILD_ID, BUILD_PLATFORM, INCOMPATIBLE_EXIT_CODE, LinkClosed, LinkHandle, NoTools, RemoteTools,
+    ToolBox, ToolCall, ToolContext,
 };
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,

@@ -113,3 +113,13 @@ pub(crate) async fn reject_compaction_writes(database: &Path) {
     .await
     .expect("建立拒绝压缩写入的触发器");
 }
+
+/// host 行上记录的已安装 executor 构建 id。`None` 表示从未安装成功。
+pub(crate) async fn installed_build(database: &Path, host: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>("SELECT installed_build FROM host WHERE name = ?1")
+        .bind(host)
+        .fetch_optional(&mut connect(database).await)
+        .await
+        .expect("查询 installed_build")
+        .flatten()
+}

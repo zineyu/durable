@@ -1,6 +1,7 @@
 //! 进程级测试脚手架：启动真实 agent 二进制、经 HTTP 驱动它，并在用例结束时杀掉。
 //! 进程内的 `Harness` 在父模块，脚本化 provider 在 `provider`。
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -26,6 +27,7 @@ pub(crate) fn executor_binary() -> PathBuf {
 pub(crate) struct Process {
     child: tokio::process::Child,
     base: String,
+    database: PathBuf,
 }
 
 impl Process {
@@ -35,21 +37,41 @@ impl Process {
         workspace: &Path,
         provider: &ScriptedProvider,
     ) -> Process {
+        Process::start_with_environment(database, workspace, provider, &[]).await
+    }
+
+    /// 与 [`Process::start`] 相同，但给 agent 进程额外设置环境变量。
+    /// ssh 传输的用例据此把假 ssh 放到 `PATH` 首位。
+    pub(crate) async fn start_with_environment(
+        database: &Path,
+        workspace: &Path,
+        provider: &ScriptedProvider,
+        environment: &[(&str, OsString)],
+    ) -> Process {
         let mut command = serving_command(database);
         command
             .arg("--workspace")
             .arg(format!("local:{}", workspace.display()))
             .env(agent::MODEL_BASE_URL, provider.base_url());
+        for (key, value) in environment {
+            command.env(key, value);
+        }
         let mut child = command.spawn().expect("启动 agent");
         let address = read_address(&mut child).await;
         Process {
             child,
             base: format!("http://{address}"),
+            database: database.to_path_buf(),
         }
     }
 
     pub(crate) fn url(&self, path: &str) -> String {
         format!("{}{path}", self.base)
+    }
+
+    /// 进程使用的 SQLite 路径：用例直接查库断言已安装的构建 id。
+    pub(crate) fn database(&self) -> &Path {
+        &self.database
     }
 
     /// 直接杀掉进程，不经过 HTTP 取消：模拟进程被杀或机器断电。
@@ -60,13 +82,22 @@ impl Process {
 }
 
 pub(crate) async fn create_session(process: &Process, workspace: &Path) -> agent::SessionMetadata {
+    create_session_on(process, "local", workspace).await
+}
+
+/// 在指定 host 上创建 session。workspace 路径必须是已在该 host 上登记的那份。
+pub(crate) async fn create_session_on(
+    process: &Process,
+    host: &str,
+    workspace: &Path,
+) -> agent::SessionMetadata {
     let path = std::fs::canonicalize(workspace)
         .expect("规范化 workspace 路径")
         .to_string_lossy()
         .into_owned();
     let response = reqwest::Client::new()
         .post(process.url("/api/sessions"))
-        .json(&serde_json::json!({ "host": "local", "workspace": path, "title": null }))
+        .json(&serde_json::json!({ "host": host, "workspace": path, "title": null }))
         .send()
         .await
         .expect("创建 session");

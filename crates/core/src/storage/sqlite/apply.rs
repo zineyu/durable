@@ -27,6 +27,9 @@ pub(super) async fn apply_change(
         Change::InsertHost(host) => insert_host(connection, host).await,
         Change::UpdateHost(host) => update_host(connection, host).await,
         Change::DeleteHost(name) => delete_host(connection, name).await,
+        Change::SetHostInstalledBuild { name, build } => {
+            set_host_installed_build(connection, name, build.as_deref()).await
+        }
         Change::InsertSession(session) => insert_session(connection, session).await,
         Change::UpdateSession {
             id,
@@ -147,6 +150,19 @@ async fn delete_host(connection: &mut SqliteConnection, name: &HostName) -> Resu
         .execute(&mut *connection)
         .await?;
     ensure_written(&result, "删除 host")
+}
+
+async fn set_host_installed_build(
+    connection: &mut SqliteConnection,
+    name: &HostName,
+    build: Option<&str>,
+) -> Result<(), StoreError> {
+    let result = sqlx::query("UPDATE host SET installed_build = ?2 WHERE name = ?1")
+        .bind(name.as_str())
+        .bind(build)
+        .execute(&mut *connection)
+        .await?;
+    ensure_written(&result, "写入 host 的 installed_build")
 }
 
 async fn insert_session(

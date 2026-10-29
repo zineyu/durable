@@ -244,6 +244,44 @@ async fn killed_executor_marks_the_host_unreachable_and_reconnect_restores_it() 
         .await;
 }
 
+/// 规格 user story R-8：停用 host 关闭它的 link，子进程不留在后台。
+#[tokio::test]
+async fn disabling_a_host_closes_its_link() {
+    let harness = Harness::start().await;
+    harness
+        .host_snapshot("local", |host| host.status == agent::HostStatus::Ok)
+        .await;
+    let pid = harness.executor_pid();
+
+    let response = harness
+        .update_host("local", serde_json::json!({ "enabled": false }))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let host = harness
+        .host_snapshot("local", |host| {
+            host.status == agent::HostStatus::Unreachable
+        })
+        .await;
+    assert_eq!(host.detail.as_deref(), Some("host 已停用"));
+
+    for _ in 0..100 {
+        if !process_alive(pid) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("停用后 executor 子进程仍然活着: {pid}");
+}
+
+/// 进程是否仍存在。仅测试使用，不引入额外依赖。
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 #[tokio::test]
 async fn heartbeat_records_latency() {
     let harness = Harness::start_with_executor(
