@@ -6,7 +6,8 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: process.env.CI !== undefined && process.env.CI !== '',
   retries: 0,
-  workers: process.env.CI ? 2 : 4,
+  // 每个 worker 自带 agent、executor 与浏览器；4 个并行在开发机上会把工具卡片的 20 秒断言挤超时。
+  workers: 2,
   reporter: [['list']],
   timeout: 90_000,
   expect: { timeout: 20_000 },
