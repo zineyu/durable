@@ -11,16 +11,26 @@ use crate::engine::plan::PendingTool;
 use crate::engine::{RunEngine, storage_failure};
 use crate::link::{ToolCall, ToolContext};
 
+/// 工具循环的结束方式。
+///
+/// 取消单独成一支：它既不是成功也不是失败，由调用方翻成 run 结局。
+pub(super) enum ToolLoopEnd {
+    /// 批次执行完毕。
+    Completed,
+    /// 执行中被取消，剩余调用已写成「结果未知」。
+    Cancelled,
+}
+
 impl RunEngine {
     /// 顺序执行待办工具调用：缺节点的先入树，执行完把结局写回同一节点。
     ///
-    /// 返回 `Ok(false)` 表示执行中被取消，调用方应结束 run。
+    /// 取消时剩余调用写成「结果未知」，并由调用方结束 run。
     pub(super) async fn run_tool_calls(
         &self,
         start: &RunStart,
         cancellation: &Cancellation,
         pending: Vec<PendingTool>,
-    ) -> Result<bool, RunFailure> {
+    ) -> Result<ToolLoopEnd, RunFailure> {
         let session = &start.run.session_id;
         let context = ToolContext {
             host: start.host.clone(),
@@ -71,10 +81,10 @@ impl RunEngine {
                 self.abandon_tools(session, start.run.id, remaining.collect())
                     .await
                     .map_err(|error| storage_failure(&error))?;
-                return Ok(false);
+                return Ok(ToolLoopEnd::Cancelled);
             }
         }
-        Ok(true)
+        Ok(ToolLoopEnd::Completed)
     }
 
     /// 保证该调用有一个 tool 节点，返回节点 id。

@@ -52,3 +52,4 @@
 | [0046](0046-store-test-seam.md) | 第三条测试 seam：`Store` | 已接受。补充 ADR 0007 的 seam 清单 | 新增内核层 seam：用临时 SQLite 打开真实 `Store`，直接断言快照、事件序列与错误变体；协议、SSE、进程与工具仍由 Seam 1 覆盖。 |
 | [0047](0047-stream-progress-persistence.md) | 流式进度落库与已中断消息 | 已接受。取代 ADR 0037 的「assistant 消息只在定型时入树」 | 流式正文按时间节流写入 run 的进度，崩溃恢复与取消时入树为标注已中断的 assistant 消息，续跑接着它继续。 |
 | [0048](0048-remote-ssh-shaped-process-model.md) | 进程模型反转为 remote-ssh 形状 | 已接受。取代 ADR 0001 的二进制划分与 ADR 0021 至 0024 的总线与分片决策 | `agent` 独占 loop 与 SQLite，工具执行交给 host 上的 executor，两侧经 SSH 上的 JSON 帧通信；状态集中，客户端回到单游标。 |
+| [0049](0049-run-plan-and-single-cancel.md) | run 动作由纯函数判定，取消只有一个翻译点 | 已接受。细化 ADR 0037 的续跑点推导、ADR 0039 的接入边界与 ADR 0014 的取消语义 | `engine/plan.rs` 的纯函数回答下一步，接入插话是它的伴随字段；工具循环、模型流与压缩各返回 Cancelled，由执行循环单点翻成 run 结局；压缩期间取消以 `cancelled` 结束。 |

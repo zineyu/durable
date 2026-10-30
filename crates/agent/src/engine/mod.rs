@@ -18,9 +18,9 @@ use durable::{
 };
 use tokio::sync::{Mutex, Notify};
 
-use self::compact::CompactionBudget;
-
+use self::compact::{CompactionBudget, CompactionEnd};
 use self::plan::NextAction;
+use self::tools::ToolLoopEnd;
 use crate::config::EngineConfig;
 use crate::link::ToolBox;
 use crate::provider::ModelProvider;
@@ -294,25 +294,25 @@ impl RunEngine {
                         }
                         StepEnd::Cancelled => return cancelled(),
                         StepEnd::Failure(failure) => {
-                            if failure.code == RunFailureCode::ContextLimitExceeded
-                                && compaction.take()
-                            {
-                                tracing::info!(session = %session.as_str(), "上下文超限，压缩后重试本步");
-                                if let Err(failure) =
-                                    self.compact(session, &transcript, cancellation).await
-                                {
-                                    return failed(failure);
-                                }
-                                continue;
+                            if failure.code != RunFailureCode::ContextLimitExceeded {
+                                return failed(failure);
                             }
-                            return failed(failure);
+                            if !compaction.take() {
+                                return failed(failure);
+                            }
+                            tracing::info!(session = %session.as_str(), "上下文超限，压缩后重试本步");
+                            match self.compact(session, &transcript, cancellation).await {
+                                CompactionEnd::Compacted => {}
+                                CompactionEnd::Cancelled => return cancelled(),
+                                CompactionEnd::Failed(failure) => return failed(failure),
+                            }
                         }
                     }
                 }
                 NextAction::Tools(pending) => {
                     match self.run_tool_calls(start, cancellation, pending).await {
-                        Ok(true) => {}
-                        Ok(false) => return cancelled(),
+                        Ok(ToolLoopEnd::Completed) => {}
+                        Ok(ToolLoopEnd::Cancelled) => return cancelled(),
                         Err(failure) => return failed(failure),
                     }
                 }

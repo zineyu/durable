@@ -542,3 +542,34 @@ async fn compaction_resets_the_step_count() {
         "压缩后的重试不占步数"
     );
 }
+/// 规格 A-10：取消以 cancelled 结束 run。
+///
+/// 压缩期间取消不是上下文超限：run 以 cancelled 结束，摘要不入树。
+#[tokio::test]
+async fn cancelling_during_compaction_ends_the_run_as_cancelled() {
+    let config = agent::EngineConfig {
+        context_char_limit: 300,
+        ..agent::EngineConfig::default()
+    };
+    let harness =
+        Harness::start_with(config, vec![Script::Text("答".repeat(200)), Script::Hang]).await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "第一问").await;
+    harness.wait_idle(&session.id).await;
+    harness.submit_message(&session.id, "第二问").await;
+    harness.wait_for_requests(2).await;
+
+    let response = harness.cancel_run(&session.id).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let tree = harness.wait_idle(&session.id).await;
+
+    assert_eq!(tree.runs[1].status, agent::RunStatus::Cancelled);
+    assert_eq!(tree.runs[1].failure, None, "取消不记上下文超限");
+    assert!(
+        tree.nodes
+            .iter()
+            .all(|node| node.role != agent::MessageRole::Compaction),
+        "取消时不写压缩消息"
+    );
+}

@@ -31,35 +31,47 @@ impl CompactionBudget {
     }
 }
 
+/// 压缩的结束方式。
+///
+/// 取消单独成一支：压缩期间取消不是上下文超限，run 应当以 `cancelled` 结束。
+pub(super) enum CompactionEnd {
+    /// 摘要已入树，可以重试本步。
+    Compacted,
+    /// 压缩途中被取消。
+    Cancelled,
+    /// 压缩失败，run 按这个失败结束。
+    Failed(RunFailure),
+}
+
 impl RunEngine {
     /// 压缩当前 transcript：用一段摘要替代历史前缀，并把摘要作为新消息入树。
     ///
-    /// 失败时不写入任何东西，返回上下文超限的失败，由调用方结束 run。
+    /// 失败时不写入任何东西。取消时同样不写入，但与失败分开报告。
     pub(super) async fn compact(
         &self,
         session: &SessionId,
         transcript: &[MessageNode],
         cancellation: &Cancellation,
-    ) -> Result<(), RunFailure> {
+    ) -> CompactionEnd {
         let messages = prompt::compaction_messages(transcript);
         let mut stream = match self.open_stream(session, &messages, cancellation).await {
             StreamOpen::Opened(stream) => stream,
-            StreamOpen::Cancelled => return Err(context_limit("压缩被取消，摘要没有生成")),
+            StreamOpen::Cancelled => return CompactionEnd::Cancelled,
             StreamOpen::Failed(error) => {
-                return Err(context_limit(&format!("压缩请求失败: {error}")));
+                return CompactionEnd::Failed(context_limit(&format!("压缩请求失败: {error}")));
             }
         };
         let mut summary = String::new();
         loop {
             let next = tokio::select! {
                 biased;
-                () = cancellation.cancelled() => return Err(context_limit("压缩被取消，摘要没有生成")),
+                () = cancellation.cancelled() => return CompactionEnd::Cancelled,
                 item = StreamExt::next(&mut stream) => item,
             };
             match next {
                 None => break,
                 Some(Err(error)) => {
-                    return Err(context_limit(&format!("压缩流失败: {error}")));
+                    return CompactionEnd::Failed(context_limit(&format!("压缩流失败: {error}")));
                 }
                 Some(Ok(ChatChunk::Text(delta))) => summary.push_str(&delta),
                 Some(Ok(ChatChunk::Reasoning(_) | ChatChunk::ToolCall { .. })) => {}
@@ -67,18 +79,20 @@ impl RunEngine {
         }
         let summary = summary.trim();
         if summary.is_empty() {
-            return Err(context_limit("压缩没有产生摘要"));
+            return CompactionEnd::Failed(context_limit("压缩没有产生摘要"));
         }
-        let id = self
+        let id = match self.store.mint_message_id().await {
+            Ok(id) => id,
+            Err(error) => return CompactionEnd::Failed(storage_failure(&error)),
+        };
+        if let Err(error) = self
             .store
-            .mint_message_id()
-            .await
-            .map_err(|error| storage_failure(&error))?;
-        self.store
             .append_compaction(session, id, vec![ContentPart::text(summary)])
             .await
-            .map_err(|error| storage_failure(&error))?;
-        Ok(())
+        {
+            return CompactionEnd::Failed(storage_failure(&error));
+        }
+        CompactionEnd::Compacted
     }
 }
 
