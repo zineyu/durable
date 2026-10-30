@@ -17,6 +17,8 @@ import {
   sessionView,
   workspaceSummaries,
 } from './derived';
+import { cacheOf } from './body-cache.fixture';
+import { begin } from './body-cache';
 import { toQueueItemId, toSessionId } from './ids';
 import { emptyClientState } from './state';
 import type { ClientState, SessionTreeState } from './state';
@@ -267,7 +269,7 @@ describe('session 派生视图', () => {
     const loaded = viewOf(
       state({
         trees: { 's-1': tree(nodes, 3) },
-        bodies: {
+        bodies: cacheOf({
           3: [
             {
               kind: 'tool_result',
@@ -276,7 +278,7 @@ describe('session 派生视图', () => {
               providerMeta: null,
             },
           ],
-        },
+        }),
       }),
     );
     expect(loaded.toolResults).toEqual({ call_1: { status: 'unknown' } });
@@ -285,7 +287,7 @@ describe('session 派生视图', () => {
   it('正文未到时 parts 为空，已拉到的正文原样给出', () => {
     const nodes = [message(1, null, 'user'), message(2, 1, 'assistant')];
     const view = viewOf(
-      state({ trees: { 's-1': tree(nodes, 2) }, bodies: { 2: text('回答') } }),
+      state({ trees: { 's-1': tree(nodes, 2) }, bodies: cacheOf({ 2: text('回答') }) }),
     );
 
     expect(entryOf(view, 1).parts).toBeNull();
@@ -379,7 +381,7 @@ describe('session 派生视图', () => {
     const view = viewOf(
       state({
         trees: { 's-1': tree(nodes, 3) },
-        bodies: { 1: text('第一条'), 2: text('回答'), 3: text('   ') },
+        bodies: cacheOf({ 1: text('第一条'), 2: text('回答'), 3: text('   ') }),
       }),
     );
 
@@ -403,7 +405,7 @@ describe('session 派生视图', () => {
             queue: [{ id: 7, text: '排队', anchor: null, createdAt: 7, pendingSteer: false }],
           }),
         },
-        bodies: {
+        bodies: cacheOf({
           1: text('先做迁移。'),
           5: text('迁移已完成。'),
           3: [
@@ -414,7 +416,7 @@ describe('session 派生视图', () => {
               providerMeta: null,
             },
           ],
-        },
+        }),
         placeholders: { 's-1': [{ id: 9, parts: text('新回答') }] },
       }),
     );
@@ -439,9 +441,7 @@ describe('缺失正文', () => {
     const nodes = [message(1, null, 'user'), message(2, 1, 'tool'), message(3, 1, 'user')];
     const value = state({
       trees: { 's-1': tree(nodes, 3) },
-      bodies: { 1: [] },
-      bodyRequests: [2],
-      bodyFailures: [],
+      bodies: begin(cacheOf({ 1: [] }), [2]),
     });
 
     expect(missingBodyIds(value, 's-1')).toEqual([3]);

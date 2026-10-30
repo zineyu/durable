@@ -4,6 +4,7 @@ import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { ToolResultState } from '../api/generated/ToolResultState';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { bodyText } from './content';
+import { cachedParts, needs } from './body-cache';
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
 import { retryNote, runFailureLabel, sessionStateOf } from './labels';
 import type { ClientState, SessionTreeState } from './state';
@@ -24,7 +25,7 @@ import type {
 /// 本模块负责由唯一一份客户端状态推导呈现所需的视图：session 摘要、完整 session 视图、
 /// workspace 分组、运行中列表、命令面板 session 列表与缺失正文 id。
 /// 它是状态的唯一常规读取者：其它模块不得为呈现目的读取状态字段。
-/// 不属于它的：事实归约在 `state.ts` 与 `reducer.ts`，块正文缓存的状态机在 `bodies.ts`，
+/// 不属于它的：事实归约在 `state.ts` 与 `reducer.ts`，正文缓存的阶段与尝试次数在 `body-cache.ts`，
 /// 组件渲染在 `components/`。
 
 export function sessionSummaries(state: ClientState): SessionSummary[] {
@@ -125,14 +126,10 @@ export function missingBodyIds(state: ClientState, sessionId: string): number[] 
   if (tree === undefined) {
     return [];
   }
-  return chainOf(tree)
-    .map((message) => message.id)
-    .filter(
-      (id) =>
-        state.bodies[id] === undefined &&
-        !state.bodyRequests.includes(id) &&
-        !state.bodyFailures.includes(id),
-    );
+  return needs(
+    state.bodies,
+    chainOf(tree).map((message) => message.id),
+  );
 }
 
 /// 输入框回溯用的用户消息正文，按链上顺序。正文未加载或为空的消息不计入。
@@ -219,7 +216,7 @@ function transcriptEntries(state: ClientState, sessionId: string): TranscriptEnt
       const display = messageDisplay(tree.runs, state.retries[sessionId], message);
       return {
         message,
-        parts: state.bodies[message.id] ?? null,
+        parts: cachedParts(state.bodies, message.id),
         state: display.state,
         note: display.note,
         branch: branchAt(siblings, message),
@@ -318,7 +315,7 @@ function toolResultsOf(state: ClientState, sessionId: string): Record<string, To
     if (node.role !== 'tool') {
       continue;
     }
-    for (const part of state.bodies[node.id] ?? []) {
+    for (const part of cachedParts(state.bodies, node.id) ?? []) {
       if (part.kind === 'tool_result') {
         results[part.callId] = part.state;
       }

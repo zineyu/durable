@@ -12,6 +12,7 @@ import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { toSessionId } from './ids';
+import { cachedParts, needs } from './body-cache';
 import { missingBodyIds, sessionView } from './derived';
 import { loadSessionTree, snapshotCursor } from './state';
 import type { ClientState } from './state';
@@ -147,7 +148,7 @@ function delta(
 }
 
 function bodyOf(state: ClientState, messageId: number): ContentPart[] | null {
-  return state.bodies[messageId] ?? null;
+  return cachedParts(state.bodies, messageId);
 }
 
 function placeholdersOf(state: ClientState, sessionId: string): MessagePlaceholder[] {
@@ -370,8 +371,8 @@ describe('正文缓存', () => {
 
     expect(bodyOf(loadedBodies, 1)).toEqual(text('问'));
     expect(bodyOf(loadedBodies, 2)).toEqual([]);
-    expect(bodyOf(loadedBodies, 3)).toBeNull();
-    expect(loadedBodies.bodyRequests).toEqual([]);
+    expect(cachedParts(loadedBodies.bodies, 3)).toBeNull();
+    expect(needs(loadedBodies.bodies, [1, 2])).toEqual([]);
   });
 
   it('message_updated 使该消息的正文失效，其它消息不变', () => {
@@ -487,8 +488,7 @@ describe('正文缓存', () => {
     const deleted = streamed(state, fact(8, { kind: 'session_deleted', sessionId: 's-1' }));
 
     expect(bodyOf(deleted, 1)).toBeNull();
-    expect(deleted.bodyRequests).toEqual([]);
-    expect(deleted.bodyFailures).toEqual([]);
+    expect(needs(deleted.bodies, [1])).toEqual([1]);
   });
 });
 

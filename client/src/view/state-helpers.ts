@@ -2,7 +2,7 @@ import type { HostSnapshot } from '../api/generated/HostSnapshot';
 import type { HostMetadata } from '../api/generated/HostMetadata';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
-import { forgetBodies } from './bodies';
+import { forget } from './body-cache';
 import type { ClientState } from './state';
 import type { RetryState } from './types';
 
@@ -10,7 +10,7 @@ import type { RetryState } from './types';
 /// 事实归约本身在 `state`，派生在 `derived`。
 
 export function removeSession(state: ClientState, sessionId: string): ClientState {
-  const removed = forgetBodies(state, messageIds(state, sessionId));
+  const removed = { ...state, bodies: forget(state.bodies, messageIds(state, sessionId)) };
   return {
     ...removed,
     sessions: removed.sessions.filter((session) => session.id !== sessionId),

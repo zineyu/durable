@@ -1,5 +1,4 @@
 import type { BootstrapResponse } from '../api/generated/BootstrapResponse';
-import type { ContentPart } from '../api/generated/ContentPart';
 import type { FactEvent } from '../api/generated/FactEvent';
 import type { HostSnapshot } from '../api/generated/HostSnapshot';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
@@ -8,7 +7,9 @@ import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
-import { dropFinished, dropPlaceholder, invalidateBody } from './bodies';
+import { emptyBodyCache, invalidate, reload } from './body-cache';
+import type { BodyCache } from './body-cache';
+import { dropFinished, dropPlaceholder } from './placeholders';
 import {
   removeSession,
   removeWorkspace,
@@ -25,7 +26,7 @@ import type {
 } from './types';
 
 /// 本模块负责客户端唯一一份状态与事实归约：host 表、workspace、session、树、正文缓存与游标。
-/// 动作分派在 `reducer`，派生视图在 `derived`，正文缓存的状态迁移在 `bodies`。
+/// 动作分派在 `reducer`，派生视图在 `derived`，正文缓存的转移在 `body-cache`，未定型占位在 `placeholders`。
 
 /// 一条事实事件的信封：事件 id、事实提交后的 session 视图与事实本体。
 export type FactEnvelope = {
@@ -50,12 +51,8 @@ export type ClientState = {
   trees: Record<string, SessionTreeState>;
   /// 按 session 记录的重试等待；仅实时，随进度清除。
   retries: Record<string, RetryState>;
-  /// 按消息 id 缓存的块正文。分支切换会复用同一条消息，因此不能按位置缓存。
-  bodies: Record<number, ContentPart[]>;
-  /// 已发出、尚未收到响应的正文请求。
-  bodyRequests: number[];
-  /// 请求失败的消息 id。快照重载或该消息更新后清除，避免反复重试。
-  bodyFailures: number[];
+  /// 正文缓存：块正文、拉取阶段与尝试次数。分支切换会复用同一条消息，因此不能按位置缓存。
+  bodies: BodyCache;
   /// 按 session 记录的未定型占位，渲染在 transcript 末尾。
   placeholders: Record<string, MessagePlaceholder[]>;
   /// 按 session 记录的最近查看时间。首次见到 session 时取当时的更新时间。
@@ -75,9 +72,7 @@ export const emptyClientState: ClientState = {
   sessions: [],
   trees: {},
   retries: {},
-  bodies: {},
-  bodyRequests: [],
-  bodyFailures: [],
+  bodies: emptyBodyCache,
   placeholders: {},
   lastSeenAt: {},
   lastEventId: null,
@@ -168,7 +163,7 @@ export function applyFactEvent(state: ClientState, fact: FactEnvelope): ClientSt
         nodes: upsertMessage(tree.nodes, event.message),
       }));
       return dropPlaceholder(
-        invalidateBody(updated, event.message.id),
+        { ...updated, bodies: invalidate(updated.bodies, event.message.id) },
         session.id,
         event.message.id,
       );
@@ -260,8 +255,7 @@ export function loadSessionTree(state: ClientState, tree: SessionTreeSnapshot): 
       ...state.trees,
       [tree.session.id]: treeState(tree),
     },
-    bodyRequests: [],
-    bodyFailures: [],
+    bodies: reload(state.bodies, tree.nodes.map((node) => node.id)),
     placeholders: { ...state.placeholders, [tree.session.id]: [] },
   });
   return clearRetry(loaded, tree.session.id);

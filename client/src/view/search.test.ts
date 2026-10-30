@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
+import { cacheOf } from './body-cache.fixture';
 import { sessionView } from './derived';
 import { stepHit, searchTranscript } from './search';
 import { emptyClientState } from './state';
@@ -40,7 +41,7 @@ function state(bodies: Record<number, ContentPart[]>): ClientState {
         runs: [],
       },
     },
-    bodies,
+    bodies: cacheOf(bodies),
   };
 }
 

@@ -3,13 +3,8 @@ import type { MessageBody } from '../api/generated/MessageBody';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
 import type { StreamEvent } from '../api/generated/StreamEvent';
-import {
-  applyDelta,
-  applyMessageBodies,
-  failMessageBodies,
-  requestMessageBodies,
-  retryMessageBodies,
-} from './bodies';
+import { arrive, begin, fail, retry } from './body-cache';
+import { applyDelta } from './placeholders';
 import {
   applyFact,
   applyRetry,
@@ -54,13 +49,13 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
     case 'session':
       return storeSession(state, action.session);
     case 'bodies-request':
-      return requestMessageBodies(state, action.ids);
+      return { ...state, bodies: begin(state.bodies, action.ids) };
     case 'bodies-failed':
-      return failMessageBodies(state, action.ids);
+      return { ...state, bodies: fail(state.bodies, action.ids) };
     case 'bodies-retry':
-      return retryMessageBodies(state, action.ids);
+      return { ...state, bodies: retry(state.bodies, action.ids) };
     case 'bodies':
-      return applyMessageBodies(state, action.ids, action.messages);
+      return { ...state, bodies: arrive(state.bodies, action.ids, action.messages) };
     case 'seen':
       return markSeen(state, action.sessionId, action.at);
     case 'connection':
