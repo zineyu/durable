@@ -378,11 +378,7 @@ async fn register_workspace(
 }
 
 async fn unavailable(state: &AgentState, host: &HostName, status: HostStatus) -> ApiError {
-    let detail = state
-        .hosts()
-        .detail(host)
-        .await
-        .unwrap_or_else(|| format!("host {host} 当前不可用"));
+    let detail = state.hosts().unavailable_detail(host).await;
     tracing::debug!(host = %host, ?status, "host 不可用");
     ApiError::host_unavailable(detail)
 }

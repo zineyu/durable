@@ -4,7 +4,7 @@
 //!
 //! 规格 user story R-35：同一 host 上的多个 session 共用一条 link，请求按 id 配对。
 //! 断链时的退出码与标准错误尾部记在 [`LinkClosed`]；host 的 `ok`/`unreachable`/`incompatible`
-//! 三态由 `crate::hosts` 按这些数据装配，本模块只分类、不宣布状态。
+//! 三态由 `crate::hosts::lifecycle` 按这些数据装配，本模块只分类、不宣布状态。
 //!
 //! link 上有两种请求：工具执行与 workspace 校验。两者都是一帧请求、一帧结果，
 //! 答复种类与请求操作一一对应。
@@ -218,6 +218,21 @@ impl LinkHandle {
             next_request: AtomicU64::new(1),
             pid,
         })
+    }
+
+    /// 没有子进程的 link，只给不碰 IO 的单测用。请求与心跳在这里发不出去。
+    #[cfg(test)]
+    pub(crate) fn detached() -> Self {
+        let (writer, frames) = mpsc::channel::<Frame>(1);
+        drop(frames);
+        Self {
+            terminate: None,
+            writer,
+            state: Arc::new(LinkState::default()),
+            pings: Arc::default(),
+            next_request: AtomicU64::new(1),
+            pid: None,
+        }
     }
 
     /// executor 子进程的 pid。测试与日志用来定位这条 link 的进程。

@@ -1,21 +1,21 @@
 //! host 的连接：两种传输的后台任务、退避重试，以及 ssh 侧的探测与安装。
-//! 状态事实与心跳在父模块；远端脚本与载荷在 `crate::link::ssh`。
+//! 状态迁移、link 与代号在 `super::lifecycle`；远端脚本与载荷在 `crate::link::ssh`。
 //!
 //! 一个 host 只有一条 link、一个后台任务。用户动作（重连、更改目标、停用、删除）
 //! 通过丢弃 [`watch::Sender`] 让任务在 [`cancelled`] 上醒来，退避因此不会拖慢手动重连。
+//!
+//! 本模块只报告一次尝试的结果：建成 link、尝试失败、link 断开。状态由 lifecycle 决定。
 
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use durable::{HostKind, HostMetadata, HostName, HostStatus};
+use durable::{HostKind, HostMetadata, HostName};
 use tokio::sync::watch;
 
 use super::HostRegistry;
+use super::lifecycle::{Attempt, HostEvent, HostFailure};
 use crate::link::ssh::{self, SetupFailure};
 use crate::link::{BUILD_ID, LinkHandle, Transport};
-
-/// host 注册后、第一条 link 建立前的状态说明。
-const CONNECTING_DETAIL: &str = "正在连接";
 
 /// 断链后重连的退避起点。每次失败翻倍，封顶 [`RETRY_CAP`]。
 const RETRY_BASE: Duration = Duration::from_secs(1);
@@ -24,29 +24,30 @@ const RETRY_BASE: Duration = Duration::from_secs(1);
 const RETRY_CAP: Duration = Duration::from_secs(30);
 
 impl HostRegistry {
-    /// 建立 link：先回到「正在连接」，把连接与退避重试交给后台任务。
+    /// 建立 link：让 lifecycle 签一个新代号并进入「正在连接」，把连接与退避交给后台任务。
     ///
     /// 丢掉的旧任务在 [`cancelled`] 上醒来立即退出，手动重连因此立即生效（退避从头算）。
     pub(super) async fn start_link(self: &Arc<Self>, host: &HostMetadata) {
-        self.clear_link(&host.name).await;
-        let cancel = self.fresh_cancel(&host.name).await;
-        if host.kind == HostKind::Ssh {
-            // 远端要探测与安装，先给出「正在连接」；本机建链是本地动作，不写这条过渡状态。
-            self.set_status(
-                &host.name,
-                HostStatus::Unreachable,
-                Some(CONNECTING_DETAIL.to_owned()),
-            )
-            .await;
-        }
-        tokio::spawn(Arc::clone(self).supervisor(host.name.clone(), cancel));
+        let Some(applied) = self.transition(&host.name, HostEvent::Connecting).await else {
+            return;
+        };
+        let Some((attempt, cancel)) = applied.attempt else {
+            return;
+        };
+        tokio::spawn(Arc::clone(self).supervisor(host.name.clone(), attempt, cancel));
     }
 
     /// host 的后台连接任务：连上就等待它断开，断开或连不上就退避后重试。
     ///
     /// 退避为 1 秒起、逐次翻倍、封顶 30 秒，并加一半以内的抖动。
-    /// 用户动作（重连、更改目标、停用、删除）会让 [`cancelled`] 醒来，任务随即退出。
-    async fn supervisor(self: Arc<Self>, name: HostName, mut cancel: watch::Receiver<()>) {
+    /// 用户动作（重连、更改目标、停用、删除）会让 [`cancelled`] 醒来，任务随即退出；
+    /// 代号被 lifecycle 作废时，任务报告的事件不被采纳，任务同样退出。
+    async fn supervisor(
+        self: Arc<Self>,
+        name: HostName,
+        attempt: Attempt,
+        mut cancel: watch::Receiver<()>,
+    ) {
         let mut backoff = RETRY_BASE;
         loop {
             let Some(host) = self.host_row(&name).await else {
@@ -61,18 +62,29 @@ impl HostRegistry {
             };
             match opened {
                 Ok(link) => {
-                    let generation = self.replace_link(&name, Some(Arc::clone(&link))).await;
-                    self.set_status(&name, HostStatus::Ok, None).await;
+                    let opened = self
+                        .transition(&name, HostEvent::Opened(attempt, Arc::clone(&link)))
+                        .await;
+                    match opened {
+                        Some(applied) if applied.accepted => {}
+                        Some(_) | None => return,
+                    }
                     let close = tokio::select! {
                         close = link.wait_closed() => close,
                         () = cancelled(&mut cancel) => return,
                     };
                     drop(link);
-                    self.link_closed(&name, generation, close).await;
+                    self.transition(&name, HostEvent::Close(attempt, close))
+                        .await;
                 }
-                Err((status, detail)) => {
-                    self.replace_link(&name, None).await;
-                    self.set_status(&name, status, Some(detail)).await;
+                Err(failure) => {
+                    let failed = self
+                        .transition(&name, HostEvent::AttemptFailed(attempt, failure))
+                        .await;
+                    match failed {
+                        Some(applied) if applied.accepted => {}
+                        Some(_) | None => return,
+                    }
                 }
             }
             let delay = jitter(backoff);
@@ -90,7 +102,7 @@ impl HostRegistry {
     }
 
     /// 本机 link：直接拉起 executor 子进程。
-    fn open_local(&self, host: &HostMetadata) -> Result<Arc<LinkHandle>, (HostStatus, String)> {
+    fn open_local(&self, host: &HostMetadata) -> Result<Arc<LinkHandle>, HostFailure> {
         LinkHandle::spawn(
             &Transport::Local {
                 executor: self.executor.clone(),
@@ -99,18 +111,13 @@ impl HostRegistry {
             &host.name,
         )
         .map(Arc::new)
-        .map_err(|error| {
-            (
-                HostStatus::Unreachable,
-                format!("启动 executor 失败: {error}"),
-            )
-        })
+        .map_err(|error| HostFailure::Unreachable(format!("启动 executor 失败: {error}")))
     }
 
     /// 建立一条 ssh link：必要时探测平台并安装 executor，然后拉起 `ssh` 子进程。
-    async fn open_ssh(&self, host: &HostMetadata) -> Result<Arc<LinkHandle>, (HostStatus, String)> {
+    async fn open_ssh(&self, host: &HostMetadata) -> Result<Arc<LinkHandle>, HostFailure> {
         let Some(target) = host.target.as_deref() else {
-            return Err((HostStatus::Incompatible, "ssh host 缺少目标".to_owned()));
+            return Err(HostFailure::Incompatible("ssh host 缺少目标".to_owned()));
         };
         let installed = match self.store.host_installed_build(&host.name).await {
             Ok(build) => build,
@@ -121,7 +128,7 @@ impl HostRegistry {
         };
         let installed_now = ssh::prepare(target, installed.as_deref(), &self.executor)
             .await
-            .map_err(status_of)?;
+            .map_err(failure_of)?;
         if installed_now {
             tracing::info!(host = %host.name, build = BUILD_ID, "已安装 executor");
             if let Err(error) = self
@@ -140,7 +147,7 @@ impl HostRegistry {
             &host.name,
         )
         .map(Arc::new)
-        .map_err(|error| (HostStatus::Unreachable, format!("启动 ssh 失败: {error}")))
+        .map_err(|error| HostFailure::Unreachable(format!("启动 ssh 失败: {error}")))
     }
 
     /// 读 host 行。读不到（已删除或数据库错误）时不重试。
@@ -155,11 +162,11 @@ impl HostRegistry {
     }
 }
 
-/// ssh 准备失败 → host 状态与说明。
-fn status_of(failure: SetupFailure) -> (HostStatus, String) {
+/// ssh 准备失败 → 这次尝试失败的原因。
+fn failure_of(failure: SetupFailure) -> HostFailure {
     match failure {
-        SetupFailure::Incompatible(detail) => (HostStatus::Incompatible, detail),
-        SetupFailure::Unreachable(detail) => (HostStatus::Unreachable, detail),
+        SetupFailure::Incompatible(detail) => HostFailure::Incompatible(detail),
+        SetupFailure::Unreachable(detail) => HostFailure::Unreachable(detail),
     }
 }
 

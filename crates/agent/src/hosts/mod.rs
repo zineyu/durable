@@ -1,12 +1,14 @@
 //! host 的运行状态：每个 host 一条 link、状态、说明与心跳延迟。
-//! host 表与事实在 `durable` 的 `store/host`；link 的帧与关闭状态在 `link`；
-//! ssh 的探测与安装在 `link::ssh`；ssh 的后台连接与退避在 `ssh`；对外快照 DTO 在 `protocol`。
+//! 一台 host 的状态迁移、link 与代号在 `lifecycle`；host 表与事实在 `durable` 的 `store/host`；
+//! link 的帧与关闭状态在 `link`；ssh 的探测与安装在 `link::ssh`；连接任务与退避在 `connect`；
+//! 对外快照 DTO 在 `protocol`。ADR 0050 记录这条边界。
 //!
 //! 规格 user story R-8、R-11、R-12、R-14、R-15、R-16、R-17、R-18、R-35、R-46：
 //! 本机 host 启动即自动注册，状态三态显式可见，ssh host 首次连接时自动安装 executor，
 //! 断链后按退避重连，同一 host 上的多个 session 共用一条 link。
 
 mod connect;
+mod lifecycle;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,10 +20,12 @@ use durable::link::WorkspaceCheckError;
 use durable::{
     HostKind, HostMetadata, HostName, HostStatus, HostUpdate, Store, StoreError, ToolLimits,
 };
-use tokio::sync::{Mutex, watch};
+use tokio::sync::Mutex;
 
-use crate::link::{LinkClosed, LinkHandle};
+use crate::link::LinkHandle;
 use crate::protocol::HostSnapshot;
+
+use lifecycle::{Applied, Attempt, HostEvent, HostLifecycle, HostState};
 
 /// 心跳间隔。往返毫秒数写进 host 快照的延迟字段。
 pub const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
@@ -35,45 +39,18 @@ pub const STARTUP_READY_WAIT: Duration = Duration::from_secs(2);
 /// 本机 host 的固定名字。首次启动自动注册。
 pub const LOCAL_HOST: &str = "local";
 
-/// 停用 host 的状态说明。
-pub(crate) const DISABLED_DETAIL: &str = "host 已停用";
-
-/// 一个 host 的进程内状态。状态本身不落库，只经事实事件对外。
-struct HostRuntime {
-    status: HostStatus,
-    detail: Option<String>,
-    latency_ms: Option<u64>,
-    link: Option<Arc<LinkHandle>>,
-    /// 每次启动 link 递增。关闭通知带上代号，过期的通知直接丢弃。
-    generation: u64,
-    /// ssh host 的后台连接任务。丢弃它即让任务退出：重连、停用与删除都这样做。
-    cancel: Option<watch::Sender<()>>,
-}
-
-impl HostRuntime {
-    fn disconnected() -> Self {
-        Self {
-            status: HostStatus::Unreachable,
-            detail: None,
-            latency_ms: None,
-            link: None,
-            generation: 0,
-            cancel: None,
-        }
-    }
-}
-
-/// host 注册表：host 的运行状态与 link 的唯一持有者。
+/// host 注册表：host 的表项与 link 的唯一持有者。
 ///
-/// 状态迁移只有三条来源：启动或重连时的一次连接、link 关闭通知、停用与更改目标。
-/// 每次状态或说明变化都写一条 `host_status_changed` 事实；延迟不写事实。
+/// 状态迁移只有两条路径：注册表命令（重建、停用、移除）与连接任务报告的事件。
+/// 两者都经注册表的 `transition` 落到 `lifecycle` 的状态机上，
+/// 它是 `host_status_changed` 事实的唯一写点；延迟不写事实。
 pub struct HostRegistry {
     store: Arc<Store>,
     executor: PathBuf,
     limits: ToolLimits,
     /// 心跳间隔。生产固定 15 秒；测试用它把一轮心跳压缩到毫秒级。
     interval: Duration,
-    hosts: Mutex<HashMap<HostName, HostRuntime>>,
+    hosts: Mutex<HashMap<HostName, HostLifecycle>>,
     sequence: AtomicU64,
 }
 
@@ -230,7 +207,9 @@ impl HostRegistry {
             .lock()
             .await
             .get(name)
-            .map_or(HostStatus::Unreachable, |runtime| runtime.status)
+            .map_or(HostStatus::Unreachable, |lifecycle| {
+                lifecycle.state().status()
+            })
     }
 
     /// 等待 host 变成 `ok`，最多等待 `timeout`。启动参数里的 workspace 依赖它在登记前就绪。
@@ -245,20 +224,16 @@ impl HostRegistry {
         false
     }
 
-    /// 请求因 host 不可用而失败时的说明：优先用状态说明，没有时给通用文案。
+    /// 请求因 host 不可用而失败时的说明。说明由状态渲染，表里没有该 host 时按「尚未连接」。
     pub async fn unavailable_detail(&self, name: &HostName) -> String {
-        self.detail(name)
-            .await
-            .unwrap_or_else(|| format!("host {name} 当前不可用"))
-    }
-
-    /// host 的当前状态说明。
-    pub async fn detail(&self, name: &HostName) -> Option<String> {
-        self.hosts
-            .lock()
-            .await
-            .get(name)
-            .and_then(|runtime| runtime.detail.clone())
+        let explanation = {
+            let hosts = self.hosts.lock().await;
+            match hosts.get(name) {
+                Some(lifecycle) => lifecycle.state().explanation(),
+                None => Some(HostState::absent_explanation()),
+            }
+        };
+        explanation.unwrap_or_else(|| format!("host {name} 当前不可用"))
     }
 
     /// 让 host 校验一个绝对目录。`None` 表示这台 host 现在没有可用 link。
@@ -280,25 +255,24 @@ impl HostRegistry {
     /// 这台 host 的 link。只有 `ok` 的 host 才有能用的 link。
     pub async fn link(&self, name: &HostName) -> Option<Arc<LinkHandle>> {
         let hosts = self.hosts.lock().await;
-        let runtime = hosts.get(name)?;
-        if !runtime.status.is_ok() {
-            return None;
-        }
-        runtime.link.clone()
+        hosts.get(name)?.state().link().cloned()
     }
 
-    fn snapshot_of(host: HostMetadata, runtime: Option<&HostRuntime>) -> HostSnapshot {
-        match runtime {
-            Some(runtime) => HostSnapshot::of(
-                host,
-                runtime.status,
-                runtime.detail.clone(),
-                runtime.latency_ms,
-            ),
+    fn snapshot_of(host: HostMetadata, lifecycle: Option<&HostLifecycle>) -> HostSnapshot {
+        match lifecycle {
+            Some(lifecycle) => {
+                let state = lifecycle.state();
+                HostSnapshot::of(
+                    host,
+                    state.status(),
+                    state.explanation(),
+                    lifecycle.latency_ms(),
+                )
+            }
             None => HostSnapshot::of(
                 host,
                 HostStatus::Unreachable,
-                Some("尚未连接".to_owned()),
+                Some(HostState::absent_explanation()),
                 None,
             ),
         }
@@ -346,106 +320,38 @@ impl HostRegistry {
                 return;
             }
         };
+        self.hosts
+            .lock()
+            .await
+            .entry(host.name.clone())
+            .or_insert_with(|| HostLifecycle::new(host.kind));
         if !host.enabled {
-            self.clear_link(name).await;
-            self.set_status(
-                name,
-                HostStatus::Unreachable,
-                Some(DISABLED_DETAIL.to_owned()),
-            )
-            .await;
+            self.transition(name, HostEvent::Disabled).await;
             return;
         }
         self.start_link(&host).await;
     }
 
-    /// 为 host 换一个新的取消通道并返回接收端。
+    /// 走一次状态迁移：加锁应用事件，出锁后按变化写一条事实。
     ///
-    /// 丢弃旧发送端让上一轮后台任务退出；新任务拿到的接收端只对下一轮动作生效。
-    async fn fresh_cancel(&self, name: &HostName) -> watch::Receiver<()> {
-        let mut hosts = self.hosts.lock().await;
-        let runtime = hosts
-            .entry(name.clone())
-            .or_insert_with(HostRuntime::disconnected);
-        let (sender, receiver) = watch::channel(());
-        runtime.cancel = Some(sender);
-        receiver
-    }
-
-    /// 丢掉 link 与后台任务并返回新的代号。停用、重建连接与重连都先走这里。
-    ///
-    /// 丢弃后台任务的取消通道让它醒来；旧 link 在这里被丢弃，
-    /// 它的标准输入随之关闭。
-    async fn clear_link(&self, name: &HostName) -> u64 {
-        let mut hosts = self.hosts.lock().await;
-        let runtime = hosts
-            .entry(name.clone())
-            .or_insert_with(HostRuntime::disconnected);
-        runtime.generation += 1;
-        runtime.link = None;
-        runtime.latency_ms = None;
-        runtime.cancel = None;
-        runtime.generation
-    }
-
-    /// 换掉 link 并返回新的代号。旧 link 在这里被丢弃，它的标准输入随之关闭。
-    async fn replace_link(&self, name: &HostName, link: Option<Arc<LinkHandle>>) -> u64 {
-        let mut hosts = self.hosts.lock().await;
-        let runtime = hosts
-            .entry(name.clone())
-            .or_insert_with(HostRuntime::disconnected);
-        runtime.generation += 1;
-        runtime.link = link;
-        runtime.latency_ms = None;
-        runtime.generation
-    }
-
-    /// link 关闭：按退出码判定 `unreachable` 或 `incompatible`。
-    async fn link_closed(&self, name: &HostName, generation: u64, close: LinkClosed) {
-        {
+    /// 表项不在时返回 `None`，事件被丢弃：host 被移除后到达的打开与关闭通知
+    /// 不会复活一个表项。
+    pub(super) async fn transition(&self, name: &HostName, event: HostEvent) -> Option<Applied> {
+        let applied = {
             let mut hosts = self.hosts.lock().await;
-            let Some(runtime) = hosts.get_mut(name) else {
-                return;
-            };
-            if runtime.generation != generation {
-                tracing::debug!(host = %name, "关闭通知来自已被替换的 link");
-                return;
-            }
-            runtime.link = None;
-        }
-        let (status, detail) = if close.protocol_mismatch() {
-            (
-                HostStatus::Incompatible,
-                format!("帧协议版本不符（{}）", close.detail()),
-            )
-        } else {
-            (HostStatus::Unreachable, close.detail())
+            hosts.get_mut(name)?.apply(event)
         };
-        tracing::info!(host = %name, ?status, "host 状态变化");
-        self.set_status(name, status, Some(detail)).await;
-    }
-
-    /// 写状态并在变化时留下一条事实。延迟不进这个函数。
-    async fn set_status(&self, name: &HostName, status: HostStatus, detail: Option<String>) {
-        let changed = {
-            let mut hosts = self.hosts.lock().await;
-            let Some(runtime) = hosts.get_mut(name) else {
-                return;
-            };
-            if runtime.status == status && runtime.detail == detail {
-                false
-            } else {
-                runtime.status = status;
-                runtime.detail.clone_from(&detail);
-                true
+        if let Some(state) = applied.changed.as_ref() {
+            tracing::info!(host = %name, status = ?state.status(), "host 状态变化");
+            if let Err(error) = self
+                .store
+                .announce_host_status(name, state.status(), state.explanation())
+                .await
+            {
+                tracing::warn!(host = %name, error = %error, "写入 host 状态事实失败");
             }
-        };
-        if !changed {
-            return;
         }
-        if let Err(error) = self.store.announce_host_status(name, status, detail).await {
-            tracing::warn!(host = %name, error = %error, "写入 host 状态事实失败");
-        }
+        Some(applied)
     }
 
     fn spawn_heartbeat(self: &Arc<Self>) {
@@ -462,20 +368,19 @@ impl HostRegistry {
 
     /// 一轮心跳：只对 `ok` 且空闲的 link 发，往返毫秒数写进延迟。
     async fn heartbeat(&self) {
-        let targets: Vec<(HostName, Arc<LinkHandle>, u64)> = {
+        let targets: Vec<(HostName, Arc<LinkHandle>, Attempt)> = {
             let hosts = self.hosts.lock().await;
             hosts
                 .iter()
-                .filter(|(_, runtime)| runtime.status.is_ok())
-                .filter_map(|(name, runtime)| {
-                    runtime
-                        .link
-                        .as_ref()
-                        .map(|link| (name.clone(), Arc::clone(link), runtime.generation))
+                .filter_map(|(name, lifecycle)| {
+                    lifecycle
+                        .state()
+                        .link()
+                        .map(|link| (name.clone(), Arc::clone(link), lifecycle.attempt()))
                 })
                 .collect()
         };
-        for (name, link, generation) in targets {
+        for (name, link, attempt) in targets {
             if !link.is_idle().await {
                 continue;
             }
@@ -484,10 +389,8 @@ impl HostRegistry {
                 continue;
             };
             let mut hosts = self.hosts.lock().await;
-            if let Some(runtime) = hosts.get_mut(&name)
-                && runtime.generation == generation
-            {
-                runtime.latency_ms = Some(latency);
+            if let Some(lifecycle) = hosts.get_mut(&name) {
+                lifecycle.set_latency(attempt, latency);
             }
         }
     }

@@ -50,7 +50,7 @@
 | `engine/` | run 引擎：`mod.rs` 执行循环与收尾、`plan.rs` 下一步判定、`step.rs` 模型流与重试、`tools.rs` 工具循环、`prompt.rs` 请求装配、`compact.rs` 上下文压缩 |
 | `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
 | `link/` | link 的 agent 侧：`mod.rs` 按请求 id 复用帧、管子进程，`closed.rs` 是断链说明，`transport.rs` 组装本地与 SSH 两种传输，`ssh.rs` 探测远端平台并推送执行端，`tools.rs` 是 `ToolBox` 与 `RemoteTools` |
-| `hosts/` | host 注册表：host 状态、说明、心跳延迟、连接任务与退避重连；`ssh.rs` 是 ssh host 的后台连接任务 |
+| `hosts/` | host 注册表：表项、命令、快照与心跳。`lifecycle.rs` 是状态机：`HostState`、`HostEvent`、代号与 link，唯一写入口是 `apply`；`connect.rs` 只报告一次连接尝试的结果与退避重连 |
 | `assets.rs` | 编译期内嵌的 `client/dist`：MIME、SPA 回落与 `/api` 的 404 |
 | `sse.rs` | 单一全局事件流：回放、实时与 resync |
 | `protocol.rs` | 对外协议 DTO 与协议版本 |
@@ -74,7 +74,7 @@
 | 新的 LLM 工具 | `crates/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
 | link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `crates/agent/src/link/mod.rs`，传输在 `link/transport.rs`、`link/ssh.rs`，executor 侧在 `crates/executor/src/main.rs` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
-| host 表命令或 host 快照 | `crates/agent/src/hosts/`，路由在 `api.rs` |
+| host 表命令或 host 快照 | `crates/agent/src/hosts/mod.rs`，路由在 `api.rs`；状态与说明的迁移在 `hosts/lifecycle.rs` |
 | 协议类型与 TS 生成 | `crates/agent/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
 | 客户端状态推导 | 事实归约在 `client/src/view/reducer.ts` 与 `state.ts`，呈现所需的派生在 `derived.ts` |
 | 客户端写命令与对话框 | `client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
