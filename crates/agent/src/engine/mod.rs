@@ -1,11 +1,11 @@
-//! run 引擎的门面：执行循环、run 生命周期与续跑点驱动。
-//! 模型流在 `step`，工具循环在 `tools`，请求装配在 `prompt`，续跑推导在 `recover`，
+//! run 引擎的门面：执行循环、run 生命周期与 run 动作驱动。
+//! 下一步的判定在 `plan`，模型流在 `step`，工具循环在 `tools`，请求装配在 `prompt`，
 //! 上下文压缩在 `compact`，进度节流在 `progress`。
 
 mod compact;
+mod plan;
 mod progress;
 mod prompt;
-mod recover;
 mod step;
 mod tools;
 
@@ -18,7 +18,9 @@ use durable::{
 };
 use tokio::sync::{Mutex, Notify};
 
-use self::recover::ResumePoint;
+use self::compact::CompactionBudget;
+
+use self::plan::NextAction;
 use crate::config::EngineConfig;
 use crate::link::ToolBox;
 use crate::provider::ModelProvider;
@@ -250,44 +252,33 @@ impl RunEngine {
         done.notify_waiters();
     }
 
-    /// 每一步先看树尾决定动作：发请求、执行工具，或收尾。
+    /// 每一步先让 [`plan`] 判定动作：接入插话、发请求、执行工具，或收尾。
     async fn drive_run(&self, start: &RunStart, cancellation: &Cancellation) -> RunOutcome {
         let session = &start.run.session_id;
-        let mut steps: Option<usize> = None;
-        let mut compacted = false;
+        let mut compaction = CompactionBudget::new();
         loop {
             let transcript = match self.store.transcript(session).await {
                 Ok(transcript) => transcript,
                 Err(error) => return failed(storage_failure(&error)),
             };
-            let executed = *steps.get_or_insert_with(|| {
-                transcript
-                    .iter()
-                    .filter(|node| {
-                        node.role == MessageRole::Assistant && node.run_id == Some(start.run.id)
-                    })
-                    .count()
-            });
-            let resume = recover::resume_point(&transcript);
-            // 步数上限先于接入：插话留给下一次 run，不白白消耗在一次必定失败的请求上。
-            if matches!(resume, ResumePoint::Request) && executed >= self.config.max_steps {
-                return failed(RunFailure {
-                    code: RunFailureCode::StepLimitExceeded,
-                    message: format!("超过 {} 步上限", self.config.max_steps),
-                });
-            }
+            let plan = plan::next_action(&transcript, start.run.id, self.config.max_steps);
             // 步骤边界：工具执行不打断，因此只在发请求与收尾之前接入待插入插话。
-            if !matches!(resume, ResumePoint::Tools(_)) {
+            if plan.steer {
                 match self.insert_pending_steers(session, start.run.id).await {
                     Ok(true) => continue,
                     Ok(false) => {}
                     Err(error) => return failed(storage_failure(&error)),
                 }
             }
-            match resume {
-                ResumePoint::Finish => return succeeded(),
-                ResumePoint::Request => {
-                    steps = Some(executed + 1);
+            match plan.action {
+                NextAction::Finish => return succeeded(),
+                NextAction::StepLimit => {
+                    return failed(RunFailure {
+                        code: RunFailureCode::StepLimitExceeded,
+                        message: format!("超过 {} 步上限", self.config.max_steps),
+                    });
+                }
+                NextAction::Request => {
                     match self
                         .stream_step(session, start.run.id, &transcript, cancellation)
                         .await
@@ -303,8 +294,9 @@ impl RunEngine {
                         }
                         StepEnd::Cancelled => return cancelled(),
                         StepEnd::Failure(failure) => {
-                            if failure.code == RunFailureCode::ContextLimitExceeded && !compacted {
-                                compacted = true;
+                            if failure.code == RunFailureCode::ContextLimitExceeded
+                                && compaction.take()
+                            {
                                 tracing::info!(session = %session.as_str(), "上下文超限，压缩后重试本步");
                                 if let Err(failure) =
                                     self.compact(session, &transcript, cancellation).await
@@ -317,7 +309,7 @@ impl RunEngine {
                         }
                     }
                 }
-                ResumePoint::Tools(pending) => {
+                NextAction::Tools(pending) => {
                     match self.run_tool_calls(start, cancellation, pending).await {
                         Ok(true) => {}
                         Ok(false) => return cancelled(),

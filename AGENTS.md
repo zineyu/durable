@@ -47,7 +47,7 @@
 | 模块 | 职责 |
 | --- | --- |
 | `api.rs` | HTTP 路由与处理器 |
-| `engine/` | run 引擎：`mod.rs` 执行循环与收尾、`step.rs` 模型流与重试、`tools.rs` 工具循环、`prompt.rs` 请求装配、`compact.rs` 上下文压缩、`recover.rs` 续跑推导 |
+| `engine/` | run 引擎：`mod.rs` 执行循环与收尾、`plan.rs` 下一步判定、`step.rs` 模型流与重试、`tools.rs` 工具循环、`prompt.rs` 请求装配、`compact.rs` 上下文压缩 |
 | `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
 | `link/` | link 的 agent 侧：`mod.rs` 按请求 id 复用帧、管子进程，`closed.rs` 是断链说明，`transport.rs` 组装本地与 SSH 两种传输，`ssh.rs` 探测远端平台并推送执行端，`tools.rs` 是 `ToolBox` 与 `RemoteTools` |
 | `hosts/` | host 注册表：host 状态、说明、心跳延迟、连接任务与退避重连；`ssh.rs` 是 ssh host 的后台连接任务 |

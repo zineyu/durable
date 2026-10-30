@@ -1,13 +1,13 @@
 //! 工具循环：先让 tool 节点入树，再执行，再写入结局。批次中途取消时，
 //! 剩余调用以「结果未知」入树，保持 assistant 的调用与 tool 节点配对。
-//! 工具经 link 交给 executor；契约在 `crate::link`，续跑点推导在 `recover`。
+//! 工具经 link 交给 executor；契约在 `crate::link`，下一步判定在 `plan`。
 
 use durable::{
     Cancellation, MessageId, RunFailure, RunFailureCode, RunId, RunStart, SessionId, StoreError,
     ToolResultState,
 };
 
-use crate::engine::recover::PendingTool;
+use crate::engine::plan::PendingTool;
 use crate::engine::{RunEngine, storage_failure};
 use crate::link::{ToolCall, ToolContext};
 

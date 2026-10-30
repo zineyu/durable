@@ -508,3 +508,37 @@ async fn cancels_run_during_retry_wait() {
     assert_eq!(tree.runs[0].failure, None);
     assert_eq!(harness.provider.requests().len(), 1, "取消之后不再重试");
 }
+
+/// 规格：超过步数上限以显式错误结束 run。
+///
+/// 步数只数当前 transcript 里的定型 assistant 节点，链在压缩节点处截断，
+/// 因此压缩之后从零起算，压缩后的重试不占步数（ADR 0049）。
+#[tokio::test]
+async fn compaction_resets_the_step_count() {
+    let config = agent::EngineConfig {
+        context_char_limit: 300,
+        max_steps: 1,
+        ..agent::EngineConfig::default()
+    };
+    let harness = Harness::start_with(
+        config,
+        vec![
+            Script::Text("答".repeat(200)),
+            Script::Text("摘要：第一答已经压缩。".into()),
+            Script::Text("第二答".into()),
+        ],
+    )
+    .await;
+    let session = harness.session("workspace").await;
+
+    harness.submit_message(&session.id, "第一问").await;
+    harness.wait_idle(&session.id).await;
+    harness.submit_message(&session.id, "第二问").await;
+    let tree = harness.wait_idle(&session.id).await;
+
+    assert_eq!(
+        tree.runs[1].status,
+        agent::RunStatus::Succeeded,
+        "压缩后的重试不占步数"
+    );
+}
