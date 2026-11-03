@@ -4,6 +4,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# 文件名的排序决定清单里各节的顺序：强制 C 排序，任何机器与地区设置产出同一份清单。
+export LC_ALL=C
+
 generated=client/src/api/generated
 manifest=docs/api/types.md
 
