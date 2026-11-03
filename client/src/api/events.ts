@@ -1,6 +1,10 @@
-import type { ConnectionState } from '../view/types';
-import type { StreamFactEvent } from '../view/reducer';
 import type { StreamEvent } from './generated/StreamEvent';
+
+/// 连接状态。由事件流的打开、断开与关闭驱动，组件只读取它。
+export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
+
+/// 实时事件只含事实、增量与重试；resync 由事件流自身处理，不交给归约。
+export type StreamFactEvent = Exclude<StreamEvent, { type: 'resync' }>;
 
 export type EventStreamHandlers = {
   onEvent: (event: StreamFactEvent) => void;

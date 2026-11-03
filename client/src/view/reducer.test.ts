@@ -18,7 +18,7 @@ import { loadSessionTree, snapshotCursor } from './state';
 import type { ClientState } from './state';
 import type { MessagePlaceholder } from './types';
 import { initialClientState, reduce } from './reducer';
-import type { StreamFactEvent } from './reducer';
+import type { StreamFactEvent } from '../api/events';
 
 const workspaceA: WorkspaceMetadata = { host: 'local', path: '/work/a', registeredAt: 10 };
 const workspaceB: WorkspaceMetadata = { host: 'studio', path: '/work/b', registeredAt: 20 };

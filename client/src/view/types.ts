@@ -14,7 +14,7 @@ export type SessionState = 'idle' | 'queued' | 'running';
 /// 最近一次 run 的结局。取消与进行中不给出结局。
 export type SessionOutcome = 'succeeded' | 'failed';
 
-export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
+export type { ConnectionState } from '../api/events';
 
 export type StatusTone = 'idle' | 'running' | 'queued' | 'success' | 'warn' | 'danger';
 

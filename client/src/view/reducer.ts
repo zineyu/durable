@@ -2,7 +2,7 @@ import type { BootstrapResponse } from '../api/generated/BootstrapResponse';
 import type { MessageBody } from '../api/generated/MessageBody';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { SessionTreeSnapshot } from '../api/generated/SessionTreeSnapshot';
-import type { StreamEvent } from '../api/generated/StreamEvent';
+import type { StreamFactEvent } from '../api/events';
 import { arrive, begin, fail, retry } from './body-cache';
 import { applyDelta } from './placeholders';
 import {
@@ -17,9 +17,6 @@ import {
 } from './state';
 import type { ClientState } from './state';
 import type { ClientError, ConnectionState } from './types';
-
-/// 实时事件只含事实、增量与重试。`resync` 由事件流自身处理（断开并刷新快照）。
-export type StreamFactEvent = Exclude<StreamEvent, { type: 'resync' }>;
 
 export type ClientAction =
   | { type: 'bootstrap'; bootstrap: BootstrapResponse }
