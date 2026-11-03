@@ -8,6 +8,8 @@ import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import {
   hasSession,
+  hostGroups,
+  hostOrderedSessions,
   hostViewOf,
   hostViews,
   missingBodyIds,
@@ -23,7 +25,7 @@ import { begin } from './body-cache';
 import { toQueueItemId, toSessionId } from './ids';
 import { emptyClientState } from './state';
 import type { ClientState, SessionTreeState } from './state';
-import type { SessionView, TranscriptEntry } from './types';
+import type { RunningEntry, SessionView, TranscriptEntry } from './types';
 
 /// 派生层用例直接构造状态，不经过 reducer。
 
@@ -541,6 +543,39 @@ describe('跨 host 列表', () => {
         workspace: '/work/b',
         updatedAt: 30,
       },
+    ]);
+  });
+
+  it('运行中面板只合并相邻的同 host 条目', () => {
+    const entries: RunningEntry[] = [
+      { host: 'local', sessionId: toSessionId('s-1'), title: '甲', queueLength: 0, startedAt: 1 },
+      { host: 'local', sessionId: toSessionId('s-2'), title: '乙', queueLength: 2, startedAt: 2 },
+      { host: 'studio', sessionId: toSessionId('s-3'), title: '丙', queueLength: 0, startedAt: 3 },
+      { host: 'local', sessionId: toSessionId('s-4'), title: '丁', queueLength: 0, startedAt: 4 },
+    ];
+
+    expect(hostGroups(entries)).toEqual([
+      { host: 'local', entries: [entries[0], entries[1]] },
+      { host: 'studio', entries: [entries[2]] },
+      { host: 'local', entries: [entries[3]] },
+    ]);
+  });
+
+  it('命令面板的 session 顺序沿用 host 表，组内最近更新的在前', () => {
+    const value = state({
+      sessions: [
+        session('s-1', '/work/a', 20),
+        session('s-2', '/work/b', 30),
+        session('s-3', '/work/a', 40),
+      ],
+    });
+
+    const ordered = hostOrderedSessions(paletteSessions(value), hostViews(value));
+
+    expect(ordered.map((item) => item.sessionId)).toEqual([
+      toSessionId('s-3'),
+      toSessionId('s-1'),
+      toSessionId('s-2'),
     ]);
   });
 });

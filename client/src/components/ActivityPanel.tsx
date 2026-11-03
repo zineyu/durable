@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import { StatusDot } from './StatusDot';
 import styles from './ActivityPanel.module.css';
+import { hostGroups } from '../view/derived';
 import type { RunningEntry } from '../view/types';
 import type { SessionId } from '../view/ids';
 
@@ -22,7 +23,7 @@ export function ActivityPanel({ entries, onSelect, onCancel }: ActivityPanelProp
       {entries.length === 0 ? (
         <p className={styles.empty}>没有正在运行的 run</p>
       ) : (
-        groups(entries).map((group) => (
+        hostGroups(entries).map((group) => (
           <div key={group.host} className={styles.group}>
             <p className={styles.host}>{group.host}</p>
             <ul className={styles.list}>
@@ -55,17 +56,4 @@ export function ActivityPanel({ entries, onSelect, onCancel }: ActivityPanelProp
       )}
     </section>
   );
-}
-
-function groups(entries: RunningEntry[]): { host: string; entries: RunningEntry[] }[] {
-  const grouped: { host: string; entries: RunningEntry[] }[] = [];
-  for (const entry of entries) {
-    const group = grouped.at(-1);
-    if (group?.host === entry.host) {
-      group.entries.push(entry);
-    } else {
-      grouped.push({ host: entry.host, entries: [entry] });
-    }
-  }
-  return grouped;
 }

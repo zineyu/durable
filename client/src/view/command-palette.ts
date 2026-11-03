@@ -1,4 +1,5 @@
 import type { HostName } from '../api/generated/HostName';
+import { hostOrderedSessions } from './derived';
 import type { HostView, PaletteSession, SessionSummary } from './types';
 import type { SessionId } from './ids';
 
@@ -66,24 +67,16 @@ export function stepPaletteIndex(current: number, delta: number, total: number):
   return (current + delta + total) % total;
 }
 
-/// session 按 host 分组：host 顺序沿用 host 表，组内最近更新的在前。
+/// session 条目。先后顺序由派生层给出。
 function sessionsOf(input: PaletteInput): PaletteEntry[] {
-  const order = new Map(input.hosts.map((host, index) => [host.name, index]));
-  return [...input.sessions]
-    .sort(
-      (left, right) =>
-        (order.get(left.host) ?? Number.MAX_SAFE_INTEGER) -
-          (order.get(right.host) ?? Number.MAX_SAFE_INTEGER) ||
-        right.updatedAt - left.updatedAt,
-    )
-    .map((session) => ({
-      id: `session:${session.host}:${session.sessionId}`,
-      group: 'session' as const,
-      heading: session.host,
-      label: session.title,
-      detail: `${session.host} · ${session.workspace}`,
-      action: { kind: 'session' as const, sessionId: session.sessionId },
-    }));
+  return hostOrderedSessions(input.sessions, input.hosts).map((session) => ({
+    id: `session:${session.host}:${session.sessionId}`,
+    group: 'session' as const,
+    heading: session.host,
+    label: session.title,
+    detail: `${session.host} · ${session.workspace}`,
+    action: { kind: 'session' as const, sessionId: session.sessionId },
+  }));
 }
 
 function hostEntries(input: PaletteInput): PaletteEntry[] {

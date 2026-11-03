@@ -2,6 +2,7 @@ import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { ToolResultState } from '../api/generated/ToolResultState';
+import type { HostName } from '../api/generated/HostName';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { bodyText } from './content';
 import { cachedParts, needs } from './body-cache';
@@ -128,6 +129,40 @@ export function runningEntries(state: ClientState): RunningEntry[] {
   );
 }
 
+/// 按 host 分组的条目。组的先后与组内顺序由分组函数决定。
+export type HostGroup<T> = {
+  host: HostName;
+  entries: T[];
+};
+
+/// 相邻同 host 的条目合成一组，输入顺序不变。正在运行面板据此把同一台机器上的 run 并在一起。
+export function hostGroups(entries: RunningEntry[]): HostGroup<RunningEntry>[] {
+  const groups: HostGroup<RunningEntry>[] = [];
+  for (const entry of entries) {
+    const group = groups.at(-1);
+    if (group?.host === entry.host) {
+      group.entries.push(entry);
+    } else {
+      groups.push({ host: entry.host, entries: [entry] });
+    }
+  }
+  return groups;
+}
+
+/// 命令面板的 session 顺序：host 顺序沿用 host 表，组内最近更新的在前。
+export function hostOrderedSessions(
+  sessions: PaletteSession[],
+  hosts: HostView[],
+): PaletteSession[] {
+  const order = new Map(hosts.map((host, index) => [host.name, index]));
+  return [...sessions].sort(
+    (left, right) =>
+      (order.get(left.host) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(right.host) ?? Number.MAX_SAFE_INTEGER) ||
+      right.updatedAt - left.updatedAt,
+  );
+}
+
 /// 跨 host 的 session 列表，供命令面板使用。workspace 不在摘要里，因此取整行。
 export function paletteSessions(state: ClientState): PaletteSession[] {
   return summaryRows(state).map(({ session, summary }) => ({
@@ -157,7 +192,7 @@ export function missingBodyIds(state: ClientState, sessionId: string): number[] 
 }
 
 /// 输入框回溯用的用户消息正文，按链上顺序。正文未加载或为空的消息不计入。
-export function sessionHistory(transcript: TranscriptEntry[]): string[] {
+function sessionHistory(transcript: TranscriptEntry[]): string[] {
   const history: string[] = [];
   for (const entry of transcript) {
     if (entry.message.role !== 'user' || entry.parts === null) {
