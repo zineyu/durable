@@ -1,6 +1,5 @@
 import type { HostName } from '../api/generated/HostName';
-import { hostStatusLabel } from './labels';
-import type { HostRecord, PaletteSession, SessionSummary } from './types';
+import type { HostView, PaletteSession, SessionSummary } from './types';
 import type { SessionId } from './ids';
 
 /// 面板条目的执行语义。组件只按 `kind` 分派，不解析文本。
@@ -24,7 +23,7 @@ export type PaletteEntry = {
 };
 
 export type PaletteInput = {
-  hosts: HostRecord[];
+  hosts: HostView[];
   /// 跨 host 的 session 列表，由派生层给出。
   sessions: PaletteSession[];
   selectedHost: HostName | null;
@@ -88,22 +87,19 @@ function sessionsOf(input: PaletteInput): PaletteEntry[] {
 }
 
 function hostEntries(input: PaletteInput): PaletteEntry[] {
-  return input.hosts.map((record) => ({
-    id: `host:${record.name}`,
+  return input.hosts.map((view) => ({
+    id: `host:${view.name}`,
     group: 'host' as const,
     heading: 'host',
-    label: record.name,
-    detail: hostDetail(record),
-    action: { kind: 'host' as const, host: record.name },
+    label: view.name,
+    detail: hostDetail(view),
+    action: { kind: 'host' as const, host: view.name },
   }));
 }
 
-function hostDetail(record: HostRecord): string {
-  const status =
-    record.detail === null
-      ? hostStatusLabel[record.status]
-      : `${hostStatusLabel[record.status]} · ${record.detail}`;
-  return record.latencyMs === null ? status : `${status} · ${record.latencyMs} ms`;
+function hostDetail(view: HostView): string {
+  const status = view.detail === null ? view.label : `${view.label} · ${view.detail}`;
+  return view.latencyMs === null ? status : `${status} · ${view.latencyMs} ms`;
 }
 
 function actions(input: PaletteInput): PaletteEntry[] {
@@ -122,7 +118,7 @@ function actions(input: PaletteInput): PaletteEntry[] {
     return entries;
   }
   const record = input.hosts.find((entry) => entry.name === host);
-  if (record?.status !== 'ok') {
+  if (record?.available !== true) {
     return entries;
   }
   entries.push({

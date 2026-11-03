@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { toSessionId } from './ids';
 import { buildPalette, filterPalette, stepPaletteIndex } from './command-palette';
 import type { PaletteInput } from './command-palette';
+import { hostViewOf } from './derived';
 import type { HostRecord, PaletteSession, SessionSummary } from './types';
 
-const hostA: HostRecord = {
+const hostARecord: HostRecord = {
   name: 'macbook-air-01',
   kind: 'local',
   target: null,
@@ -14,7 +15,7 @@ const hostA: HostRecord = {
   detail: null,
   latencyMs: 4,
 };
-const hostB: HostRecord = {
+const hostBRecord: HostRecord = {
   name: 'studio',
   kind: 'ssh',
   target: 'studio',
@@ -23,7 +24,7 @@ const hostB: HostRecord = {
   detail: null,
   latencyMs: 32,
 };
-const hostC: HostRecord = {
+const hostCRecord: HostRecord = {
   name: 'retired',
   kind: 'ssh',
   target: 'retired',
@@ -32,6 +33,9 @@ const hostC: HostRecord = {
   detail: '隧道断开',
   latencyMs: null,
 };
+const hostA = hostViewOf(hostARecord);
+const hostB = hostViewOf(hostBRecord);
+const hostC = hostViewOf(hostCRecord);
 
 function paletteSession(
   host: string,

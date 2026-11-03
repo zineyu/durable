@@ -5,12 +5,12 @@ import { EmptyState } from './EmptyState';
 import { SessionPane } from './SessionPane';
 import { hostNotice } from '../view/labels';
 import type { SessionId } from '../view/ids';
-import type { ConnectionState, HostRecord, SessionView } from '../view/types';
+import type { ConnectionState, HostView, SessionView } from '../view/types';
 
 export type MainPaneProps = {
   sessionId: SessionId | null;
   view: SessionView | null;
-  host: HostRecord | undefined;
+  host: HostView | undefined;
   connection: ConnectionState;
   draft: string;
   pastes: Record<string, string>;
@@ -63,7 +63,7 @@ export function MainPane({
       />
     );
   }
-  if (host?.status !== 'ok') {
+  if (host?.available !== true) {
     const notice = hostNotice(host) ?? 'host 当前不可用';
     return <EmptyState title="host 不可用" description={notice} />;
   }

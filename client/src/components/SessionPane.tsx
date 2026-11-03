@@ -23,14 +23,14 @@ import type {
   BranchControl,
   BranchPosition,
   ConnectionState,
-  HostRecord,
+  HostView,
   SessionView,
   TranscriptEntry,
 } from '../view/types';
 
 export type SessionPaneProps = {
   host: HostName;
-  record: HostRecord;
+  record: HostView;
   view: SessionView;
   connection: ConnectionState;
   draft: string;

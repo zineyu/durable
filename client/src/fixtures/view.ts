@@ -1,9 +1,10 @@
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from '../view/ids';
-import type { HostRecord, QueueItem, WorkspaceSummary } from '../view/types';
+import { hostViewOf } from '../view/derived';
+import type { HostRecord, HostView, QueueItem, WorkspaceSummary } from '../view/types';
 
 export const modelName = 'gpt-5-codex';
 
-export const hosts: HostRecord[] = [
+const hostRecords: HostRecord[] = [
   {
     name: 'macbook-air-01',
     kind: 'local',
@@ -33,7 +34,9 @@ export const hosts: HostRecord[] = [
   },
 ];
 
-export const unreachableHost: HostRecord = {
+export const hosts: HostView[] = hostRecords.map(hostViewOf);
+
+export const unreachableHost: HostView = hostViewOf({
   name: 'studio',
   kind: 'ssh',
   target: 'studio',
@@ -41,9 +44,9 @@ export const unreachableHost: HostRecord = {
   status: 'unreachable',
   detail: '连接 host 失败: 隧道已断开',
   latencyMs: null,
-};
+});
 
-export const incompatibleHost: HostRecord = {
+export const incompatibleHost: HostView = hostViewOf({
   name: 'legacy-lab',
   kind: 'ssh',
   target: 'legacy-lab',
@@ -51,7 +54,7 @@ export const incompatibleHost: HostRecord = {
   status: 'incompatible',
   detail: 'executor 构建 0 与 agent 要求的 1 不一致',
   latencyMs: null,
-};
+});
 
 const updated = (hours: number, minutes: number): number =>
   new Date(2026, 9, 19, hours, minutes).getTime();

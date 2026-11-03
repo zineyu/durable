@@ -1,5 +1,7 @@
+import type { HostKind } from '../api/generated/HostKind';
 import type { HostName } from '../api/generated/HostName';
 import type { HostSnapshot } from '../api/generated/HostSnapshot';
+import type { HostStatus } from '../api/generated/HostStatus';
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { MessageSkeleton } from '../api/generated/MessageSkeleton';
 import type { RunStatus } from '../api/generated/RunStatus';
@@ -38,6 +40,24 @@ export type ClientError = {
 
 /// 侧栏、host 面板与命令面板共用的一项 host。运行状态不落库，来自一次 bootstrap。
 export type HostRecord = HostSnapshot;
+
+/// 一个 host 的呈现视图。可用性与不可用说明只由派生层判定，组件只读取结果。
+export type HostView = {
+  name: HostName;
+  available: boolean;
+  status: HostStatus;
+  /// 状态文案。
+  label: string;
+  tone: StatusTone;
+  /// 不可用时给用户看的说明；可用时为 `null`。
+  notice: string | null;
+  /// 状态的具体说明；可用时为 `null`。
+  detail: string | null;
+  latencyMs: number | null;
+  kind: HostKind;
+  target: string | null;
+  enabled: boolean;
+};
 
 export type SessionSummary = {
   id: SessionId;

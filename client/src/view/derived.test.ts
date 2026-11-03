@@ -8,7 +8,8 @@ import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import {
   hasSession,
-  hostAvailable,
+  hostViewOf,
+  hostViews,
   missingBodyIds,
   orderedSessions,
   paletteSessions,
@@ -37,7 +38,7 @@ function host(name: string, status: HostSnapshot['status'] = 'ok'): HostSnapshot
     enabled: true,
     status,
     detail: status === 'ok' ? null : '隧道已断开',
-    latencyMs: null,
+    latencyMs: status === 'ok' ? 4 : null,
   };
 }
 
@@ -191,16 +192,34 @@ describe('session 摘要', () => {
     ]);
   });
 
-  it('不可用 host 的 workspace 会话列表为空', () => {
+  it('host 视图给出可用性、说明与延迟', () => {
     const value = state({
       hosts: [host('local'), host('studio', 'unreachable')],
       sessions: [session('s-a', '/work/a', 100), session('s-b', '/work/b', 200)],
     });
 
-    expect(hostAvailable(value, 'local')).toBe(true);
-    expect(hostAvailable(value, 'studio')).toBe(false);
-    expect(hostAvailable(value, 'missing')).toBe(false);
+    expect(hostViews(value).map((view) => [view.name, view.available, view.notice])).toEqual([
+      ['local', true, null],
+      ['studio', false, '隧道已断开'],
+    ]);
+    expect(hostViews(value).find((view) => view.name === 'missing')).toBeUndefined();
+    expect(hostViews(value)[0]?.latencyMs).toBe(4);
     expect(workspaceSummaries(value).map((workspace) => workspace.sessions.length)).toEqual([1, 0]);
+  });
+
+  it('不可用 host 没有具体说明时用状态文案', () => {
+    const view = hostViewOf({
+      name: 'studio',
+      kind: 'ssh',
+      target: 'studio',
+      enabled: true,
+      status: 'unreachable',
+      detail: null,
+      latencyMs: null,
+    });
+
+    expect(view.available).toBe(false);
+    expect(view.notice).toBe('不可达');
   });
 
   it('快捷键顺序沿用侧栏顺序', () => {

@@ -4,12 +4,11 @@ import type { HostName } from '../api/generated/HostName';
 import { IconButton } from './IconButton';
 import styles from './HostSwitcher.module.css';
 import { StatusDot } from './StatusDot';
-import { hostNotice, hostStatusLabel, hostStatusTone } from '../view/labels';
 import type { SessionId } from '../view/ids';
-import type { HostRecord, SessionSummary, StatusTone } from '../view/types';
+import type { HostView, SessionSummary, StatusTone } from '../view/types';
 
 export type HostSwitcherProps = {
-  hosts: HostRecord[];
+  hosts: HostView[];
   sessions: SessionSummary[];
   selectedHost: HostName | null;
   selectedSessionId?: SessionId | null;
@@ -17,7 +16,7 @@ export type HostSwitcherProps = {
   onRegister?: () => void;
   onRename?: (host: HostName) => void;
   onRemove?: (host: HostName) => void;
-  onToggleEnabled?: (host: HostRecord) => void;
+  onToggleEnabled?: (host: HostView) => void;
   onReconnect?: (host: HostName) => void;
   defaultMenuOpen?: boolean;
 };
@@ -78,59 +77,58 @@ export function HostSwitcher({
       {menuOpen ? (
         <div className={styles.panel}>
           {hosts.length === 0 ? <p className={styles.empty}>还没有 host</p> : null}
-          {hosts.map((record) => {
-            const label = hostStatusLabel[record.status];
+          {hosts.map((host) => {
             return (
-              <section key={record.name} className={styles.host} aria-label={`host ${record.name}`}>
+              <section key={host.name} className={styles.host} aria-label={`host ${host.name}`}>
                 <div className={styles.hostHeader}>
-                  <StatusDot tone={hostStatusTone[record.status]} />
-                  <span className={styles.name}>{record.name}</span>
-                  <span className={styles.status}>{label}</span>
-                  {record.latencyMs === null ? null : (
-                    <span className={styles.latency}>往返 {record.latencyMs} ms</span>
+                  <StatusDot tone={host.tone} />
+                  <span className={styles.name}>{host.name}</span>
+                  <span className={styles.status}>{host.label}</span>
+                  {host.latencyMs === null ? null : (
+                    <span className={styles.latency}>往返 {host.latencyMs} ms</span>
                   )}
                 </div>
                 <p className={styles.target}>
-                  {record.kind === 'ssh' ? record.target : '本机'}
+                  {host.kind === 'ssh' ? host.target : '本机'}
                 </p>
-                {record.detail === null ? null : (
-                  <p className={styles.detail}>{hostNotice(record)}</p>
+                {host.detail === null ? null : (
+                  <p className={styles.detail}>{host.notice}</p>
                 )}
                 <div className={styles.hostActions}>
                   <button
                     type="button"
                     className={styles.action}
-                    onClick={() => { onToggleEnabled?.(record); }}
+                    onClick={() => { onToggleEnabled?.(host); }}
                   >
-                    {record.enabled ? '停用' : '启用'}
+                    {host.enabled ? '停用' : '启用'}
                   </button>
                   <button
                     type="button"
                     className={styles.action}
-                    onClick={() => { onReconnect?.(record.name); }}
+                    onClick={() => { onReconnect?.(host.name); }}
                   >
                     重连
                   </button>
                   <IconButton
                     icon="pencil"
-                    label={`重命名 host：${record.name}`}
+                    label={`重命名 host：${host.name}`}
                     size="sm"
-                    onClick={() => { close(); onRename?.(record.name); }}
+                    onClick={() => { close(); onRename?.(host.name); }}
                   />
                   <IconButton
                     icon="trash"
-                    label={`删除 host：${record.name}`}
+                    label={`删除 host：${host.name}`}
                     tone="danger"
                     size="sm"
-                    onClick={() => { close(); onRemove?.(record.name); }}
+                    onClick={() => { close(); onRemove?.(host.name); }}
                   />
                 </div>
                 <ul className={styles.sessions}>
-                  {sessions.filter((session) => session.host === record.name).length === 0 ? (
+                  {sessions.filter((session) => session.host === host.name).length === 0 ? (
                     <li className={styles.empty}>这个 host 没有 session</li>
                   ) : null}
                   {sessions
-                    .filter((session) => session.host === record.name)
+                    .filter((session) => session.host === host.name)
                     .map((session) => (
                       <li key={session.id}>
                         <button
@@ -156,7 +154,7 @@ export function HostSwitcher({
   );
 }
 
-function toneOf(hosts: HostRecord[], name: HostName): StatusTone {
-  const record = hosts.find((entry) => entry.name === name);
-  return record === undefined ? 'idle' : hostStatusTone[record.status];
+function toneOf(hosts: HostView[], name: HostName): StatusTone {
+  const host = hosts.find((entry) => entry.name === name);
+  return host === undefined ? 'idle' : host.tone;
 }

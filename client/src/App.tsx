@@ -19,6 +19,7 @@ import { buildPalette, filterPalette, stepPaletteIndex } from './view/command-pa
 import type { PaletteEntry } from './view/command-palette';
 import {
   hasSession,
+  hostViews,
   orderedSessions,
   paletteSessions,
   runningEntries,
@@ -54,12 +55,13 @@ export function App(): ReactElement {
   );
   const workspaces = useMemo(() => workspaceSummaries(state), [state]);
   const sessions = useMemo(() => orderedSessions(workspaces), [workspaces]);
+  const hosts = useMemo(() => hostViews(state), [state]);
   const host = useMemo(
-    () => (view === null ? undefined : state.hosts.find((entry) => entry.name === view.session.host)),
-    [state.hosts, view],
+    () => (view === null ? undefined : hosts.find((entry) => entry.name === view.session.host)),
+    [hosts, view],
   );
   const selectedHost = host?.name ?? null;
-  const connected = host === undefined || host.status === 'ok';
+  const connected = host === undefined || host.available;
   const notice = selection === null ? null : hostNotice(host);
 
   const navigate = useCallback((sessionId: Selection) => {
@@ -119,14 +121,14 @@ export function App(): ReactElement {
     () =>
       filterPalette(
         buildPalette({
-          hosts: state.hosts,
+          hosts,
           sessions: paletteSessions(state),
           selectedHost,
           selectedSession: view === null ? null : view.summary,
         }),
         paletteQuery,
       ),
-    [paletteQuery, selectedHost, state, view],
+    [hosts, paletteQuery, selectedHost, state, view],
   );
   const paletteCursor =
     paletteEntries.length === 0 ? 0 : Math.min(paletteIndex, paletteEntries.length - 1);
@@ -238,7 +240,7 @@ export function App(): ReactElement {
           cycleSession(command.delta);
           return;
         case 'select-host': {
-          const target = state.hosts[command.index];
+          const target = hosts[command.index];
           if (target !== undefined) {
             event.preventDefault();
             selectSessionOfHost(target.name);
@@ -257,9 +259,9 @@ export function App(): ReactElement {
     cycleSession,
     dialog,
     helpOpen,
+    hosts,
     paletteOpen,
     selectSessionOfHost,
-    state.hosts,
   ]);
 
   const running = useMemo(() => runningEntries(state), [state]);
@@ -269,7 +271,7 @@ export function App(): ReactElement {
       <AppShell
         sidebar={
           <Sidebar
-            hosts={state.hosts}
+            hosts={hosts}
             selectedHost={selectedHost}
             selectedSessionId={selection}
             sessions={sessions}

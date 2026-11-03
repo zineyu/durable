@@ -9,7 +9,7 @@ import type { SessionItemView } from './SessionListItem';
 import type { HostName } from '../api/generated/HostName';
 import type { SessionId, WorkspacePath } from '../view/ids';
 import type {
-  HostRecord,
+  HostView,
   RunningEntry,
   SessionSummary,
   WorkspaceSummary,
@@ -21,7 +21,7 @@ export type SessionEditing = {
 };
 
 export type SidebarProps = {
-  hosts: HostRecord[];
+  hosts: HostView[];
   selectedHost: HostName | null;
   selectedSessionId: SessionId | null;
   /// host 切换器里按 host 分组的 session，顺序沿用侧栏。
@@ -30,7 +30,7 @@ export type SidebarProps = {
   onRegisterHost?: () => void;
   onRenameHost?: (host: HostName) => void;
   onRemoveHost?: (host: HostName) => void;
-  onToggleHost?: (host: HostRecord) => void;
+  onToggleHost?: (host: HostView) => void;
   onReconnectHost?: (host: HostName) => void;
   /// host 不可用或未知时的说明，替换空列表提示。
   notice?: string | null;

@@ -2,7 +2,7 @@ import type { HostStatus } from '../api/generated/HostStatus';
 import type { RunFailureCode } from '../api/generated/RunFailureCode';
 import type {
   ConnectionState,
-  HostRecord,
+  HostView,
   MessageState,
   RetryState,
   SessionState,
@@ -64,15 +64,12 @@ export function retryNote(retry: RetryState): string {
   return `供应商限流，第 ${retry.attempt}/${retry.maxAttempts} 次重试，等待 ${retryDelay(retry.delayMs)}`;
 }
 
-/// 侧栏与主面板里的 host 说明。host 可用时没有说明。
-export function hostNotice(record: HostRecord | undefined): string | null {
-  if (record === undefined) {
+/// 侧栏与主面板里的 host 说明。可用时没有说明，未知 host 给出固定文案。
+export function hostNotice(view: HostView | undefined): string | null {
+  if (view === undefined) {
     return '未知 host，host 表里没有这个名字';
   }
-  if (record.status === 'ok') {
-    return null;
-  }
-  return record.detail ?? hostStatusLabel[record.status];
+  return view.notice;
 }
 
 function retryDelay(delayMs: number): string {

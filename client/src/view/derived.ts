@@ -6,10 +6,12 @@ import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { bodyText } from './content';
 import { cachedParts, needs } from './body-cache';
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
-import { retryNote, runFailureLabel, sessionStateOf } from './labels';
+import { hostStatusLabel, hostStatusTone, retryNote, runFailureLabel, sessionStateOf } from './labels';
 import type { ClientState, SessionTreeState } from './state';
 import type {
   BranchPosition,
+  HostRecord,
+  HostView,
   MessageState,
   PaletteSession,
   QueueItem,
@@ -34,11 +36,16 @@ export function sessionSummaries(state: ClientState): SessionSummary[] {
 
 export function workspaceSummaries(state: ClientState): WorkspaceSummary[] {
   const rows = summaryRows(state);
+  const available = new Set(
+    hostViews(state)
+      .filter((view) => view.available)
+      .map((view) => view.name),
+  );
   return [...state.workspaces].sort(compareWorkspaces).map((workspace) => ({
     id: toWorkspaceId(workspace.host, workspace.path),
     host: workspace.host,
     path: toWorkspacePath(workspace.path),
-    sessions: hostAvailable(state, workspace.host)
+    sessions: available.has(workspace.host)
       ? rows
           .filter(
             (row) =>
@@ -50,10 +57,27 @@ export function workspaceSummaries(state: ClientState): WorkspaceSummary[] {
   }));
 }
 
-/// host 可用时它的 workspace 才列出 session。不可用 host 的列表为空，
-/// 侧栏与主面板据 host 快照显示说明（规格 user story R-47）。
-export function hostAvailable(state: ClientState, host: string): boolean {
-  return state.hosts.some((record) => record.name === host && record.status === 'ok');
+/// 全部 host 的呈现视图，顺序沿用 host 表。
+export function hostViews(state: ClientState): HostView[] {
+  return state.hosts.map(hostViewOf);
+}
+
+/// 一个 host 的呈现视图。可用性与不可用说明只在这里判定。
+export function hostViewOf(record: HostRecord): HostView {
+  const available = record.status === 'ok';
+  return {
+    name: record.name,
+    available,
+    status: record.status,
+    label: hostStatusLabel[record.status],
+    tone: hostStatusTone[record.status],
+    notice: available ? null : record.detail ?? hostStatusLabel[record.status],
+    detail: record.detail,
+    latencyMs: record.latencyMs,
+    kind: record.kind,
+    target: record.target,
+    enabled: record.enabled,
+  };
 }
 
 /// 侧栏展示顺序下的全部 session，供快捷键在同一顺序里切换。
