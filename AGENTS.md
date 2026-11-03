@@ -30,7 +30,7 @@
 | `session.rs` | session 元数据、`SessionTreeSnapshot` 快照与自动标题 |
 | `queue.rs` | 待执行队列项与锚点 |
 | `run.rs` | 运行实体、状态与失败码 |
-| `tool.rs` | 工具定义（名称、说明、JSON Schema、幂等标记）、字节上限、失败原因与错误码；两侧共用同一份 |
+| `tool.rs` | 一次调用的身份（调用 id、工具名、参数）、工具定义（名称、说明、JSON Schema、幂等标记）、字节上限、失败原因与错误码；两侧共用同一份 |
 | `link.rs`、`cancel.rs` | link 帧类型与读写；两侧共享的取消信号 |
 | `workspace.rs` | workspace 元数据 |
 | `tree.rs` | 消息树的问题：transcript、子树叶子与祖先；存储只返回行，链上顺序由它回答 |

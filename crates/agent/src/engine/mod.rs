@@ -350,7 +350,7 @@ impl RunEngine {
                     tracing::warn!(message = node.id.get(), "执行中的工具节点找不到调用记录");
                     continue;
                 };
-                if self.tools.idempotent(name) {
+                if idempotent(self.tools.as_ref(), name) {
                     tracing::info!(tool = name, message = node.id.get(), "重跑幂等工具");
                     continue;
                 }
@@ -366,6 +366,14 @@ impl RunEngine {
         }
         Ok(())
     }
+}
+
+/// 工具是否幂等。幂等是工具定义上的标记，不是执行器回答的问题。
+fn idempotent(tools: &dyn ToolBox, name: &str) -> bool {
+    tools
+        .definitions()
+        .iter()
+        .any(|definition| definition.name == name && definition.idempotent)
 }
 
 /// 在 transcript 中找出某次工具调用的工具名。

@@ -41,7 +41,7 @@ pub use storage::Snapshot;
 pub use store::{Command, RunStart, SessionCommand, Store};
 pub use stream::{DeltaKind, EventBus, ResyncReason, StreamEvent};
 pub use tool::{
-    DEFAULT_BASH_OUTPUT_BYTES, DEFAULT_BASH_TIMEOUT, DEFAULT_READ_BYTES, ToolDefinition,
+    DEFAULT_BASH_OUTPUT_BYTES, DEFAULT_BASH_TIMEOUT, DEFAULT_READ_BYTES, ToolCall, ToolDefinition,
     ToolErrorCode, ToolFailure, ToolLimits, ToolOutcome, ToolResultState, parse_arguments,
     tool_definition, tool_definitions,
 };

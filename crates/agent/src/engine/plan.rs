@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use durable::{MessageId, MessageNode, MessageRole, RunId, ToolResultState};
+use durable::{MessageId, MessageNode, MessageRole, RunId, ToolCall, ToolResultState};
 
 /// 下一步动作。
 #[derive(Debug, PartialEq)]
@@ -14,7 +14,7 @@ pub(super) enum NextAction {
     /// 发一次模型请求。
     Request,
     /// 执行这些工具调用。
-    Tools(Vec<PendingTool>),
+    Tools(Vec<PendingCall>),
     /// 最后一条 assistant 消息没有请求工具，run 正常收尾。
     Finish,
     /// 当前 run 已达到步数上限。
@@ -31,14 +31,12 @@ pub(super) struct Plan {
     pub action: NextAction,
 }
 
-/// 待执行的工具调用。
+/// 待执行的工具调用：调用身份，以及它在树中已有的节点。
 #[derive(Debug, PartialEq)]
-pub(super) struct PendingTool {
-    pub call_id: String,
-    pub name: String,
-    pub arguments: String,
+pub(super) struct PendingCall {
+    pub call: ToolCall,
     /// 已在树中的执行中节点；`None` 表示还没入树。
-    pub message: Option<MessageId>,
+    pub node: Option<MessageId>,
 }
 
 /// 从 transcript 与当前 run 推出下一步。
@@ -98,22 +96,24 @@ fn action_of(transcript: &[MessageNode]) -> NextAction {
         return NextAction::Finish;
     }
     let results = tool_results(transcript);
-    let pending: Vec<PendingTool> = assistant
+    let pending: Vec<PendingCall> = assistant
         .tool_calls()
-        .filter_map(|(call_id, name, arguments)| match results.get(call_id) {
-            Some(&(_, ToolResultState::Finished { .. } | ToolResultState::Unknown)) => None,
-            Some(&(message, ToolResultState::Running)) => Some(PendingTool {
-                call_id: call_id.to_owned(),
-                name: name.to_owned(),
-                arguments: arguments.to_owned(),
-                message: Some(message),
-            }),
-            None => Some(PendingTool {
-                call_id: call_id.to_owned(),
-                name: name.to_owned(),
-                arguments: arguments.to_owned(),
-                message: None,
-            }),
+        .filter_map(|(call_id, name, arguments)| {
+            let node = match results.get(call_id) {
+                Some(&(_, ToolResultState::Finished { .. } | ToolResultState::Unknown)) => {
+                    return None;
+                }
+                Some(&(message, ToolResultState::Running)) => Some(message),
+                None => None,
+            };
+            Some(PendingCall {
+                call: ToolCall {
+                    id: call_id.to_owned(),
+                    name: name.to_owned(),
+                    arguments: arguments.to_owned(),
+                },
+                node,
+            })
         })
         .collect();
     if pending.is_empty() {
@@ -270,7 +270,7 @@ mod tests {
             panic!("应执行工具");
         };
         assert_eq!(pending.len(), 2);
-        assert!(pending.iter().all(|tool| tool.message.is_none()));
+        assert!(pending.iter().all(|pending| pending.node.is_none()));
     }
 
     #[test]
@@ -284,8 +284,8 @@ mod tests {
             panic!("应补齐剩余工具");
         };
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].call_id, "call_b");
-        assert_eq!(pending[0].message, None);
+        assert_eq!(pending[0].call.id, "call_b");
+        assert_eq!(pending[0].node, None);
     }
 
     #[test]
@@ -299,7 +299,7 @@ mod tests {
             panic!("应重跑执行中的工具");
         };
         assert_eq!(
-            pending[0].message,
+            pending[0].node,
             Some(MessageId::parse(3).expect("合法消息 id"))
         );
     }

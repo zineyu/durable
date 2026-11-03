@@ -8,8 +8,8 @@ pub const INCOMPATIBLE_EXIT_CODE: i32 = 3;
 
 /// link 已断开：executor 的退出码与最后几行标准错误。
 ///
-/// 只由本模块产生。工具结局里的 [`durable::ToolErrorCode::LinkClosed`] 是它在工具层的对应码，
-/// 但工具实现从不产生该码；引擎据本结构把在途调用记为「结果未知」。
+/// 只由本模块产生。链路断开的调用没有工具结局：引擎据本结构把在途调用记为「结果未知」，
+/// 并让 run 以 `host_unreachable` 结束。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkClosed {
     /// executor 的退出码。被信号终止或退出码未及时到达时为 `None`。
@@ -51,6 +51,15 @@ impl LinkClosed {
         Self {
             exit_code: None,
             stderr_tail: detail,
+        }
+    }
+
+    /// 对端回答了错误的答复种类：这条链路已不可信，按断链处理。
+    #[must_use]
+    pub(super) fn unexpected_reply(operation: &str) -> Self {
+        Self {
+            exit_code: None,
+            stderr_tail: format!("link 回答了与{operation}不匹配的答复"),
         }
     }
 }

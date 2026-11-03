@@ -32,7 +32,7 @@ pub use durable::{
     MessageNode, MessageRole, MessageSkeleton, MessageText, MessageTextError, MessageTree,
     PartSkeleton, PartState, ProviderMeta, QueueItem, QueueItemId, RunFailure, RunFailureCode,
     RunId, RunRecord, RunStatus, SessionId, SessionIdError, SessionMetadata, SessionTitle,
-    SessionTitleError, SessionTreeSnapshot, Store, StoreError, StreamEvent, SubmitMode,
+    SessionTitleError, SessionTreeSnapshot, Store, StoreError, StreamEvent, SubmitMode, ToolCall,
     ToolDefinition, ToolErrorCode, ToolFailure, ToolLimits, ToolOutcome, ToolResultState,
     WorkspaceMetadata, WorkspacePath, WorkspacePathError,
 };
@@ -40,8 +40,8 @@ pub use engine::RunEngine;
 pub use error::ApiError;
 pub use hosts::{HEARTBEAT_INTERVAL, HostRegistry, LOCAL_HOST, STARTUP_READY_WAIT};
 pub use link::{
-    BUILD_ID, BUILD_PLATFORM, INCOMPATIBLE_EXIT_CODE, LinkClosed, LinkHandle, NoTools, RemoteTools,
-    ToolBox, ToolCall, ToolContext,
+    BUILD_ID, BUILD_PLATFORM, INCOMPATIBLE_EXIT_CODE, LinkClosed, LinkHandle, RemoteTools, ToolBox,
+    ToolContext, ToolEnd,
 };
 pub use protocol::{
     BootstrapResponse, CreateSessionRequest, EditMessageRequest, ErrorCode, ErrorResponse,

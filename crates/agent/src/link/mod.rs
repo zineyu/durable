@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use durable::link::{Frame, Operation, Reply, WorkspaceCheckError, read_frame, write_frame};
-use durable::{Cancellation, HostName, ToolErrorCode, ToolLimits, ToolOutcome};
+use durable::{Cancellation, HostName, ToolLimits, ToolOutcome};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
@@ -30,7 +30,7 @@ pub use closed::{INCOMPATIBLE_EXIT_CODE, LinkClosed};
 pub(crate) use transport::Transport;
 pub use transport::{BUILD_ID, BUILD_PLATFORM};
 
-pub use tools::{NoTools, RemoteTools, ToolBox, ToolCall, ToolContext};
+pub use tools::{RemoteTools, ToolBox, ToolContext, ToolEnd};
 
 /// 待写帧队列容量。写侧只有一个任务，容量只用于吸收突发。
 const FRAME_QUEUE: usize = 64;
@@ -297,7 +297,7 @@ impl LinkHandle {
     /// # Errors
     ///
     /// link 在请求发出前或等待结果期间断开时返回 [`LinkClosed`]；此时这次调用的结局未知，
-    /// 不是工具失败。
+    /// 不是工具失败。对端回答了错误的答复种类同样返回 [`LinkClosed`]：链路已不可信。
     pub async fn request(
         &self,
         workspace: &str,
@@ -312,7 +312,7 @@ impl LinkHandle {
         };
         match self.exchange(operation, Some(cancellation)).await? {
             Reply::Outcome { outcome } => Ok(outcome),
-            Reply::Workspace { .. } => Ok(mismatched_reply("工具调用")),
+            Reply::Workspace { .. } => Err(LinkClosed::unexpected_reply("工具调用")),
         }
     }
 
@@ -322,7 +322,7 @@ impl LinkHandle {
     ///
     /// # Errors
     ///
-    /// link 断开时返回 [`LinkClosed`]；此时这次校验没有结论。
+    /// link 断开或对端答错答复种类时返回 [`LinkClosed`]；两种情形下这次校验都没有结论。
     pub async fn check_workspace(
         &self,
         path: &str,
@@ -332,7 +332,7 @@ impl LinkHandle {
         };
         match self.exchange(operation, None).await? {
             Reply::Workspace { result } => Ok(result),
-            Reply::Outcome { .. } => Ok(Err(WorkspaceCheckError::Unreadable)),
+            Reply::Outcome { .. } => Err(LinkClosed::unexpected_reply("workspace 校验")),
         }
     }
 
@@ -385,14 +385,6 @@ impl Drop for LinkHandle {
         {
             tracing::debug!("退出观察者已结束，无需再结束 executor");
         }
-    }
-}
-
-/// 答复种类与请求操作不符。link 仍然活着，因此按工具失败返回。
-fn mismatched_reply(operation: &str) -> ToolOutcome {
-    ToolOutcome::Failed {
-        code: ToolErrorCode::IoError,
-        message: format!("link 回答了与{operation}不匹配的答复"),
     }
 }
 

@@ -8,6 +8,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ts_rs::TS;
 
+/// 一次工具调用的领域身份：调用 id、工具名与参数 JSON。
+///
+/// 它不携带消息树里的节点位置，也不上帧：帧自己的 `id` 是请求 id，与调用 id 无关。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
 /// 工具失败的稳定类别。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -24,9 +34,6 @@ pub enum ToolErrorCode {
     EditNotUnique,
     BashTimeout,
     IoError,
-    /// 等待结果时 link 断开。只由 agent 的 link 层产生，工具实现从不返回它；
-    /// 引擎把这种调用记为「结果未知」并让 run 以 `host_unreachable` 结束。
-    LinkClosed,
     Cancelled,
 }
 

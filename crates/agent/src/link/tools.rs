@@ -5,17 +5,21 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use durable::{Cancellation, HostName, ToolDefinition, ToolErrorCode, ToolOutcome, WorkspacePath};
+use durable::{Cancellation, HostName, ToolCall, ToolDefinition, ToolOutcome, WorkspacePath};
 
 use super::LinkClosed;
 use crate::hosts::HostRegistry;
 
-/// 一次工具调用的请求。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: String,
+/// 一次工具调用的终止方式。
+///
+/// 只有两支：得到工具结局，或宿主丢失。返回类型不是 `Result`，因此 `?` 无法把宿主丢失
+/// 静默传给上一层；调用点必须显式处理两支。
+#[derive(Debug, Clone)]
+pub enum ToolEnd {
+    /// 工具产生了结局。成功与失败都是结局。
+    Ended(ToolOutcome),
+    /// host 的 link 断开或答非所问；这次调用没有结局。
+    HostGone(LinkClosed),
 }
 
 /// 工具执行的上下文：走哪台 host 的 link、workspace 边界与取消信号。
@@ -27,45 +31,13 @@ pub struct ToolContext {
     pub cancellation: Cancellation,
 }
 
-/// 执行工具调用。工具失败以结构化结局返回；link 断开是运维失败，作为错误传播。
+/// 执行工具调用。工具失败以结构化结局返回；宿主丢失是 [`ToolEnd`] 的第二支。
 #[async_trait]
 pub trait ToolBox: Send + Sync {
     /// 每轮模型请求携带的工具定义。
     fn definitions(&self) -> Vec<ToolDefinition>;
 
-    async fn execute(
-        &self,
-        call: &ToolCall,
-        context: &ToolContext,
-    ) -> Result<ToolOutcome, LinkClosed>;
-
-    /// 该工具是否幂等。未登记的工具按非幂等处理。
-    fn idempotent(&self, name: &str) -> bool {
-        self.definitions()
-            .iter()
-            .any(|definition| definition.name == name && definition.idempotent)
-    }
-}
-
-/// 未注册任何工具的占位执行器：所有调用返回 `unknown_tool`。
-pub struct NoTools;
-
-#[async_trait]
-impl ToolBox for NoTools {
-    fn definitions(&self) -> Vec<ToolDefinition> {
-        Vec::new()
-    }
-
-    async fn execute(
-        &self,
-        call: &ToolCall,
-        _context: &ToolContext,
-    ) -> Result<ToolOutcome, LinkClosed> {
-        Ok(ToolOutcome::Failed {
-            code: ToolErrorCode::UnknownTool,
-            message: format!("未知工具: {}", call.name),
-        })
-    }
+    async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolEnd;
 }
 
 /// 把工具调用经 session 所属 host 的 link 交给 executor 的执行器。
@@ -88,26 +60,23 @@ impl ToolBox for RemoteTools {
         durable::tool_definitions()
     }
 
-    async fn execute(
-        &self,
-        call: &ToolCall,
-        context: &ToolContext,
-    ) -> Result<ToolOutcome, LinkClosed> {
+    async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolEnd {
         let Some(link) = self.hosts.link(&context.host).await else {
-            return Err(LinkClosed::unavailable(
+            return ToolEnd::HostGone(LinkClosed::unavailable(
                 self.hosts.unavailable_detail(&context.host).await,
             ));
         };
-        link.request(
-            context.workspace.as_str(),
-            &call.name,
-            &call.arguments,
-            &context.cancellation,
-        )
-        .await
-    }
-
-    fn idempotent(&self, name: &str) -> bool {
-        durable::tool_definition(name).is_some_and(|definition| definition.idempotent)
+        match link
+            .request(
+                context.workspace.as_str(),
+                &call.name,
+                &call.arguments,
+                &context.cancellation,
+            )
+            .await
+        {
+            Ok(outcome) => ToolEnd::Ended(outcome),
+            Err(closed) => ToolEnd::HostGone(closed),
+        }
     }
 }

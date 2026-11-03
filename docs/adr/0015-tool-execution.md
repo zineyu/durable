@@ -1,6 +1,6 @@
 # ADR 0015: 工具执行与 workspace 路径边界
 
-- 状态：已接受
+- 状态：已接受。`NoTools` 保留由 ADR 0052 修订
 - 日期：2026-11-01
 
 ## 背景
@@ -9,7 +9,7 @@
 
 ## 决策
 
-**工具集合由 `ToolRegistry` 实现 `ToolBox`**。`ToolBox` 增加 `definitions()`，返回四个工具的名称、说明与 JSON Schema 参数。引擎在每轮请求前取出定义传给 `ModelProvider::stream_chat`，因此请求体携带全部工具声明。`NoTools` 保留为空注册表，只用于不涉及工具的测试。
+**工具集合由 `ToolRegistry` 实现 `ToolBox`**。`ToolBox` 增加 `definitions()`，返回四个工具的名称、说明与 JSON Schema 参数。引擎在每轮请求前取出定义传给 `ModelProvider::stream_chat`，因此请求体携带全部工具声明。`NoTools` 曾作为空注册表保留给不涉及工具的测试。ADR 0052 删除了它：它没有任何调用者，测试替身由 seam 六 提供。
 
 **路径必须是 workspace 根内的相对路径**。解析分三步：拒绝空路径与绝对路径；拒绝任何 `..`、根与前缀组件；把相对路径拼到根上再做 containment 检查。
 
