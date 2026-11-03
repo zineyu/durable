@@ -44,15 +44,15 @@ impl SessionCommand<'_> {
         &mut self.session
     }
 
-    /// 快照读取时刻的队列长度，不含本次变更。
+    /// 快照读取时刻的队列长度，不含本次变更。提交后的长度见 `finalize` 推导的视图。
     #[must_use]
-    pub fn queue_length(&self) -> u32 {
+    pub fn queued_before(&self) -> u32 {
         self.base.queue_length
     }
 
     /// 快照读取时刻是否有 running 的 run，不含本次变更。
     #[must_use]
-    pub fn busy(&self) -> bool {
+    pub fn busy_before(&self) -> bool {
         self.base.busy
     }
 
@@ -90,13 +90,7 @@ impl SessionCommand<'_> {
         let view = self.changes.session_view(&self.session.id, self.base)?;
         if self.session != self.initial {
             self.session.updated_at = self.now;
-            self.changes.update_session(
-                self.session.id.clone(),
-                self.session.title.clone(),
-                self.session.title_auto,
-                self.now,
-                self.session.active_leaf,
-            );
+            self.changes.update_session(self.session.clone());
         }
         Ok(Some(self.session.metadata(view)))
     }

@@ -7,7 +7,7 @@ use crate::change::Change;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::host::{HostMetadata, HostName};
-use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
+use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
 use crate::message::{ContentPart, Message};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
@@ -32,23 +32,7 @@ pub(super) async fn apply_change(
             set_host_installed_build(connection, name, build.as_deref()).await
         }
         Change::InsertSession(session) => insert_session(connection, session).await,
-        Change::UpdateSession {
-            id,
-            title,
-            title_auto,
-            updated_at,
-            active_leaf,
-        } => {
-            update_session(
-                connection,
-                id,
-                title,
-                *title_auto,
-                *updated_at,
-                *active_leaf,
-            )
-            .await
-        }
+        Change::UpdateSession(session) => update_session(connection, session).await,
         Change::DeleteSession(id) => delete_session(connection, id).await,
         Change::InsertMessage(message) => insert_message(connection, message).await,
         Change::ReplaceMessageParts { id, parts } => {
@@ -202,20 +186,16 @@ async fn insert_session(
 
 async fn update_session(
     connection: &mut SqliteConnection,
-    id: &SessionId,
-    title: &SessionTitle,
-    title_auto: bool,
-    updated_at: i64,
-    active_leaf: Option<MessageId>,
+    session: &SessionRecord,
 ) -> Result<(), StoreError> {
     let result = sqlx::query(
         "UPDATE session SET title = ?2, title_auto = ?3, updated_at = ?4, active_leaf = ?5 WHERE id = ?1",
     )
-    .bind(id.as_str())
-    .bind(title.as_str())
-    .bind(title_auto)
-    .bind(updated_at)
-    .bind(active_leaf.map(MessageId::get))
+    .bind(session.id.as_str())
+    .bind(session.title.as_str())
+    .bind(session.title_auto)
+    .bind(session.updated_at)
+    .bind(session.active_leaf.map(MessageId::get))
     .execute(&mut *connection)
     .await?;
     ensure_written(&result, "更新 session")

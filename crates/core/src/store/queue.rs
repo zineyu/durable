@@ -38,14 +38,16 @@ impl Store {
         self.command(id, async |command| {
             let now = command.now();
             if command.session().title_auto
-                && command.queue_length() == 0
+                && command.queued_before() == 0
                 && self.storage.message_count(id).await? == 0
             {
                 command.session_mut().title = derive_title(&text)
                     .map_err(|error| StoreError::Invariant(format!("自动标题推导失败: {error}")))?;
             }
             match mode {
-                SubmitMode::Steer if command.busy() => self.submit_steer(id, text, command).await,
+                SubmitMode::Steer if command.busy_before() => {
+                    self.submit_steer(id, text, command).await
+                }
                 _ => {
                     let item = QueueItem {
                         id: self.storage.mint_queue_item_id().await?,

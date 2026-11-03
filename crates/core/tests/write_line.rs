@@ -123,7 +123,7 @@ async fn later_commands_see_every_committed_effect() {
     }
 
     let seen = store
-        .command(&session, async |command| Ok(command.queue_length()))
+        .command(&session, async |command| Ok(command.queued_before()))
         .await
         .expect("读取队列长度");
     assert_eq!(seen, 5, "后续命令看到全部并发的入队");

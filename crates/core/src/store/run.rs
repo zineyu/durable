@@ -40,7 +40,7 @@ impl Store {
     /// 队列为空或该 session 已有 running 的 run 时返回 `None`。
     pub async fn start_run(&self, id: &SessionId) -> Result<Option<RunStart>, StoreError> {
         self.command(id, async |command| {
-            if command.busy() {
+            if command.busy_before() {
                 return Ok(None);
             }
             let Some(item) = self.storage.first_queue_item(id).await? else {

@@ -5,7 +5,7 @@
 use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::host::{HostMetadata, HostName};
-use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
+use crate::id::{MessageId, QueueItemId, RunId, SessionId, WorkspacePath};
 use crate::message::{ContentPart, Message};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
@@ -61,21 +61,8 @@ impl Changeset {
     }
 
     /// 写入 session 的全部可变字段：标题、标题是否自动、更新时间与 active leaf。
-    pub fn update_session(
-        &mut self,
-        id: SessionId,
-        title: SessionTitle,
-        title_auto: bool,
-        updated_at: i64,
-        active_leaf: Option<MessageId>,
-    ) {
-        self.push(Change::UpdateSession {
-            id,
-            title,
-            title_auto,
-            updated_at,
-            active_leaf,
-        });
+    pub fn update_session(&mut self, session: SessionRecord) {
+        self.push(Change::UpdateSession(session));
     }
 
     pub fn delete_session(&mut self, id: SessionId) {
@@ -229,13 +216,7 @@ pub(crate) enum Change {
         build: Option<String>,
     },
     InsertSession(SessionRecord),
-    UpdateSession {
-        id: SessionId,
-        title: SessionTitle,
-        title_auto: bool,
-        updated_at: i64,
-        active_leaf: Option<MessageId>,
-    },
+    UpdateSession(SessionRecord),
     DeleteSession(SessionId),
     InsertMessage(Message),
     InsertQueueItem {
