@@ -24,6 +24,7 @@ use tempfile::TempDir;
 pub(crate) mod db;
 mod event_stream;
 mod hosts;
+pub(crate) mod matrix;
 pub(crate) mod ssh;
 mod test_agent;
 

@@ -404,4 +404,140 @@ mod tests {
         ];
         assert_eq!(plan(&transcript, 1).action, super::NextAction::Request);
     }
+    /// 恢复判定的有界性：从任意树尾形状出发，`next_action` 在有限步内到达终态。
+    ///
+    /// 恢复是「树 → 下一步」的纯函数，所以「恢复不会活锁」可以被穷举而不是靠推理：
+    /// 造出随机的树尾形状，按引擎同样的规则把动作作用回树上，断言 64 步之内收尾。
+    /// 动作作用回树的规则必须与 `drive_run` 一致：请求追加一条 assistant，工具批次
+    /// 补齐节点并写结局。
+    #[test]
+    fn any_tail_reaches_a_terminal_action_within_a_bounded_number_of_steps() {
+        for seed in 0..500 {
+            let max_steps = 1 + (seed % 6) as usize;
+            let mut world = RandomTail::new(seed);
+            let mut steps = 0;
+            loop {
+                steps += 1;
+                assert!(steps < 64, "seed {seed} 的恢复没有在 64 步内收尾");
+                let plan = super::next_action(&world.transcript, current_run(), max_steps);
+                match plan.action {
+                    super::NextAction::Finish | super::NextAction::StepLimit => break,
+                    super::NextAction::Request => world.request(),
+                    super::NextAction::Tools(pending) => {
+                        assert!(!pending.is_empty(), "空的工具批次会让恢复空转");
+                        world.run_tools(&pending);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 随机树尾：只保留 `plan` 会读到的形状。
+    struct RandomTail {
+        transcript: Vec<MessageNode>,
+        seed: u64,
+        next_id: i64,
+        call_serial: u64,
+    }
+
+    impl RandomTail {
+        fn new(seed: u64) -> Self {
+            let mut world = Self {
+                transcript: Vec::new(),
+                seed,
+                next_id: 1,
+                call_serial: 0,
+            };
+            let rolls = world.roll(5);
+            // 七成场景从一条用户消息开始，其余从空树、压缩消息或已中断的 assistant 开始。
+            match rolls {
+                0..=3 => {
+                    let id = world.mint();
+                    world.transcript.push(user(id));
+                }
+                4 => {
+                    let id = world.mint();
+                    world.transcript.push(compaction(id, None));
+                }
+                _ => {
+                    let id = world.mint();
+                    let mut assistant = reply(id, 0);
+                    assistant.parent_id = None;
+                    assistant.interrupted = true;
+                    world.transcript.push(assistant);
+                }
+            }
+            world
+        }
+
+        fn roll(&mut self, modulus: u64) -> u64 {
+            self.seed = self
+                .seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (self.seed >> 33) % modulus
+        }
+
+        fn mint(&mut self) -> i64 {
+            self.next_id += 1;
+            self.next_id - 1
+        }
+
+        fn parent(&self) -> Option<i64> {
+            self.transcript.last().map(|node| node.id.get())
+        }
+
+        /// 请求落地：追加一条 assistant，可能带调用、可能标注已中断。
+        fn request(&mut self) {
+            let id = self.mint();
+            let calls = self.roll(3);
+            let interrupted = self.roll(4) == 0;
+            let parts = if calls == 0 {
+                vec![ContentPart::text("回答")]
+            } else {
+                (0..calls)
+                    .map(|_| {
+                        self.call_serial += 1;
+                        ContentPart::tool_call(
+                            format!("call_{}", self.call_serial),
+                            "read_file",
+                            "{}",
+                        )
+                    })
+                    .collect()
+            };
+            let mut node = node(id, self.parent(), MessageRole::Assistant, parts);
+            node.run_id = Some(current_run());
+            node.interrupted = interrupted;
+            self.transcript.push(node);
+        }
+
+        /// 工具批次落地：补齐节点并写入结局。只做一部分，模拟「批次中间又被杀」。
+        fn run_tools(&mut self, pending: &[super::PendingCall]) {
+            let count = u64::try_from(pending.len()).expect("批次数在 u64 之内");
+            let done = 1 + usize::try_from(self.roll(count)).expect("随机数小于批次数");
+            for call in pending.iter().take(done) {
+                let id = if let Some(id) = call.node {
+                    id.get()
+                } else {
+                    let id = self.mint();
+                    let mut node = node(
+                        id,
+                        self.parent(),
+                        MessageRole::Tool,
+                        vec![ContentPart::tool_result(
+                            &call.call.id,
+                            ToolResultState::Running,
+                        )],
+                    );
+                    node.run_id = Some(current_run());
+                    self.transcript.push(node);
+                    id
+                };
+                if let Some(node) = self.transcript.iter_mut().find(|node| node.id.get() == id) {
+                    node.parts = vec![ContentPart::tool_result(&call.call.id, finished())];
+                }
+            }
+        }
+    }
 }

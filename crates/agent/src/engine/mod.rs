@@ -105,12 +105,35 @@ impl RunEngine {
     /// - `StoreError::CorruptedData`：存储值不符合领域约束。
     /// - `StoreError::Invariant`：存储不变量被破坏。
     pub async fn recover(self: &Arc<Self>) -> Result<(), StoreError> {
-        for session in self.store.sessions_with_work().await? {
-            self.resolve_interrupted_tools(&session).await?;
-            self.resolve_interrupted_progress(&session).await?;
+        let sessions = self.store.sessions_with_work().await?;
+        for session in &sessions {
+            self.resolve_interrupted_tools(session).await?;
+            self.resolve_interrupted_progress(session).await?;
+        }
+        // 检查放在修复之后、驱动之前：此刻库是静的，违例就是崩溃留下的真实形状。
+        self.report_invariants().await;
+        for session in sessions {
             self.ensure_driver(session).await;
         }
         Ok(())
+    }
+
+    /// 恢复后的不变量检查。违例只记日志：它说明状态不该出现，但进程仍应继续服务。
+    ///
+    /// 清单见 [`durable::InvariantKind`]，与崩溃前缀矩阵共用同一份检查。
+    async fn report_invariants(&self) {
+        match self.store.check_invariants().await {
+            Ok(violations) => {
+                for violation in violations {
+                    tracing::warn!(
+                        kind = violation.kind.as_str(),
+                        detail = %violation.detail,
+                        "恢复后的不变量违例"
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(error = %error, "检查恢复后的不变量失败"),
+        }
     }
 
     /// 启动恢复时把流式进度入树为已中断消息。续跑推导随后从这条消息之后继续。
