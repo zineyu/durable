@@ -1,6 +1,7 @@
 #![expect(
+    clippy::panic,
     clippy::too_many_lines,
-    reason = "测试用例用一个函数描述完整的工具循环，拆开会掩盖时序断言。"
+    reason = "测试用例用一个函数描述完整的工具循环，拆开会掩盖时序断言；辅助函数用 panic 报告不符合预期的工具结局。"
 )]
 
 use std::time::Duration;
@@ -26,26 +27,29 @@ async fn texts(
     texts
 }
 
-/// 一条消息的工具结果块。
-async fn tool_states(
+/// 一条消息的工具结局，按正文顺序。耗时另在 `duration` 测试目标中断言。
+async fn tool_outcomes(
     harness: &Harness,
     session: &agent::SessionId,
     message: agent::MessageId,
-) -> Vec<(String, agent::ToolResultState)> {
+) -> Vec<(String, agent::ToolOutcome)> {
     harness
         .body(session, message)
         .await
         .tool_results()
-        .map(|(call_id, state)| (call_id.to_owned(), state.clone()))
+        .map(|(call_id, state)| {
+            let agent::ToolResultState::Finished { outcome, .. } = state else {
+                panic!("工具结局已定: {state:?}");
+            };
+            (call_id.to_owned(), outcome.clone())
+        })
         .collect()
 }
 
 /// 工具成功的结局。
-fn succeeded(content: &str) -> agent::ToolResultState {
-    agent::ToolResultState::Finished {
-        outcome: agent::ToolOutcome::Succeeded {
-            content: content.to_owned(),
-        },
+fn succeeded(content: &str) -> agent::ToolOutcome {
+    agent::ToolOutcome::Succeeded {
+        content: content.to_owned(),
     }
 }
 
@@ -157,11 +161,11 @@ async fn executes_tool_calls_in_order_and_continues() {
     assert_eq!(first.parent_id, Some(assistant.id));
     assert_eq!(second.parent_id, Some(first.id));
     assert_eq!(
-        tool_states(&harness, &session.id, first.id).await,
+        tool_outcomes(&harness, &session.id, first.id).await,
         vec![("call_1".to_owned(), succeeded("写入 6 字节: notes.txt"))]
     );
     assert_eq!(
-        tool_states(&harness, &session.id, second.id).await,
+        tool_outcomes(&harness, &session.id, second.id).await,
         vec![("call_2".to_owned(), succeeded("1\t记录\n"))]
     );
 
@@ -446,14 +450,12 @@ async fn passes_tool_failure_to_model_and_continues() {
     let tool = &tree.nodes[2];
     assert_eq!(tool.role, agent::MessageRole::Tool);
     assert_eq!(
-        tool_states(&harness, &session.id, tool.id).await,
+        tool_outcomes(&harness, &session.id, tool.id).await,
         vec![(
             "call_1".to_owned(),
-            agent::ToolResultState::Finished {
-                outcome: agent::ToolOutcome::Failed {
-                    code: agent::ToolErrorCode::FileNotFound,
-                    message: "文件不存在: absent.txt".into(),
-                },
+            agent::ToolOutcome::Failed {
+                code: agent::ToolErrorCode::FileNotFound,
+                message: "文件不存在: absent.txt".into(),
             },
         )]
     );
@@ -533,7 +535,7 @@ async fn broadcasts_tool_node_before_and_after_execution() {
     assert_eq!(finished.id, running.id);
     assert_eq!(finished.parts[0].state, agent::PartState::Complete);
     assert_eq!(
-        tool_states(&harness, &session.id, finished.id).await,
+        tool_outcomes(&harness, &session.id, finished.id).await,
         vec![("call_1".to_owned(), succeeded("写入 6 字节: notes.txt"))]
     );
 

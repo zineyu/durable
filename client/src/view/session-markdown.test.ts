@@ -92,7 +92,7 @@ describe('Markdown 导出', () => {
           {
             kind: 'tool_result',
             callId: 'call-1',
-            state: { status: 'finished', outcome: { status: 'succeeded', content: 'ok' } },
+            state: { status: 'finished', outcome: { status: 'succeeded', content: 'ok' }, durationMs: 5 },
             providerMeta: null,
           },
         ],
@@ -123,6 +123,38 @@ describe('Markdown 导出', () => {
     const markdown = sessionMarkdown(viewOf(compacted), 'macbook-air-01');
     expect(markdown).toContain('## 摘要');
     expect(markdown).toContain('> 之前的对话摘要。');
+  });
+
+  it('已结束 run 的耗时写在与界面相同的句子里', () => {
+    const ended: ClientState = {
+      ...emptyClientState,
+      sessions: [session],
+      trees: {
+        's-1': {
+          activeLeaf: 2,
+          nodes: [
+            { ...message(1, null, 'user'), runId: 1 },
+            { ...message(2, 1, 'assistant'), runId: 1 },
+          ],
+          queue: [],
+          runs: [
+            {
+              id: 1,
+              sessionId: 's-1',
+              status: 'succeeded',
+              failure: null,
+              progress: null,
+              durationMs: 4200,
+              createdAt: 1,
+              updatedAt: new Date(2026, 10, 3, 9, 5, 6).getTime(),
+            },
+          ],
+        },
+      },
+      bodies: cacheOf({ 1: [text('开始。')], 2: [text('完成。')] }),
+    };
+    const markdown = sessionMarkdown(viewOf(ended), 'macbook-air-01');
+    expect(markdown).toContain('> 本次 run 耗时 4.2s（结束于 2026-11-03 09:05:06）');
   });
 
   it('文件名去掉路径分隔符与空白', () => {

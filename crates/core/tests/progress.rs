@@ -241,7 +241,7 @@ async fn cancelling_keeps_partial_output_and_ends_the_run_as_cancelled() {
         .expect("入树已中断消息")
         .expect("progress 非空时入树");
     store
-        .finish_run(&session, &started, RunStatus::Cancelled, None)
+        .finish_run(&session, &started, RunStatus::Cancelled, None, Some(1))
         .await
         .expect("结束 run");
 
@@ -283,6 +283,7 @@ async fn finishing_a_run_clears_progress_without_making_a_message() {
                 code: durable::RunFailureCode::ModelUpstream,
                 message: "连接被拒绝".to_owned(),
             }),
+            Some(1),
         )
         .await
         .expect("结束 run");
@@ -343,7 +344,7 @@ async fn progress_write_requires_the_run_to_be_running() {
         .expect("读取 running run")
         .expect("run 仍在执行");
     store
-        .finish_run(&session, &started, RunStatus::Succeeded, None)
+        .finish_run(&session, &started, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
 

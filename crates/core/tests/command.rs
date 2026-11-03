@@ -80,12 +80,13 @@ async fn commit_failure_publishes_nothing() {
         status: RunStatus::Running,
         failure: None,
         progress: None,
+        duration_ms: None,
         created_at: 1,
         updated_at: 1,
     };
 
     let error = store
-        .finish_run(&session, &missing, RunStatus::Succeeded, None)
+        .finish_run(&session, &missing, RunStatus::Succeeded, None, Some(1))
         .await
         .expect_err("run 行未命中时必须失败");
     assert!(
@@ -153,7 +154,7 @@ async fn queue_and_run_commands_fill_the_envelope() {
 
     after = max_event_id(&store).await;
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
     envelope_matches_snapshot(&store, &session, after).await;
@@ -195,6 +196,7 @@ async fn message_commands_fill_the_envelope() {
                 outcome: durable::ToolOutcome::Succeeded {
                     content: "ok".to_owned(),
                 },
+                duration_ms: 12,
             },
         )
         .await
@@ -254,7 +256,7 @@ async fn idle_commands_fill_the_envelope() {
         .await
         .expect("assistant 入树");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
 

@@ -4,13 +4,15 @@
 //!
 //! 宿主丢失只有一处翻译：在途调用与剩余调用写「结果未知」，run 以 `host_unreachable` 结束。
 
+use std::time::Instant;
+
 use durable::{
     Cancellation, MessageId, RunFailure, RunFailureCode, RunId, RunStart, SessionId, StoreError,
     ToolResultState,
 };
 
 use crate::engine::plan::PendingCall;
-use crate::engine::{RunEngine, storage_failure};
+use crate::engine::{RunEngine, elapsed_ms, storage_failure};
 use crate::link::{ToolContext, ToolEnd};
 
 /// 工具循环的结束方式。
@@ -47,8 +49,12 @@ impl RunEngine {
                 .map_err(|error| storage_failure(&error))?;
             let call = pending.call;
             tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
+            let started = Instant::now();
             let state = match self.tools.execute(&call, &context).await {
-                ToolEnd::Ended(outcome) => ToolResultState::from(outcome),
+                ToolEnd::Ended(outcome) => ToolResultState::Finished {
+                    outcome,
+                    duration_ms: elapsed_ms(started.elapsed()),
+                },
                 ToolEnd::HostGone(closed) => {
                     tracing::warn!(
                         session = %session.as_str(),
@@ -138,6 +144,7 @@ fn log_outcome(session: &SessionId, name: &str, state: &ToolResultState) {
     match state {
         ToolResultState::Finished {
             outcome: durable::ToolOutcome::Failed { code, message },
+            ..
         } => tracing::warn!(
             session = %session.as_str(),
             tool = name,
@@ -147,6 +154,7 @@ fn log_outcome(session: &SessionId, name: &str, state: &ToolResultState) {
         ),
         ToolResultState::Finished {
             outcome: durable::ToolOutcome::Succeeded { .. },
+            ..
         } => {
             tracing::debug!(session = %session.as_str(), tool = name, "工具成功");
         }

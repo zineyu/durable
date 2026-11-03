@@ -1,6 +1,7 @@
 import type { ContentPart } from '../api/generated/ContentPart';
 import type { ToolResultState } from '../api/generated/ToolResultState';
 import type { ToolState } from './types';
+import { formatDuration } from './duration';
 
 /// assistant 消息里的工具调用块。
 export type ToolCallPart = Extract<ContentPart, { kind: 'tool_call' }>;
@@ -12,6 +13,8 @@ export type ToolCardModel = {
   summary: string;
   input: string;
   result: string | null;
+  /// 工具耗时文本；结局未到或结局未知时为 `null`。
+  durationLabel: string | null;
 };
 
 /// 把工具调用块与它的结局合成卡片模型。结局未到时按执行中渲染。
@@ -26,6 +29,7 @@ export function toolCardModel(
     summary: summarize(call.arguments),
     input: call.arguments,
     result: null,
+    durationLabel: null,
   };
   if (state === undefined || state.status === 'running') {
     return model;
@@ -34,9 +38,15 @@ export function toolCardModel(
     return { ...model, state: 'unknown', result: '工具结果未知：执行中崩溃，结局没有观测到。' };
   }
   const outcome = state.outcome;
+  const durationLabel = formatDuration(state.durationMs);
   return outcome.status === 'succeeded'
-    ? { ...model, state: 'succeeded', result: outcome.content }
-    : { ...model, state: 'failed', result: `${outcome.code}: ${outcome.message}` };
+    ? { ...model, state: 'succeeded', result: outcome.content, durationLabel }
+    : {
+        ...model,
+        state: 'failed',
+        result: `${outcome.code}: ${outcome.message}`,
+        durationLabel,
+      };
 }
 
 /// 摘要取工具入参中的目标路径或命令；入参不是 JSON 对象时原样返回。

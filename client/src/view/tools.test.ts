@@ -12,6 +12,7 @@ describe('工具卡片归约', () => {
     const model = toolCardModel(call('call_1', 'read_file', '{"path":"crates/agent/src/sse.rs"}'), {
       status: 'finished',
       outcome: { status: 'succeeded', content: '文件内容' },
+      durationMs: 412,
     });
 
     expect(model).toEqual({
@@ -21,6 +22,7 @@ describe('工具卡片归约', () => {
       summary: 'crates/agent/src/sse.rs',
       input: '{"path":"crates/agent/src/sse.rs"}',
       result: '文件内容',
+      durationLabel: '412ms',
     });
   });
 
@@ -28,11 +30,13 @@ describe('工具卡片归约', () => {
     const model = toolCardModel(call('call_2', 'bash', '{"command":"cargo test","cwd":"client"}'), {
       status: 'finished',
       outcome: { status: 'failed', code: 'bash_timeout', message: '命令超时' },
+      durationMs: 4200,
     });
 
     expect(model.state).toBe('failed');
     expect(model.summary).toBe('cargo test');
     expect(model.result).toBe('bash_timeout: 命令超时');
+    expect(model.durationLabel).toBe('4.2s');
   });
 
   it('结局未到时按执行中渲染，没有结果正文', () => {
@@ -43,6 +47,7 @@ describe('工具卡片归约', () => {
 
     expect(pending.state).toBe('running');
     expect(pending.result).toBeNull();
+    expect(pending.durationLabel).toBeNull();
     expect(running).toEqual(pending);
   });
 
@@ -53,14 +58,17 @@ describe('工具卡片归约', () => {
 
     expect(model.state).toBe('unknown');
     expect(model.result).toBe('工具结果未知：执行中崩溃，结局没有观测到。');
+    expect(model.durationLabel).toBeNull();
   });
 
   it('入参不是 JSON 对象时摘要取原文', () => {
     const model = toolCardModel(call('call_5', 'bash', '不是 JSON'), {
       status: 'finished',
       outcome: { status: 'succeeded', content: '' },
+      durationMs: 3,
     });
 
     expect(model.summary).toBe('不是 JSON');
+    expect(model.durationLabel).toBe('3ms');
   });
 });

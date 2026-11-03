@@ -11,6 +11,7 @@ mod tools;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use durable::{
     EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunId, RunStart, RunStatus,
@@ -231,6 +232,8 @@ impl RunEngine {
         let run = start.run.id.get();
         tracing::info!(session = %session.as_str(), run, "开始 run");
         let cancellation = Cancellation::new();
+        // 续跑的 run 从接管时刻开始计时：重启之前的时段没有单调读数。
+        let started = Instant::now();
         let done = Arc::new(Notify::new());
         self.controls.lock().await.insert(
             session.clone(),
@@ -256,7 +259,13 @@ impl RunEngine {
         }
         if let Err(error) = self
             .store
-            .finish_run(&session, &start.run, outcome.status, outcome.failure)
+            .finish_run(
+                &session,
+                &start.run,
+                outcome.status,
+                outcome.failure,
+                Some(elapsed_ms(started.elapsed())),
+            )
             .await
         {
             tracing::error!(session = %session.as_str(), run, error = %error, "结束 run 失败");
@@ -406,6 +415,11 @@ fn call_name<'a>(transcript: &'a [durable::MessageNode], call_id: &str) -> Optio
         .flat_map(durable::MessageNode::tool_calls)
         .find(|(id, ..)| *id == call_id)
         .map(|(_, name, _)| name)
+}
+
+/// 单调时钟读数转成毫秒。耗时超过 `u64` 上限时截顶，实践中不会发生。
+pub(super) fn elapsed_ms(elapsed: Duration) -> u64 {
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
 }
 
 fn succeeded() -> RunOutcome {

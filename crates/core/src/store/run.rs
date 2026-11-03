@@ -53,6 +53,7 @@ impl Store {
                 status: RunStatus::Running,
                 failure: None,
                 progress: None,
+                duration_ms: None,
                 created_at: now,
                 updated_at: now,
             };
@@ -386,7 +387,10 @@ impl Store {
         .await
     }
 
-    /// 结束 run：写终态并写入事实事件。终态与清空进度在同一事务里生效。
+    /// 结束 run：写终态与耗时，并写入事实事件。终态、耗时与清空进度在同一事务里生效。
+    ///
+    /// `duration_ms` 由调用方用单调时钟测得；没有观测到结束的路径传 `None`，
+    /// 此时界面不显示耗时。
     ///
     /// # Errors
     ///
@@ -403,6 +407,7 @@ impl Store {
         run: &RunRecord,
         status: RunStatus,
         failure: Option<RunFailure>,
+        duration_ms: Option<u64>,
     ) -> Result<(), StoreError> {
         self.command(session, async |command| {
             let now = command.now();
@@ -410,12 +415,17 @@ impl Store {
                 status,
                 failure,
                 progress: None,
+                duration_ms,
                 updated_at: now,
                 ..run.clone()
             };
-            command
-                .changes()
-                .update_run(run.id, status, finished.failure.clone(), now);
+            command.changes().update_run(
+                run.id,
+                status,
+                finished.failure.clone(),
+                duration_ms,
+                now,
+            );
             command.changes().update_run_progress(run.id, None);
             command.changes().append_event(
                 FactEvent::RunFinished {

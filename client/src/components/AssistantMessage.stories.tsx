@@ -24,6 +24,14 @@ export const Complete: Story = {
   args: { state: 'complete', children: body },
 };
 
+export const WithDuration: Story = {
+  args: {
+    state: 'complete',
+    children: body,
+    duration: { label: '4.2s', endedAt: new Date(2026, 10, 3, 9, 5, 6).getTime() },
+  },
+};
+
 export const Streaming: Story = {
   args: {
     state: 'streaming',

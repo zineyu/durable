@@ -110,12 +110,14 @@ impl Changeset {
         id: RunId,
         status: RunStatus,
         failure: Option<RunFailure>,
+        duration_ms: Option<u64>,
         updated_at: i64,
     ) {
         self.push(Change::UpdateRun {
             id,
             status,
             failure,
+            duration_ms,
             updated_at,
         });
     }
@@ -248,6 +250,7 @@ pub(crate) enum Change {
         id: RunId,
         status: RunStatus,
         failure: Option<RunFailure>,
+        duration_ms: Option<u64>,
         updated_at: i64,
     },
     UpdateRunProgress {

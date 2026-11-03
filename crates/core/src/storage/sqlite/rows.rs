@@ -202,6 +202,10 @@ pub(super) fn parse_run(row: &SqliteRow) -> Result<RunRecord, StoreError> {
             })
             .transpose()?,
         progress: row.get("progress"),
+        duration_ms: row
+            .get::<Option<i64>, _>("duration_ms")
+            .map(|value| u64::try_from(value).map_err(|error| corrupted("run.duration_ms", error)))
+            .transpose()?,
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
     })

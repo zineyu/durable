@@ -38,6 +38,7 @@ CREATE TABLE run (
     status TEXT NOT NULL,
     failure TEXT,
     progress TEXT,
+    duration_ms INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );

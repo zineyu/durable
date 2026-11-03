@@ -10,4 +10,14 @@ export type RunRecord = { id: number, sessionId: SessionId, status: RunStatus, f
 /**
  * 流式生成中已经产生的正文。只在 run 为 `running` 时可能非空，结束或定型时清空。
  */
-progress: string | null, createdAt: number, updatedAt: number, };
+progress: string | null, 
+/**
+ * 从开始到结束的耗时，由结束路径用单调时钟测得。
+ *
+ * 只有观测到结束的 run 才有值；重启时被判失败的 run 没有观测到结束，写空值。
+ */
+durationMs: number | null, createdAt: number, 
+/**
+ * 最后一次写入的时刻。已结束的 run 的 `updated_at` 就是结束时刻。
+ */
+updatedAt: number, };

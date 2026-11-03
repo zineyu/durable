@@ -363,7 +363,8 @@ async fn a_tool_call_runs_through_the_ssh_link() {
         matches!(
             state,
             agent::ToolResultState::Finished {
-                outcome: agent::ToolOutcome::Succeeded { .. }
+                outcome: agent::ToolOutcome::Succeeded { .. },
+                ..
             }
         ),
         "工具经 ssh 成功: {state:?}"

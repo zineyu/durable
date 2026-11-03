@@ -58,6 +58,7 @@ function block(
           summary={model.summary}
           input={model.input}
           {...(model.result === null ? {} : { result: model.result })}
+          {...(model.durationLabel === null ? {} : { durationLabel: model.durationLabel })}
         />
       );
     }

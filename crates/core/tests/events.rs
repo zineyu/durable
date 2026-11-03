@@ -143,7 +143,7 @@ async fn run_lifecycle_facts_keep_their_order() {
         .await
         .expect("assistant 入树");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
 

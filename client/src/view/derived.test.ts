@@ -81,6 +81,7 @@ function run(
     status,
     failure: null,
     progress: null,
+    durationMs: null,
     createdAt: id,
     updatedAt: id,
     ...extra,
@@ -465,7 +466,7 @@ describe('session 派生视图', () => {
             {
               kind: 'tool_result',
               callId: 'call_1',
-              state: { status: 'finished', outcome: { status: 'succeeded', content: 'ok' } },
+              state: { status: 'finished', outcome: { status: 'succeeded', content: 'ok' }, durationMs: 5 },
               providerMeta: null,
             },
           ],
@@ -482,7 +483,7 @@ describe('session 派生视图', () => {
       nextId: null,
     });
     expect(view.toolResults).toEqual({
-      call_1: { status: 'finished', outcome: { status: 'succeeded', content: 'ok' } },
+      call_1: { status: 'finished', outcome: { status: 'succeeded', content: 'ok' }, durationMs: 5 },
     });
     expect(view.placeholders.map((placeholder) => placeholder.id)).toEqual([9]);
     expect(view.queue.map((item) => item.id)).toEqual([toQueueItemId('7')]);

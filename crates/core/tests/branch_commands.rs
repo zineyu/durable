@@ -35,7 +35,7 @@ async fn answered() -> (TempDir, Store, SessionId, MessageId, MessageId) {
         .await
         .expect("assistant 入树");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
     let user = assistant.parent_id.expect("assistant 的父用户节点");
@@ -63,7 +63,7 @@ async fn edit_user_message_creates_sibling_and_queues_it() {
         .active_leaf
         .expect("run 的用户节点");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
 
@@ -250,7 +250,7 @@ async fn switch_active_leaf_moves_to_subtree_leaf_without_touching_nodes() {
         .await
         .expect("assistant 入树");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
     let user = second.parent_id.expect("assistant 的父用户节点");
@@ -274,7 +274,7 @@ async fn switch_active_leaf_moves_to_subtree_leaf_without_touching_nodes() {
         .await
         .expect("assistant 入树");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
 

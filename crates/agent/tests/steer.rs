@@ -127,7 +127,8 @@ async fn steers_into_running_run_at_step_boundary() {
         matches!(
             states.first(),
             Some(agent::ToolResultState::Finished {
-                outcome: agent::ToolOutcome::Succeeded { .. }
+                outcome: agent::ToolOutcome::Succeeded { .. },
+                ..
             })
         ),
         "插话不打断正在执行的工具: {states:?}"

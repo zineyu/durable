@@ -45,7 +45,7 @@ impl SqliteStorage {
         .map(parse_queue_item)
         .collect::<Result<Vec<QueueItem>, _>>()?;
         let runs = sqlx::query(
-            "SELECT id, session_id, status, failure, progress, created_at, updated_at FROM run
+            "SELECT id, session_id, status, failure, progress, duration_ms, created_at, updated_at FROM run
              WHERE session_id = ?1 ORDER BY id ASC",
         )
         .bind(id.as_str())

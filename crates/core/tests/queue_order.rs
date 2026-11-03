@@ -70,7 +70,7 @@ async fn queue_length_and_busy_follow_queue_and_run() {
     );
 
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
     let finished = tree(&store, &session).await;
@@ -107,7 +107,7 @@ async fn start_run_takes_one_item_in_queue_order() {
     assert_eq!(tail_text(&store, &session).await, "第一条", "起点是第一条");
 
     store
-        .finish_run(&session, &first.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &first.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
     let second = store

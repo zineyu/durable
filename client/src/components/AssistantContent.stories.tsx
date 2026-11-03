@@ -23,7 +23,7 @@ function call(id: string, name: string, argumentsText: string): ContentPart {
 }
 
 function succeeded(content: string): ToolResultState {
-  return { status: 'finished', outcome: { status: 'succeeded', content } };
+  return { status: 'finished', outcome: { status: 'succeeded', content }, durationMs: 412 };
 }
 
 function skeleton(...kinds: PartSkeleton['kind'][]): PartSkeleton[] {
@@ -66,6 +66,7 @@ export const WithFailedTool: Story = {
       call_2: {
         status: 'finished',
         outcome: { status: 'failed', code: 'edit_not_unique', message: '旧文本匹配到 3 处' },
+        durationMs: 87,
       },
     },
   },

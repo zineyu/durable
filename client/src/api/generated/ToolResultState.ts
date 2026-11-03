@@ -7,4 +7,4 @@ import type { ToolOutcome } from "./ToolOutcome";
  * 工具在执行前入树，此时为 [`ToolResultState::Running`]；执行完毕写入结局；
  * 非幂等工具在执行中崩溃后写 [`ToolResultState::Unknown`]，表示丢失了观测。
  */
-export type ToolResultState = { "status": "running" } | { "status": "finished", outcome: ToolOutcome, } | { "status": "unknown" };
+export type ToolResultState = { "status": "running" } | { "status": "finished", outcome: ToolOutcome, durationMs: number, } | { "status": "unknown" };

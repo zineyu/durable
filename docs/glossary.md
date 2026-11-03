@@ -7,6 +7,8 @@
 | 工具调用 | 一次工具执行的领域身份：调用 id、工具名与参数 JSON。它不携带消息树里的节点位置。 |
 | 工具定义 | 每轮模型请求携带的 function 声明：名称、说明与 JSON Schema 参数。 |
 | 工具失败 | 结构化的 `ToolOutcome::Failed`，含稳定错误码与说明。工具失败回传模型，run 继续。 |
+| 工具耗时 | 一次工具调用从交给执行端到得到结局的时间。它包含 link 往返，因此不小于命令自己报告的执行时间。结果未知的调用没有工具耗时。见 ADR 0061。 |
+| 命令耗时 | `bash` 在结果正文里报告的命令运行时间，只覆盖命令本身。它与工具耗时是两个数。 |
 | 调用终止 | `ToolEnd`：工具执行契约的返回。两支是得到工具结局，或宿主丢失；宿主丢失时该调用写「结果未知」，run 以 `host_unreachable` 结束。 |
 | 读取上限 | `read_file` 的字节上限，默认 256 KiB。超出是错误，不是截断。 |
 | 输出截断 | `bash` 输出超过上限（默认 64 KiB）时保留前段并在结果中标注。截断不是错误。 |
@@ -32,6 +34,7 @@
 | session | 绑定唯一 workspace 的对话单元。含消息树、队列、active leaf。session 因而属于该 workspace 的 host。 |
 | run | 一次用户消息触发的执行。从发起模型请求开始，到 assistant 不再请求工具结束。 |
 | run 状态 | `running`、`succeeded`、`failed`、`cancelled`。排队中的 run 由队列项表示。 |
+| run 耗时 | 一次 run 从开始到结束的时间，不含排队等待。没有观测到结束的 run 没有 run 耗时。见 ADR 0061。 |
 | run 失败类别 | `model_upstream`、`model_rate_limited`、`context_limit_exceeded`、`step_limit_exceeded`、`storage_failed`、`host_unreachable`、`interrupted`（只为读出历史值，不再产生）。 |
 | step | run 内的一次模型请求及其工具调用。 |
 | message tree | session 内消息节点构成的树。节点含 id、parent_id、role、内容块与 run 元数据。一个节点是一条消息。 |

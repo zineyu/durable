@@ -220,6 +220,7 @@ mod tests {
             outcome: durable::ToolOutcome::Succeeded {
                 content: "好".to_owned(),
             },
+            duration_ms: 12,
         }
     }
 

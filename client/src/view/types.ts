@@ -112,6 +112,12 @@ export type MessagePlaceholder = {
   parts: ContentPart[];
 };
 
+/// 已结束 run 的耗时视图。`endedAt` 是该 run 的 `updatedAt`。
+export type RunDuration = {
+  label: string;
+  endedAt: number;
+};
+
 /// 活动链上的一条消息，连同渲染所需的派生结果。
 export type TranscriptEntry = {
   message: MessageSkeleton;
@@ -120,6 +126,8 @@ export type TranscriptEntry = {
   state: MessageState;
   /// 进行中或失败时的说明；其余为 `null`。
   note: string | null;
+  /// 该消息收尾的 run 的耗时；不是收尾消息、run 未结束或未测到耗时时为 `null`。
+  duration: RunDuration | null;
   /// 兄弟分支位置；没有分支时为 `null`。
   branch: BranchPosition | null;
 };

@@ -29,7 +29,7 @@ async fn answered(store: &Store, session: &SessionId) -> (MessageId, MessageId) 
         .await
         .expect("assistant 入树");
     store
-        .finish_run(session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
     (
@@ -99,7 +99,7 @@ async fn transcript_follows_the_active_branch() {
         .await
         .expect("assistant 入树");
     store
-        .finish_run(&session, &start.run, RunStatus::Succeeded, None)
+        .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
         .expect("结束 run");
 

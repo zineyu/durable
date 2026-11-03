@@ -88,9 +88,11 @@ fn tool_result_content(state: &ToolResultState) -> String {
     match state {
         ToolResultState::Finished {
             outcome: ToolOutcome::Succeeded { content },
+            ..
         } => content.clone(),
         ToolResultState::Finished {
             outcome: ToolOutcome::Failed { code, message },
+            ..
         } => serde_json::json!({ "error": code, "message": message }).to_string(),
         ToolResultState::Running => {
             serde_json::json!({ "error": "running", "message": "工具仍在执行" }).to_string()

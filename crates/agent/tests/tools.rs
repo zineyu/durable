@@ -67,7 +67,7 @@ impl ToolRun {
         let states = self.results().await;
         let mut outcomes = Vec::new();
         for state in &states {
-            if let agent::ToolResultState::Finished { outcome } = state {
+            if let agent::ToolResultState::Finished { outcome, .. } = state {
                 outcomes.push(outcome.clone());
             }
         }

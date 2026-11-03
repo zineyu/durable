@@ -72,6 +72,15 @@
   color: var(--color-text-tertiary);
 }
 
+.duration {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-2xs);
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .footer {
   display: flex;
   align-items: center;

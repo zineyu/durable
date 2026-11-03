@@ -66,7 +66,7 @@ async fn finish_running(store: &Store, session: &SessionId) {
         .expect("读取 running 的 run")
     {
         store
-            .finish_run(session, &run, RunStatus::Succeeded, None)
+            .finish_run(session, &run, RunStatus::Succeeded, None, Some(1))
             .await
             .expect("结束 run");
     }

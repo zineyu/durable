@@ -56,8 +56,19 @@ pub(super) async fn apply_change(
             id,
             status,
             failure,
+            duration_ms,
             updated_at,
-        } => update_run(connection, *id, *status, failure.as_ref(), *updated_at).await,
+        } => {
+            update_run(
+                connection,
+                *id,
+                *status,
+                failure.as_ref(),
+                *duration_ms,
+                *updated_at,
+            )
+            .await
+        }
         Change::UpdateRunProgress { id, progress } => {
             update_run_progress(connection, *id, progress.as_deref()).await
         }
@@ -354,8 +365,8 @@ async fn delete_queue_item(
 
 async fn insert_run(connection: &mut SqliteConnection, run: &RunRecord) -> Result<(), StoreError> {
     sqlx::query(
-        "INSERT INTO run (id, session_id, status, failure, progress, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO run (id, session_id, status, failure, progress, duration_ms, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
     )
     .bind(run.id.get())
     .bind(run.session_id.as_str())
@@ -367,6 +378,7 @@ async fn insert_run(connection: &mut SqliteConnection, run: &RunRecord) -> Resul
             .transpose()?,
     )
     .bind(run.progress.as_deref())
+    .bind(duration_ms(run.duration_ms)?)
     .bind(run.created_at)
     .bind(run.updated_at)
     .execute(&mut *connection)
@@ -392,17 +404,28 @@ async fn update_run(
     id: RunId,
     status: RunStatus,
     failure: Option<&RunFailure>,
+    duration_ms_value: Option<u64>,
     updated_at: i64,
 ) -> Result<(), StoreError> {
-    let result =
-        sqlx::query("UPDATE run SET status = ?2, failure = ?3, updated_at = ?4 WHERE id = ?1")
-            .bind(id.get())
-            .bind(status.as_str())
-            .bind(failure.map(serde_json::to_string).transpose()?)
-            .bind(updated_at)
-            .execute(&mut *connection)
-            .await?;
+    let result = sqlx::query(
+        "UPDATE run SET status = ?2, failure = ?3, duration_ms = ?4, updated_at = ?5 WHERE id = ?1",
+    )
+    .bind(id.get())
+    .bind(status.as_str())
+    .bind(failure.map(serde_json::to_string).transpose()?)
+    .bind(duration_ms(duration_ms_value)?)
+    .bind(updated_at)
+    .execute(&mut *connection)
+    .await?;
     ensure_written(&result, "更新 run")
+}
+
+/// SQLite 的 INTEGER 是有符号 64 位；耗时的领域值是无符号，写库前在此转换一次。
+fn duration_ms(value: Option<u64>) -> Result<Option<i64>, StoreError> {
+    value
+        .map(i64::try_from)
+        .transpose()
+        .map_err(|error| StoreError::Invariant(format!("run 耗时超出 i64: {error}")))
 }
 
 async fn append_event(

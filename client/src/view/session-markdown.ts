@@ -1,8 +1,10 @@
 import type { HostName } from '../api/generated/HostName';
 import { bodyText } from './content';
+import { runDurationSentence } from './duration';
 import { toolStateLabel } from './labels';
 import { toolCardModel } from './tools';
 import type { ToolCallPart } from './tools';
+import { formatEndedAt } from './time';
 import type { SessionView } from './types';
 
 /// 把 session 派生视图的活动链渲染为 Markdown。工具调用折叠为引用块。
@@ -30,7 +32,13 @@ export function sessionMarkdown(view: SessionView, host: HostName): string {
     const tools = parts
       .filter((part): part is ToolCallPart => part.kind === 'tool_call')
       .map((part) => toolQuote(part, results[part.callId]));
-    const body = [text, ...tools].filter((piece) => piece.length > 0).join('\n\n');
+    const pieces = [text, ...tools].filter((piece) => piece.length > 0);
+    if (entry.duration !== null) {
+      pieces.push(
+        `> ${runDurationSentence(entry.duration)}（结束于 ${formatEndedAt(entry.duration.endedAt)}）`,
+      );
+    }
+    const body = pieces.join('\n\n');
     if (body.length > 0) {
       sections.push(`## 助手\n\n${body}`);
     }

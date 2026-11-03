@@ -6,6 +6,7 @@ import type { HostName } from '../api/generated/HostName';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { bodyText } from './content';
 import { cachedParts, needs } from './body-cache';
+import { closingRunDurations } from './duration';
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
 import { hostNotice, hostStatusLabel, hostStatusTone, retryNote, runFailureLabel, sessionStateOf } from './labels';
 import type { ClientState, SessionTreeState } from './state';
@@ -243,7 +244,9 @@ function transcriptEntries(state: ClientState, sessionId: string): TranscriptEnt
     return [];
   }
   const siblings = siblingIndex(tree.nodes);
-  return chainOf(tree)
+  const chain = chainOf(tree);
+  const durations = closingRunDurations(chain, tree.runs);
+  return chain
     .filter((message) => message.role !== 'tool')
     .map((message) => {
       const display = messageDisplay(tree.runs, state.retries[sessionId], message);
@@ -252,6 +255,7 @@ function transcriptEntries(state: ClientState, sessionId: string): TranscriptEnt
         parts: cachedParts(state.bodies, message.id),
         state: display.state,
         note: display.note,
+        duration: durations.get(message.id) ?? null,
         branch: branchAt(siblings, message),
       };
     });

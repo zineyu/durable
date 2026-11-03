@@ -66,14 +66,16 @@ pub enum ToolOutcome {
 )]
 pub enum ToolResultState {
     Running,
-    Finished { outcome: ToolOutcome },
+    /// 执行完毕，带回结局与工具耗时。
+    ///
+    /// `duration_ms` 是 agent 在调用点用单调时钟测得的端到端耗时，包含 link 往返；
+    /// `bash` 正文里的「耗时」是命令耗时，两者不是同一个数（ADR 0061）。
+    Finished {
+        outcome: ToolOutcome,
+        #[ts(type = "number")]
+        duration_ms: u64,
+    },
     Unknown,
-}
-
-impl From<ToolOutcome> for ToolResultState {
-    fn from(outcome: ToolOutcome) -> Self {
-        Self::Finished { outcome }
-    }
 }
 
 /// 暴露给模型的工具定义，对应 `OpenAI` 的 `function` 声明。

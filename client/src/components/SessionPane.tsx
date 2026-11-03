@@ -149,6 +149,7 @@ export function SessionPane({
         highlighted={highlighted}
         state={entry.state}
         {...(entry.note === null ? {} : { note: entry.note })}
+        {...(entry.duration === null ? {} : { duration: entry.duration })}
         onRetry={() => { onRetryMessage(message.id); }}
         retryDisabled={!idle}
         {...controls(entry.branch)}

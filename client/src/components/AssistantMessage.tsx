@@ -2,13 +2,16 @@ import { BranchSwitcher } from './BranchSwitcher';
 import { IconButton } from './IconButton';
 import styles from './AssistantMessage.module.css';
 import { messageStateLabel } from '../view/labels';
+import { runDurationSentence } from '../view/duration';
+import { formatEndedAt } from '../view/time';
 import type { ReactElement, ReactNode } from 'react';
-import type { BranchControl, MessageState } from '../view/types';
+import type { BranchControl, MessageState, RunDuration } from '../view/types';
 
 export type AssistantMessageProps = {
   state: MessageState;
   children: ReactNode;
   note?: string;
+  duration?: RunDuration;
   branch?: BranchControl;
   onRetry?: () => void;
   retryDisabled?: boolean;
@@ -20,13 +23,14 @@ export function AssistantMessage({
   state,
   children,
   note,
+  duration,
   branch,
   onRetry,
   retryDisabled = false,
   messageId,
   highlighted = false,
 }: AssistantMessageProps): ReactElement {
-  const showStatus = state !== 'complete' || note !== undefined;
+  const showStatus = state !== 'complete' || note !== undefined || duration !== undefined;
   const showFooter = branch !== undefined || onRetry !== undefined;
   return (
     <article
@@ -47,6 +51,14 @@ export function AssistantMessage({
             </span>
           ) : null}
           {note !== undefined ? <span className={styles.note}>{note}</span> : null}
+          {duration !== undefined ? (
+            <span
+              className={styles.duration}
+              title={`结束于 ${formatEndedAt(duration.endedAt)}`}
+            >
+              {runDurationSentence(duration)}
+            </span>
+          ) : null}
         </p>
       ) : null}
       {showFooter ? (

@@ -315,7 +315,7 @@ impl SqliteStorage {
         id: &SessionId,
     ) -> Result<Option<RunRecord>, StoreError> {
         let row = sqlx::query(
-            "SELECT id, session_id, status, failure, progress, created_at, updated_at FROM run
+            "SELECT id, session_id, status, failure, progress, duration_ms, created_at, updated_at FROM run
              WHERE session_id = ?1 AND status = 'running' ORDER BY id ASC LIMIT 1",
         )
         .bind(id.as_str())
@@ -438,6 +438,12 @@ async fn verify_baseline(pool: &SqlitePool, path: &Path) -> Result<(), StoreErro
             .fetch_all(pool)
             .await?;
     if !columns.iter().any(|column| column == "host") {
+        return Err(legacy());
+    }
+    let run_columns: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info('run')")
+        .fetch_all(pool)
+        .await?;
+    if !run_columns.iter().any(|column| column == "duration_ms") {
         return Err(legacy());
     }
     let views: Vec<String> =

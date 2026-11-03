@@ -70,6 +70,24 @@ const FOREIGN_HISTORY: &str = "
         VALUES (1, 'init', 1, x'00', 0);
 ";
 
+/// 基线形状但 `run` 表缺少 `duration_ms` 列：ADR 0061 之前建的库。
+const RUN_WITHOUT_DURATION: &str = "
+    CREATE TABLE host (name TEXT PRIMARY KEY);
+    CREATE TABLE workspace (host TEXT NOT NULL, path TEXT NOT NULL);
+    CREATE TABLE run (id INTEGER PRIMARY KEY);
+    CREATE TABLE _sqlx_migrations (
+        version BIGINT PRIMARY KEY,
+        description TEXT NOT NULL,
+        installed_on TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        success BOOLEAN NOT NULL,
+        checksum BLOB NOT NULL,
+        execution_time BIGINT NOT NULL
+    );
+    INSERT INTO _sqlx_migrations (version, description, success, checksum, execution_time)
+        VALUES (1, 'baseline', 1, x'00', 0);
+    CREATE VIEW session_head AS SELECT 1 AS id;
+";
+
 /// 用旧结构建库，返回它的路径。
 async fn legacy_database(directory: &tempfile::TempDir, scripts: &[&'static str]) -> PathBuf {
     let path = directory.path().join("legacy.sqlite");
@@ -143,4 +161,19 @@ async fn reopens_a_database_it_created() {
 
     let store = Store::open(&path).await.expect("重新打开新库");
     assert!(store.hosts().await.expect("读取 host 表").is_empty());
+}
+
+/// ADR 0061：`run` 表缺少 `duration_ms` 的库是旧库，打开即被拒绝。
+#[tokio::test]
+async fn refuses_database_without_run_duration_column() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let path = legacy_database(&directory, &[RUN_WITHOUT_DURATION]).await;
+
+    let Err(error) = Store::open(&path).await else {
+        panic!("缺少耗时列的库被拒绝");
+    };
+    assert!(
+        matches!(error, StoreError::LegacyDatabase(_)),
+        "得到 {error:?}"
+    );
 }
