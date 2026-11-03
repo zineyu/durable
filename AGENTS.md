@@ -158,6 +158,7 @@
 
 - 组件只消费 `client/src/styles/tokens.css` 的语义 token，不写颜色字面量与硬编码长度。
 - 页面不含注释性说明。
+- `client/src/view/` 下的纯函数模块即使只有一个调用方也保留：它们从组件与 hook 里取出纯逻辑，由 Vitest 直接断言（ADR 0007 第二条 seam）。合并回去之前，先确认原有测试有别的落点。
 - 组件样式由确定性检查与截图脚本断言：见 `docs/adr/0010-client-style-verification.md`。
 - ESLint 开启类型感知严格集：禁止 `any`、非空断言与未处理联合分支。
 
