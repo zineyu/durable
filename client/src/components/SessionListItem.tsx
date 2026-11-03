@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import type { FocusEvent, KeyboardEvent, ReactElement } from 'react';
+import type { KeyboardEvent, ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import { StatusDot } from './StatusDot';
+import { useMenuDismiss } from './use-menu-dismiss';
 import styles from './SessionListItem.module.css';
 import { sessionStateTone } from '../view/labels';
 import { formatUpdatedAt } from '../view/time';
@@ -35,21 +35,14 @@ export function SessionListItem({
   onDeleteConfirm,
   defaultMenuOpen = false,
 }: SessionListItemProps): ReactElement {
-  const [menuOpen, setMenuOpen] = useState(defaultMenuOpen);
+  const {
+    open: menuOpen,
+    setOpen: setMenuOpen,
+    close,
+    onBlur,
+    onKeyDown,
+  } = useMenuDismiss(defaultMenuOpen);
   const menuVisible = menuOpen || view === 'deleting';
-
-  const handleBlur = (event: FocusEvent<HTMLDivElement>) => {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
-      return;
-    }
-    setMenuOpen(false);
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') {
-      setMenuOpen(false);
-    }
-  };
 
   const handleRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === 'Enter') {
@@ -69,8 +62,8 @@ export function SessionListItem({
     <div
       className={styles.item}
       data-selected={selected}
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
+      onBlur={onBlur}
+      onKeyDown={onKeyDown}
     >
       {view === 'renaming' ? (
         <div className={styles.rename}>
@@ -90,7 +83,7 @@ export function SessionListItem({
           className={styles.select}
           aria-current={selected}
           onClick={() => {
-            setMenuOpen(false);
+            close();
             onSelect?.(session.id);
           }}
         >
@@ -123,8 +116,8 @@ export function SessionListItem({
         onMouseEnter={() => { setMenuOpen(true); }}
         onMouseLeave={() => { setMenuOpen(false); }}
         onFocus={() => { setMenuOpen(true); }}
-        onBlur={handleBlur}
-        onKeyDown={handleKeyDown}
+        onBlur={onBlur}
+        onKeyDown={onKeyDown}
       >
         <IconButton
           icon="more"

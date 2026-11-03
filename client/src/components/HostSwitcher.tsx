@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import type { FocusEvent, KeyboardEvent, ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import type { HostName } from '../api/generated/HostName';
 import { IconButton } from './IconButton';
 import styles from './HostSwitcher.module.css';
 import { StatusDot } from './StatusDot';
+import { useMenuDismiss } from './use-menu-dismiss';
 import type { SessionId } from '../view/ids';
 import type { HostView, SessionSummary, StatusTone } from '../view/types';
 
@@ -37,29 +37,20 @@ export function HostSwitcher({
   onReconnect,
   defaultMenuOpen = false,
 }: HostSwitcherProps): ReactElement {
-  const [menuOpen, setMenuOpen] = useState(defaultMenuOpen);
-
-  const handleBlur = (event: FocusEvent<HTMLElement>) => {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) {
-      return;
-    }
-    setMenuOpen(false);
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key === 'Escape') {
-      setMenuOpen(false);
-    }
-  };
-
-  const close = () => { setMenuOpen(false); };
+  const {
+    open: menuOpen,
+    toggle,
+    close,
+    onBlur,
+    onKeyDown,
+  } = useMenuDismiss(defaultMenuOpen);
 
   return (
     <nav
       className={styles.switcher}
       aria-label="host 切换器"
-      onBlur={handleBlur}
-      onKeyDown={handleKeyDown}
+      onBlur={onBlur}
+      onKeyDown={onKeyDown}
     >
       <div className={styles.bar}>
         <button
@@ -67,7 +58,7 @@ export function HostSwitcher({
           className={styles.trigger}
           aria-haspopup="true"
           aria-expanded={menuOpen}
-          onClick={() => { setMenuOpen((current) => !current); }}
+          onClick={toggle}
         >
           <StatusDot tone={selectedHost === null ? 'idle' : toneOf(hosts, selectedHost)} />
           <span className={styles.name}>{selectedHost ?? 'host'}</span>
