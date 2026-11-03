@@ -233,7 +233,7 @@ stateDiagram-v2
 - 上下文超限与步数超限分别以对应错误码结束 run，队列继续。
 - 上下文超限时先压缩一次并重试：压缩后的 transcript 以摘要消息开头，摘要不带 `run_id`；压缩失败时 run 以 `context_limit_exceeded` 结束，且不留下摘要消息。
 - 编辑历史用户消息产生兄弟节点并执行新 run；重试 assistant 产生同父兄弟；切换 active leaf 后 transcript 与 bootstrap 一致。
-- 在同一 SQLite 上重启 agent：消息树、队列、active leaf 恢复；running 状态转为 failed。
+- 在同一 SQLite 上重启 agent：消息树、队列、active leaf 恢复；重启前仍是 `running` 的 run 从树尾续跑，不新建 run。流式进度入树为标注「已中断」的 assistant 消息，非幂等工具在断链或被杀时记为「结果未知」（ADR 0037、ADR 0047）。崩溃点的覆盖由提交前缀矩阵断言（ADR 0056）。
 - 从 `after` 游标回放事件，客户端视角与 bootstrap 合并后状态一致。
 - `write_file`、`edit_file`、`bash` 的文件系统副作用可在临时 workspace 中直接观察。
 
