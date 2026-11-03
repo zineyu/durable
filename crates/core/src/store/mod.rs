@@ -149,10 +149,7 @@ fn append_node(command: &mut SessionCommand<'_>, node: &MessageNode) {
 
 fn snapshot_into_tree(snapshot: SessionSnapshot) -> SessionTreeSnapshot {
     SessionTreeSnapshot {
-        session: snapshot
-            .head
-            .session
-            .metadata(snapshot.head.queue_length, snapshot.head.busy),
+        session: snapshot.head.session.metadata(snapshot.head.view),
         max_event_id: snapshot.max_event_id,
         active_leaf: snapshot.head.session.active_leaf,
         nodes: snapshot.messages,

@@ -54,10 +54,12 @@
 | 写入线 | 串行化写入的互斥边界。读-改-写与一次原子提交都在同一条写入线内完成。 |
 | changeset | 一次提交登记的变更集合，顺序即意图，在单条存储事务内整体生效。 |
 | 写命令 | 一次写入的完整意图：前置判定、变更登记与返回值。不含加锁、视图推导与发布。 |
-| 命令入口 | `Store::command`、`Store::command_idle` 与 `Store::command_root`。承载加锁、轻量快照、session 视图推导、提交与发布。 |
+| 命令入口 | `Store::command`、`Store::command_idle`、`Store::command_view` 与 `Store::command_root`。承载加锁、轻量快照、session 视图推导、提交与发布。 |
 | 根命令 | 不读 session 快照的写命令：workspace、host 与新建 session。入口是 `Store::command_root`。 |
 | 轻量快照 | 命令入口读取的 session 状态：记录、队列长度与是否有 running 的 run。不加载消息树。 |
-| session 视图 | 事实信封上的 `session` 字段，即该事实提交后的 session 元数据。为空表示该事实不属于任何 session，或该事实删除了 session。 |
+| session 视图 | 事实信封上的 `session` 字段，即该事实提交后的 session 元数据。为空表示该事实不属于任何 session，或该事实删除了 session。队列长度与 `busy` 由提交处的变更清单推导；`updated_at` 是记录字段，不随变更推导。 |
+| 视图基线 | 命令入口读取轻量快照时得到的队列长度与 `busy`，不含本次变更。 |
+| 视图推导 | 由视图基线与一次提交的变更清单求出提交后的队列长度与 `busy` 的动作。这两个字段的定义只在这里，存储只按行读回同一个结果。 |
 | delta | 流式 token 增量。仅经 SSE 实时传输，不落库。 |
 | 限流 | 模型供应商对请求速率的拒绝，通常表现为 HTTP `429` 或带 `Retry-After` 的响应。 |
 | 重试提示 | `retry` 事件：限流等待期间广播的重试序号、上限与等待时长。仅实时，不落库，不推进游标。 |

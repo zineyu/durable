@@ -1,13 +1,15 @@
 //! 一次存储事务内的变更清单：按顺序累积行操作与事实事件，交给存储层落库。
-//! 行写入在 `storage/sqlite/apply`，领域类型在同级各对象模块。
+//! session 视图的推导也在这里（`Changeset::session_view`）；行写入在 `storage/sqlite/apply`，
+//! 领域类型在同级各对象模块。
 
+use crate::error::StoreError;
 use crate::event::FactEvent;
 use crate::host::{HostMetadata, HostName};
 use crate::id::{MessageId, QueueItemId, RunId, SessionId, SessionTitle, WorkspacePath};
 use crate::message::{ContentPart, Message};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
-use crate::session::SessionRecord;
+use crate::session::{SessionRecord, SessionView};
 use crate::workspace::WorkspaceMetadata;
 
 /// 一次原子提交的全部变更。字段私有，只能经下面的方法逐个登记，保证顺序与意图明确。
@@ -141,6 +143,62 @@ impl Changeset {
 
     pub fn append_event(&mut self, event: FactEvent, created_at: i64) {
         self.push(Change::AppendEvent { event, created_at });
+    }
+
+    /// 由视图基线与本次登记的全部变更求出提交后的视图。
+    ///
+    /// 影响视图的变更只有队列项与 run 两类。`match` 逐个列出变体、不带兜底分支：新增变更
+    /// 种类时编译器要求作者表态。队列项只统计指向 `session` 的变更，因此一条命令只能写
+    /// 一个 session。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Invariant`：推导出的队列长度超出 `u32`，或减到负数。此时基线与变更
+    ///   清单不一致，提交应当失败。
+    pub(crate) fn session_view(
+        &self,
+        session: &SessionId,
+        base: SessionView,
+    ) -> Result<SessionView, StoreError> {
+        let mut view = base;
+        for change in &self.operations {
+            match change {
+                Change::InsertQueueItem { session: owner, .. } => {
+                    if owner == session {
+                        view.queue_length = view.queue_length.checked_add(1).ok_or_else(|| {
+                            StoreError::Invariant("推导出的队列长度超出 u32".to_owned())
+                        })?;
+                    }
+                }
+                Change::DeleteQueueItem { session: owner, .. } => {
+                    if owner == session {
+                        view.queue_length = view.queue_length.checked_sub(1).ok_or_else(|| {
+                            StoreError::Invariant("推导出的队列长度减到零以下".to_owned())
+                        })?;
+                    }
+                }
+                Change::InsertRun(run) => view.busy = run.status == RunStatus::Running,
+                Change::UpdateRun { status, .. } => view.busy = *status == RunStatus::Running,
+                Change::ClearPendingSteer { .. }
+                | Change::InsertMessage(_)
+                | Change::ReplaceMessageParts { .. }
+                | Change::BindMessageRun { .. }
+                | Change::RebindMessageParent { .. }
+                | Change::UpdateRunProgress { .. }
+                | Change::InsertSession(_)
+                | Change::UpdateSession { .. }
+                | Change::DeleteSession(_)
+                | Change::InsertWorkspace(_)
+                | Change::DeleteWorkspace { .. }
+                | Change::InsertHost(_)
+                | Change::UpdateHost(_)
+                | Change::RenameHost { .. }
+                | Change::DeleteHost(_)
+                | Change::SetHostInstalledBuild { .. }
+                | Change::AppendEvent { .. } => {}
+            }
+        }
+        Ok(view)
     }
 
     fn push(&mut self, change: Change) {

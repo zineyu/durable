@@ -28,6 +28,27 @@ pub struct SessionMetadata {
     pub updated_at: i64,
 }
 
+/// session 视图里由提交处的变更清单推导的那部分。
+///
+/// 队列长度是队列项行数，`busy` 是存在 `running` 的 run。两者的定义只在
+/// `Changeset::session_view`；存储只按行读回同一个结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SessionView {
+    pub queue_length: u32,
+    pub busy: bool,
+}
+
+impl SessionView {
+    /// 空基线：没有队列项，也没有 run。新建 session 的视图由它推导。
+    #[must_use]
+    pub fn empty() -> Self {
+        SessionView {
+            queue_length: 0,
+            busy: false,
+        }
+    }
+}
+
 /// session 的持久记录。`active_leaf` 是当前 transcript 的叶子消息。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionRecord {
@@ -53,14 +74,14 @@ impl SessionRecord {
     }
 
     #[must_use]
-    pub fn metadata(&self, queue_length: u32, busy: bool) -> SessionMetadata {
+    pub fn metadata(&self, view: SessionView) -> SessionMetadata {
         SessionMetadata {
             id: self.id.clone(),
             host: self.host.clone(),
             workspace: self.workspace.clone(),
             title: self.title.clone(),
-            busy,
-            queue_length,
+            busy: view.busy,
+            queue_length: view.queue_length,
             updated_at: self.updated_at,
         }
     }

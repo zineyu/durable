@@ -13,7 +13,7 @@ use crate::message::{
 };
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
-use crate::session::SessionRecord;
+use crate::session::{SessionRecord, SessionView};
 use crate::storage::SessionHead;
 use crate::workspace::WorkspaceMetadata;
 
@@ -69,18 +69,22 @@ pub(super) fn parse_session(row: &SqliteRow) -> Result<SessionRecord, StoreError
 pub(super) fn parse_session_head(row: &SqliteRow) -> Result<SessionHead, StoreError> {
     Ok(SessionHead {
         session: parse_session(row)?,
-        queue_length: parse_queue_length(row)?,
-        busy: parse_busy(row),
+        view: parse_session_view(row)?,
     })
 }
 
 pub(super) fn parse_session_metadata(
     row: &SqliteRow,
 ) -> Result<crate::session::SessionMetadata, StoreError> {
-    let session = parse_session(row)?;
-    let queue_length = parse_queue_length(row)?;
-    let busy = parse_busy(row);
-    Ok(session.metadata(queue_length, busy))
+    Ok(parse_session(row)?.metadata(parse_session_view(row)?))
+}
+
+/// 视图读回：队列长度与 `busy` 取自 `session_head` 视图的两个计数。
+fn parse_session_view(row: &SqliteRow) -> Result<SessionView, StoreError> {
+    Ok(SessionView {
+        queue_length: parse_queue_length(row)?,
+        busy: parse_busy(row),
+    })
 }
 
 pub(super) fn parse_queue_length(row: &SqliteRow) -> Result<u32, StoreError> {

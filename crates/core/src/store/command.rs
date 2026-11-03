@@ -1,12 +1,12 @@
 //! 写命令入口：加锁、轻量快照、session 视图推导、提交与发布。
+//! 视图的推导本身在 `Changeset::session_view`，入口是它唯一的调用者；
 //! 各对象的写命令在 `session`、`queue`、`run`、`branch`、`compaction`、`workspace`、`host`；
 //! 读方法留在同一门面，不加锁。
 
 use crate::change::{Change, Changeset};
 use crate::error::StoreError;
 use crate::id::SessionId;
-use crate::run::RunStatus;
-use crate::session::{SessionMetadata, SessionRecord};
+use crate::session::{SessionMetadata, SessionRecord, SessionView};
 use crate::storage::SessionHead;
 
 use super::Store;
@@ -17,8 +17,7 @@ use super::Store;
 pub struct SessionCommand<'a> {
     session: SessionRecord,
     initial: SessionRecord,
-    queue_length: u32,
-    busy: bool,
+    base: SessionView,
     changes: &'a mut Changeset,
     now: i64,
 }
@@ -28,8 +27,7 @@ impl SessionCommand<'_> {
         SessionCommand {
             initial: head.session.clone(),
             session: head.session,
-            queue_length: head.queue_length,
-            busy: head.busy,
+            base: head.view,
             changes,
             now,
         }
@@ -49,13 +47,13 @@ impl SessionCommand<'_> {
     /// 快照读取时刻的队列长度，不含本次变更。
     #[must_use]
     pub fn queue_length(&self) -> u32 {
-        self.queue_length
+        self.base.queue_length
     }
 
     /// 快照读取时刻是否有 running 的 run，不含本次变更。
     #[must_use]
     pub fn busy(&self) -> bool {
-        self.busy
+        self.base.busy
     }
 
     /// 本次变更清单。
@@ -69,51 +67,6 @@ impl SessionCommand<'_> {
         self.now
     }
 
-    /// 提交后的 session 视图。
-    ///
-    /// 队列长度与 `busy` 由本次变更推导；记录有变化时 `updated_at` 取本次的 `now`。
-    /// 入口用同一个推导填写事件信封，因此需要返回视图的命令可以直接返回它。
-    ///
-    /// 影响视图的变更只有 `InsertQueueItem`、`DeleteQueueItem`、`InsertRun` 与 `UpdateRun`；
-    /// 新增会改变队列长度或 run 状态的变更种类时，必须同步扩展这里。一条命令只写一个
-    /// session，因此推导不按 session 过滤。
-    ///
-    /// # Errors
-    ///
-    /// - `StoreError::Invariant`：推导出的队列长度超出 `u32`。
-    pub(crate) fn view(&self) -> Result<SessionMetadata, StoreError> {
-        let mut session = self.session.clone();
-        if session != self.initial {
-            session.updated_at = self.now;
-        }
-        Ok(session.metadata(self.queue_length_after()?, self.busy_after()))
-    }
-
-    fn queue_length_after(&self) -> Result<u32, StoreError> {
-        let mut length = i64::from(self.queue_length);
-        for change in self.changes.operations() {
-            length += match change {
-                Change::InsertQueueItem { session, .. } if session == &self.session.id => 1,
-                Change::DeleteQueueItem { session, .. } if session == &self.session.id => -1,
-                _ => 0,
-            };
-        }
-        u32::try_from(length)
-            .map_err(|_| StoreError::Invariant(format!("推导出的队列长度超出 u32: {length}")))
-    }
-
-    fn busy_after(&self) -> bool {
-        let mut busy = self.busy;
-        for change in self.changes.operations() {
-            match change {
-                Change::InsertRun(run) => busy = run.status == RunStatus::Running,
-                Change::UpdateRun { status, .. } => busy = *status == RunStatus::Running,
-                _ => {}
-            }
-        }
-        busy
-    }
-
     fn deletes_session(&self) -> bool {
         self.changes
             .operations()
@@ -121,13 +74,20 @@ impl SessionCommand<'_> {
             .any(|change| matches!(change, Change::DeleteSession(id) if id == &self.session.id))
     }
 
-    /// 收尾：记录有变化时补 `updated_at` 并登记 `update_session`，再返回提交后的视图。
-    /// 删除 session 的命令不写 session 行，视图为空。
+    /// 收尾：推导视图、必要时登记 `update_session`，返回提交后的视图。
+    ///
+    /// 队列长度与 `busy` 取自 `Changeset::session_view`，与事件信封用的是同一次推导。
+    /// 记录有变化时 `updated_at` 取本次的 `now`。删除 session 的命令不写 session 行，
+    /// 视图为空。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::Invariant`：推导出的队列长度超出 `u32` 或减到零以下。
     fn finalize(&mut self) -> Result<Option<SessionMetadata>, StoreError> {
         if self.deletes_session() {
             return Ok(None);
         }
-        let view = self.view()?;
+        let view = self.changes.session_view(&self.session.id, self.base)?;
         if self.session != self.initial {
             self.session.updated_at = self.now;
             self.changes.update_session(
@@ -138,7 +98,7 @@ impl SessionCommand<'_> {
                 self.session.active_leaf,
             );
         }
-        Ok(Some(view))
+        Ok(Some(self.session.metadata(view)))
     }
 }
 
@@ -163,17 +123,14 @@ impl Command<'_> {
     }
 
     /// 登记新 session 的插入，并返回它提交后的视图。
+    ///
+    /// 新 session 没有队列项也没有 run，因此视图由空基线推导。
     pub fn insert_session(&mut self, session: SessionRecord) -> SessionMetadata {
-        let view = created_view(&session);
+        let view = session.metadata(SessionView::empty());
         self.view = Some(view.clone());
         self.changes.insert_session(session);
         view
     }
-}
-
-/// 新 session 的视图：队列为空，没有 run。入口据此填写 `session_created` 的信封。
-fn created_view(session: &SessionRecord) -> SessionMetadata {
-    session.metadata(0, false)
 }
 
 impl Store {
@@ -181,6 +138,8 @@ impl Store {
     ///
     /// 入口流程：加锁 → 读轻量快照 → 闭包 → 推导 session 视图 → 比较记录并登记
     /// `update_session` → 提交 → 成功后发布 → 返回闭包的值。
+    ///
+    /// 需要提交后的视图时用 [`Store::command_view`]。
     ///
     /// # Errors
     ///
@@ -191,6 +150,23 @@ impl Store {
         id: &SessionId,
         f: impl AsyncFnOnce(&mut SessionCommand<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
+        Ok(self.command_view(id, f).await?.0)
+    }
+
+    /// 与 [`Store::command`] 相同，但同时返回提交后的 session 视图。
+    ///
+    /// 视图只能在这里取：它由本次提交的全部变更推导，命令体拿不到部分推导结果。
+    /// 删除 session 的命令返回 `None`。
+    ///
+    /// # Errors
+    ///
+    /// - `StoreError::SessionNotFound`：session 不存在。
+    /// - 闭包返回的错误原样传出；出错时不提交，也不发布事件。
+    pub async fn command_view<T>(
+        &self,
+        id: &SessionId,
+        f: impl AsyncFnOnce(&mut SessionCommand<'_>) -> Result<T, StoreError>,
+    ) -> Result<(T, Option<SessionMetadata>), StoreError> {
         self.run_session(id, false, f).await
     }
 
@@ -209,7 +185,7 @@ impl Store {
         id: &SessionId,
         f: impl AsyncFnOnce(&mut SessionCommand<'_>) -> Result<T, StoreError>,
     ) -> Result<T, StoreError> {
-        self.run_session(id, true, f).await
+        Ok(self.run_session(id, true, f).await?.0)
     }
 
     /// 在写入线内执行一条不读 session 快照的写命令。
@@ -241,7 +217,7 @@ impl Store {
         id: &SessionId,
         idle: bool,
         f: impl AsyncFnOnce(&mut SessionCommand<'_>) -> Result<T, StoreError>,
-    ) -> Result<T, StoreError> {
+    ) -> Result<(T, Option<SessionMetadata>), StoreError> {
         let _line = self.line.lock().await;
         let head = self
             .storage
@@ -249,10 +225,10 @@ impl Store {
             .await?
             .ok_or_else(|| StoreError::SessionNotFound(id.clone()))?;
         if idle {
-            if head.queue_length > 0 {
+            if head.view.queue_length > 0 {
                 return Err(StoreError::QueueNotEmpty(id.clone()));
             }
-            if head.busy {
+            if head.view.busy {
                 return Err(StoreError::RunInProgress(id.clone()));
             }
         }
@@ -264,7 +240,7 @@ impl Store {
             (value, view)
         };
         self.commit(&changes, view.as_ref()).await?;
-        Ok(value)
+        Ok((value, view))
     }
 }
 

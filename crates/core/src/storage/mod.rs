@@ -7,7 +7,7 @@ use crate::host::HostMetadata;
 use crate::message::MessageSkeleton;
 use crate::queue::QueueItem;
 use crate::run::RunRecord;
-use crate::session::{SessionMetadata, SessionRecord};
+use crate::session::{SessionMetadata, SessionRecord, SessionView};
 use crate::workspace::WorkspaceMetadata;
 
 /// bootstrap 所需的元数据快照。
@@ -19,14 +19,14 @@ pub struct Snapshot {
     pub max_event_id: i64,
 }
 
-/// 单个 session 的轻量快照：记录、队列长度与是否有 running 的 run。
+/// 单个 session 的轻量快照：记录与视图。视图里的队列长度与 `busy` 是读回值，
+/// 本次写命令在此基础上推导新视图。
 ///
 /// 命令入口只读它：全量快照会加载全部消息，写热路径不能承担。
 #[derive(Debug, Clone)]
 pub(crate) struct SessionHead {
     pub session: SessionRecord,
-    pub queue_length: u32,
-    pub busy: bool,
+    pub view: SessionView,
 }
 
 /// 单个 session 的完整快照：轻量快照、消息树、队列与 run 列表。

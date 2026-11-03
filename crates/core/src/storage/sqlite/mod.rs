@@ -38,12 +38,12 @@ pub(crate) struct SqliteStorage {
 const BASELINE_VERSION: i64 = 1;
 const BASELINE_DESCRIPTION: &str = "baseline";
 
-/// session 记录与两个轻量计数的查询。全量快照与命令入口共用，两处计数因此一致。
-pub(crate) const SESSION_HEAD_SQL: &str =
-    "SELECT id, workspace_host, workspace, title, title_auto, created_at, updated_at, active_leaf,
-            (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
-            (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
-     FROM session WHERE id = ?1";
+/// 命令入口读一条 session 视图。记录与两个计数都来自 `session_head` SQL 视图，
+/// 队列长度与 `busy` 的定义在 `Changeset::session_view`，这里不重复定义。
+pub(crate) const SESSION_HEAD_SQL: &str = "SELECT * FROM session_head WHERE id = ?1";
+
+/// bootstrap 读全部 session 视图。与 `SESSION_HEAD_SQL` 共用 `session_head` 视图定义。
+const SESSION_VIEWS_SQL: &str = "SELECT * FROM session_head ORDER BY updated_at DESC, row_id DESC";
 
 impl SqliteStorage {
     /// 打开 SQLite 文件，确认它是基线结构，再应用尚未执行的迁移。
@@ -145,17 +145,12 @@ impl SqliteStorage {
         .iter()
         .map(parse_workspace)
         .collect::<Result<Vec<_>, _>>()?;
-        let sessions = sqlx::query(
-            "SELECT id, workspace_host, workspace, title, title_auto, created_at, updated_at, active_leaf,
-                    (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
-                    (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count
-             FROM session ORDER BY updated_at DESC, rowid DESC",
-        )
-        .fetch_all(&mut *transaction)
-        .await?
-        .iter()
-        .map(parse_session_metadata)
-        .collect::<Result<Vec<_>, _>>()?;
+        let sessions = sqlx::query(SESSION_VIEWS_SQL)
+            .fetch_all(&mut *transaction)
+            .await?
+            .iter()
+            .map(parse_session_metadata)
+            .collect::<Result<Vec<_>, _>>()?;
         transaction.commit().await?;
         Ok(Snapshot {
             hosts,
@@ -429,6 +424,13 @@ async fn verify_baseline(pool: &SqlitePool, path: &Path) -> Result<(), StoreErro
             .fetch_all(pool)
             .await?;
     if !columns.iter().any(|column| column == "host") {
+        return Err(legacy());
+    }
+    let views: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type = 'view'")
+            .fetch_all(pool)
+            .await?;
+    if !views.iter().any(|view| view == "session_head") {
         return Err(legacy());
     }
     Ok(())

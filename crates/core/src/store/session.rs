@@ -75,10 +75,9 @@ impl Store {
         id: &SessionId,
         title: &SessionTitle,
     ) -> Result<SessionMetadata, StoreError> {
-        self.command(id, async |command| {
+        self.command_view(id, async |command| {
             command.session_mut().title = title.clone();
             command.session_mut().title_auto = false;
-            let view = command.view()?;
             let now = command.now();
             command.changes().append_event(
                 FactEvent::SessionRenamed {
@@ -86,9 +85,11 @@ impl Store {
                 },
                 now,
             );
-            Ok(view)
+            Ok(())
         })
-        .await
+        .await?
+        .1
+        .ok_or_else(|| StoreError::Invariant("重命名不应删除 session".to_owned()))
     }
 
     /// 删除 session。

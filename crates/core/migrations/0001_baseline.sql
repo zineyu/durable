@@ -92,3 +92,12 @@ CREATE TABLE meta (
 INSERT INTO meta (key, value) VALUES ('next_message_id', 1);
 INSERT INTO meta (key, value) VALUES ('next_queue_item_id', 1);
 INSERT INTO meta (key, value) VALUES ('next_run_id', 1);
+
+-- session 视图的读回：记录与两个计数在这里只按行统计，定义在 `Changeset::session_view`。
+-- `row_id` 供快照按插入顺序打破 `updated_at` 的并列。
+CREATE VIEW session_head AS
+SELECT id, workspace_host, workspace, title, title_auto, created_at, updated_at, active_leaf,
+       (SELECT COUNT(*) FROM queue_item WHERE session_id = session.id) AS queue_length,
+       (SELECT COUNT(*) FROM run WHERE session_id = session.id AND status = 'running') AS running_count,
+       session.rowid AS row_id
+FROM session;

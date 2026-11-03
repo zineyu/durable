@@ -45,7 +45,7 @@
 | [0039](0039-steer-at-step-boundary.md) | 插话在步骤边界接入当前 run | 已接受 | `mode=steer` 的插话在提交时入树，在模型请求与收尾前的步骤边界接入同一个 run；工具不打断；run 结束未消费则降级为排队。 |
 | [0040](0040-client-multi-node-usability.md) | 客户端多节点可用性 | 已取代。见 ADR 0048（客户端改为单游标、单状态） | 命令面板、快捷键、按 (node, session) 的草稿、跨节点运行面板、未读标记、session 内搜索与 Markdown 导出都在客户端完成，不新增协议。 |
 | [0041](0041-node-table-commands-write-node-view.md) | 节点表命令可以写节点视图 | 已取代。见 ADR 0048 | 探测结果只由 watcher 写，停用与等待连接的管理状态由节点表命令写，共用同一条 node_status_changed。 |
-| [0042](0042-fact-envelope-carries-session-view.md) | 事实信封携带 session 视图 | 已接受。取代 ADR 0013 的队列长度递减约定，细化 ADR 0012 的单一写入线 | 事实载荷只留身份，session 视图由命令入口推导并落在事件信封上，`event` 表新增 `session` 列，协议版本升到 5。 |
+| [0042](0042-fact-envelope-carries-session-view.md) | 事实信封携带 session 视图 | 已接受。取代 ADR 0013 的队列长度递减约定，细化 ADR 0012 的单一写入线；视图的定义来源与输出入口由 ADR 0053 细化 | 事实载荷只留身份，session 视图由命令入口推导并落在事件信封上，`event` 表新增 `session` 列，协议版本升到 5。 |
 | [0043](0043-store-error-classification.md) | 错误分类归内核 | 已接受。细化 ADR 0014 的失败类别、ADR 0028 的状态码选型与 ADR 0031 的类别约定 | `StoreError` 给出无载荷的分类与结局类别，状态码只由结局类别决定，两个 seam 穷尽映射协议码并把节点码统一为 `node_not_found`；新增 `storage_failed` 失败类别，协议版本升到 6。 |
 | [0044](0044-client-derived-view.md) | 客户端派生视图层 | 已接受。细化 ADR 0017 的「组件只接收派生后的 props」与 ADR 0024 的分片形状 | 新增纯函数派生层 `view/derived.ts`，摘要全算、完整视图按需算，按分片对象缓存；它是分片表的唯一常规读取者，组件只收 `SessionView`；`SessionTreeState` 由 `SessionTreeSnapshot` 派生；选中位置只由 URL 哈希持有。 |
 | [0045](0045-message-tree-module.md) | 消息树成为独立 module | 已接受。细化 ADR 0036 的压缩截断与 ADR 0038 的骨架读取 | 新增领域类型 `MessageTree`，一次建索引后只回答树的问题；存储只返回行，链上顺序、压缩截断与叶子选择由它回答；协议快照改名 `SessionTreeSnapshot`。 |
@@ -56,3 +56,4 @@
 | [0050](0050-host-lifecycle-module.md) | host 状态机与 link 生命周期收进一个 module | 已接受。细化 ADR 0048 的「状态集中」，并关闭其中安装期间停用的缺口 | `hosts/lifecycle.rs` 的 `HostLifecycle` 拥有状态、link 与代号，唯一写入口是 `apply(HostEvent)`；状态与说明合成单枚举 `HostState`，陈旧事件由 module 内签发的 `Attempt` 丢弃。 |
 | [0051](0051-client-body-cache-module.md) | 正文缓存收进一个 module | 已接受。细化 ADR 0038 的正文按需拉取与 ADR 0044 的派生层读取边界 | 新增 `view/body-cache.ts`，内部是带阶段的条目表与按 id 记的尝试次数，互斥规则由类型排除；`needs` 收候选 id，`reload` 只回退该 session；重试延时留在 hook，`retrying()` 按等待时长分组。 |
 | [0052](0052-tool-call-identity-and-ending.md) | 一次工具调用只有一个身份与一种终止 | 已接受。细化 ADR 0015 的工具契约，删去其中 `NoTools` 的保留；补充 ADR 0049 取消翻译点的工具一侧 | 一个 `ToolCall` 贯穿引擎与传输；`ToolBox` 返回 `ToolEnd` 两种终止，`?` 无法旁路宿主丢失；删除 `ToolErrorCode::LinkClosed` 与 `NoTools`；错答复按断链处理。 |
+| [0053](0053-session-view-defined-by-changeset.md) | session 视图的定义只来自提交处的变更清单 | 已接受。细化 ADR 0042 的「入口是唯一的视图推导点」，补充 ADR 0013 的队列长度约定与 ADR 0046 的不变量用例清单 | 队列长度与 `busy` 只由变更清单推导，`match` 不带兜底分支；`session_head` SQL 视图只读回同一条规则；视图只由 `Store::command_view` 在提交处产出。 |
