@@ -1,5 +1,6 @@
 import type { HostStatus } from '../api/generated/HostStatus';
 import type { RunFailureCode } from '../api/generated/RunFailureCode';
+import type { RunStatus } from '../api/generated/RunStatus';
 import type {
   ConnectionState,
   HostView,
@@ -60,6 +61,13 @@ export const runFailureLabel: Record<RunFailureCode, string> = {
   interrupted: '进程中断',
 };
 
+export const runStatusLabel: Record<RunStatus, string> = {
+  running: '执行中',
+  succeeded: '成功',
+  failed: '失败',
+  cancelled: '已取消',
+};
+
 export function retryNote(retry: RetryState): string {
   return `供应商限流，第 ${retry.attempt}/${retry.maxAttempts} 次重试，等待 ${retryDelay(retry.delayMs)}`;
 }
@@ -83,6 +91,12 @@ export const sessionStateTone: Record<SessionState, StatusTone> = {
   idle: 'idle',
   queued: 'queued',
   running: 'running',
+};
+
+export const connectionLabel: Record<ConnectionState, string> = {
+  connected: '已连接',
+  reconnecting: '重连中',
+  disconnected: '已断开',
 };
 
 export const connectionTone: Record<ConnectionState, StatusTone> = {

@@ -1,5 +1,6 @@
 import type { HostName } from '../api/generated/HostName';
 import type { RunStatus } from '../api/generated/RunStatus';
+import { runStatusLabel, sessionStateLabel } from './labels';
 import type { SessionState } from './types';
 
 export type TitleSession = {
@@ -19,16 +20,16 @@ export function documentTitle(session: TitleSession | null): string {
 
 function statePrefix(session: TitleSession): string {
   if (session.state === 'running') {
-    return '执行中 · ';
+    return `${sessionStateLabel.running} · `;
   }
   if (session.state === 'queued') {
-    return '排队中 · ';
+    return `${sessionStateLabel.queued} · `;
   }
   if (session.lastRun === 'failed') {
-    return '失败 · ';
+    return `${runStatusLabel.failed} · `;
   }
   if (session.lastRun === 'cancelled') {
-    return '已取消 · ';
+    return `${runStatusLabel.cancelled} · `;
   }
   return '';
 }
