@@ -93,9 +93,10 @@
 | session 派生视图 | 一个 session 的完整派生数据：摘要、transcript（消息连同正文、消息状态与说明、分支位置）、工具结局、队列、未定型占位与空闲判定。主面板、session 内搜索与 Markdown 导出读它。 |
 | 命令面板 | `Ctrl/⌘+K` 打开的单一面板。分 session（跨 host）、动作与 host 三组，条目可模糊过滤并用键盘执行。 |
 | 草稿 | 按 session 存在浏览器 `localStorage` 的未发送输入。含折叠的长粘贴块。 |
+| 滚动位置 | 按 session 存在浏览器 `localStorage` 的 transcript 滚动位置，刷新后恢复。见 ADR 0055。 |
 | 未读标记 | 客户端状态里按 `lastSeenAt` 推导的 session 状态：未读、最近完成或最近失败。只在本地，不入库。 |
 | 正在运行面板 | 侧栏中汇总全部 host 运行中 run 的面板。代码标识符 `ActivityPanel`。 |
-| 连接状态 | 客户端对 SSE 连接的可见状态：已连接、重连中、已断开。 |
+| 连接状态 | 客户端对 SSE 连接的可见状态：已连接、重连中、已断开。连续 3 次重连失败升级为已断开，一次成功打开回到已连接。见 ADR 0055。 |
 | scripted provider | 测试用本地 OpenAI 兼容 SSE 服务。按脚本返回响应，不替换被测代码。 |
 | 标准目录 | 应用按平台惯例使用的可写数据与日志目录。macOS 用 `Library` 子目录，类 Unix 平台用 XDG 基础目录，Windows 用 `LOCALAPPDATA`。 |
 | 日志文件 | 标准日志目录中按天轮转的 JSON Lines 文件，文件名为 `<prefix>.<YYYY-MM-DD>.log`，保留最近 14 个。 |

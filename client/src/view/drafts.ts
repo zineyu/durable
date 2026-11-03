@@ -1,8 +1,6 @@
 import { toSessionId } from './ids';
+import type { KeyValueStorage } from './storage';
 import type { SessionId } from './ids';
-
-/// 浏览器存储的最小接口。测试传入内存实现，生产传 `window.localStorage`。
-export type DraftStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 /// 一条 session 的草稿。折叠的粘贴块与正文一起保存，刷新后可还原。
 export type Draft = {
@@ -19,7 +17,7 @@ export function draftKey(sessionId: SessionId): string {
   return `${DRAFT_PREFIX}:${sessionId}`;
 }
 
-export function readDraft(storage: DraftStorage, sessionId: SessionId | null): Draft {
+export function readDraft(storage: KeyValueStorage, sessionId: SessionId | null): Draft {
   if (sessionId === null) {
     return emptyDraft;
   }
@@ -31,7 +29,7 @@ export function readDraft(storage: DraftStorage, sessionId: SessionId | null): D
 }
 
 export function writeDraft(
-  storage: DraftStorage,
+  storage: KeyValueStorage,
   sessionId: SessionId | null,
   draft: Draft,
 ): void {
@@ -47,7 +45,7 @@ export function writeDraft(
 }
 
 /// 上次打开的 session。session id 全局唯一，因此所有 host 共用一条记录。
-export function readLastSession(storage: DraftStorage): SessionId | null {
+export function readLastSession(storage: KeyValueStorage): SessionId | null {
   const raw = storage.getItem(LAST_SESSION_KEY);
   if (raw === null || raw.trim().length === 0) {
     return null;
@@ -55,7 +53,7 @@ export function readLastSession(storage: DraftStorage): SessionId | null {
   return toSessionId(raw);
 }
 
-export function writeLastSession(storage: DraftStorage, sessionId: SessionId): void {
+export function writeLastSession(storage: KeyValueStorage, sessionId: SessionId): void {
   storage.setItem(LAST_SESSION_KEY, sessionId);
 }
 

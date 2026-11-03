@@ -18,16 +18,16 @@ import { Sidebar } from './components/Sidebar';
 import { buildPalette, filterPalette, stepPaletteIndex } from './view/command-palette';
 import type { PaletteEntry } from './view/command-palette';
 import {
+  defaultWorkspaceHost,
   hasSession,
   hostViews,
-  orderedSessions,
   paletteSessions,
   runningEntries,
   sessionView,
   workspaceSummaries,
 } from './view/derived';
+import { orderedSessions } from './view/ordering';
 import { readLastSession, writeLastSession } from './view/drafts';
-import { hostNotice } from './view/labels';
 import { readSelection, writeSelection } from './view/session-hash';
 import type { Selection } from './view/session-hash';
 import { isEditableTarget, resolveShortcut } from './view/shortcuts';
@@ -62,14 +62,18 @@ export function App(): ReactElement {
   );
   const selectedHost = host?.name ?? null;
   const connected = host === undefined || host.available;
-  const notice = selection === null ? null : hostNotice(host);
+  const defaultHost = defaultWorkspaceHost(hosts, selectedHost);
 
   const navigate = useCallback((sessionId: Selection) => {
     window.location.hash = writeSelection(sessionId);
   }, []);
 
   const commands = useCommands({ selection, view, dispatch, report, runCommand, navigate });
-  const { cancelRun, closeDialog, dialog, resetForLocation } = commands;
+  const { cancelRun, closeDialog, dialog, resetForLocation, setDialog } = commands;
+
+  const openRegisterWorkspace = useCallback(() => {
+    setDialog({ kind: 'register-workspace', host: defaultHost, path: '' });
+  }, [defaultHost, setDialog]);
 
   const restoreLast = useRef(false);
 
@@ -157,10 +161,10 @@ export function App(): ReactElement {
           selectSessionOfHost(entry.action.host);
           return;
         case 'register-host':
-          commands.setDialog({ kind: 'register-host', name: '', hostKind: 'local', target: '' });
+          setDialog({ kind: 'register-host', name: '', hostKind: 'local', target: '' });
           return;
         case 'register-workspace':
-          commands.setDialog({ kind: 'register-workspace', host: selectedHost ?? 'local', path: '' });
+          openRegisterWorkspace();
           return;
         case 'cancel-run':
           runCommand(api.cancelRun(entry.action.sessionId));
@@ -171,7 +175,7 @@ export function App(): ReactElement {
         }
       }
     },
-    [commands, navigate, runCommand, selectSessionOfHost, selectedHost],
+    [navigate, openRegisterWorkspace, runCommand, selectSessionOfHost, setDialog],
   );
 
   const cycleSession = useCallback(
@@ -289,8 +293,7 @@ export function App(): ReactElement {
               runCommand(api.updateHost(record.name, { enabled: !record.enabled }));
             }}
             onReconnectHost={(name) => { runCommand(api.reconnectHost(name)); }}
-            notice={notice}
-            commandsDisabled={!connected}
+            registerDisabled={!connected}
             running={running}
             onSelectRunning={navigate}
             onCancelRunning={(id) => { runCommand(api.cancelRun(id)); }}
@@ -304,9 +307,7 @@ export function App(): ReactElement {
             onDeleteConfirm={commands.deleteSession}
             onEditCancel={commands.cancelEditing}
             onCreateSession={commands.createSession}
-            onAddWorkspace={() => {
-              commands.setDialog({ kind: 'register-workspace', host: selectedHost ?? 'local', path: '' });
-            }}
+            onAddWorkspace={openRegisterWorkspace}
             onRemoveWorkspace={(host, path) => {
               commands.setDialog({ kind: 'remove-workspace', host, path });
             }}
@@ -348,9 +349,7 @@ export function App(): ReactElement {
               commands.setDialog({ kind: 'retry', sessionId: view.session.id, messageId });
             }
           }}
-          onRegisterWorkspace={() => {
-            commands.setDialog({ kind: 'register-workspace', host: selectedHost ?? 'local', path: '' });
-          }}
+          onRegisterWorkspace={openRegisterWorkspace}
         />
       </AppShell>
       {commands.dialog !== null ? (

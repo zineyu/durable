@@ -77,6 +77,10 @@ export type WorkspaceSummary = {
   id: WorkspaceId;
   host: HostName;
   path: WorkspacePath;
+  /// host 当前可用。不可用时 `sessions` 为空，写操作禁用。
+  available: boolean;
+  /// host 不可用时给用户看的说明；host 可用时为 `null`。
+  notice: string | null;
   sessions: SessionSummary[];
 };
 

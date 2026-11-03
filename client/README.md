@@ -29,6 +29,7 @@ React + Vite + TypeScript 客户端。设计 token 位于 `src/styles/tokens.css
 | 切换 host | `Alt+1…9`，按 host 面板顺序跳到该 host 最近的 session。 |
 | 取消当前 run | `Esc`。浮层打开时先关闭浮层。 |
 | 草稿 | 按 session id 存 `localStorage`；没有选中 session 时恢复上次打开的那一个。 |
+| 滚动位置 | transcript 的滚动位置按 session id 存 `localStorage`，刷新或切回该 session 时恢复。 |
 | 正在运行 | 侧栏 host 面板下方的面板，按 host 分组列出在跑的 run 并可逐个停止。 |
 | 未读标记 | 侧栏 session 右侧显示「完成」「失败」或未读点；只在当前页面会话期间有效。 |
 | session 内搜索 | 页头放大镜按钮。`Enter` 下一个，`Shift+Enter` 上一个。 |
@@ -55,7 +56,7 @@ devenv shell -- bash -c 'cd client && npm run test:e2e'
 ```
 
 - `e2e/` 下的用例独享一套栈：脚本化 OpenAI 兼容 SSE 服务、真实 `agent`、临时 SQLite 与临时 workspace。页面由 `agent` 自己提供。
-- `palette.spec.ts` 覆盖命令面板按 host 跳转与快捷键；`draft.spec.ts` 覆盖草稿隔离与上次 session 恢复；`reconnect.spec.ts` 覆盖 `agent` 重启后的重连与续传。
+- `palette.spec.ts` 覆盖命令面板按 host 跳转与快捷键；`draft.spec.ts` 覆盖草稿隔离与上次 session 恢复；`scroll.spec.ts` 覆盖刷新后 transcript 滚动位置恢复；`host-availability.spec.ts` 覆盖不可用 host 的说明、写操作禁用与注册 workspace 的默认 host；`reconnect.spec.ts` 覆盖 `agent` 重启后的重连、长时间离线后的「已断开」与恢复。
 - 断言只用用户可见文本与可访问名称；前置数据经 `agent` 的 HTTP API 准备。
 - 模型回答由 `e2e/support/model-server.ts` 的脚本队列决定。`hold` 脚本先流式返回文本再挂起，用于观察运行中的 run，测试调用 `release()` 收尾。
 - 每个测试使用随机端口与临时目录，可并行执行。
@@ -68,7 +69,7 @@ devenv shell -- bash -c 'cd client && npm run test:e2e'
 - 工具栏「主题」切换浅色与深色语义 token。
 - 组件 stories 位于 `src/components/*.stories.tsx`；页面级 stories 为 `Pages/Console` 与 `Pages/Tokens`。
 - host 状态由 `Components/HostSwitcher`、`Components/HostStatusBadge` 与 `Components/Sidebar` 覆盖；页面级 `Pages/Console` 另有 host 不可用、未知 session 与空 host 表三种状态。
-- host 表在面板里维护：`注册 host` 打开注册对话框；每个 host 条目提供停用/启用、重连、重命名与删除。
+- host 表在面板里维护：`注册 host` 打开注册对话框；每个 host 条目提供停用/启用、重连、重命名与删除。host 不在 `ok` 时，重命名与删除、以及它的 workspace 下的新建 session 与移除都禁用；停用/启用与重连仍可用。
 - 组件 stories 通过 `parameters.frame` 选择画框：`sidebar`（280px，侧栏内组件）、`content`（748px，消息与工具行）、`centered`（自然尺寸居中，按钮与图标）、`page`（整页，shell 与页面）。画框只存在于 Storybook。
 
 ## 截图

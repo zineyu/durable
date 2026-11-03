@@ -2,7 +2,7 @@ import type { ReactElement } from 'react';
 import { IconButton } from './IconButton';
 import { StatusDot } from './StatusDot';
 import styles from './ActivityPanel.module.css';
-import { hostGroups } from '../view/derived';
+import { hostGroups } from '../view/ordering';
 import type { RunningEntry } from '../view/types';
 import type { SessionId } from '../view/ids';
 

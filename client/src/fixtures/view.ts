@@ -64,6 +64,8 @@ export const workspaces: WorkspaceSummary[] = [
     id: toWorkspaceId('macbook-air-01', '/Users/zine/space/project/durable'),
     host: 'macbook-air-01',
     path: toWorkspacePath('/Users/zine/space/project/durable'),
+    available: true,
+    notice: null,
     sessions: [
       {
         id: toSessionId('s-1'),
@@ -101,6 +103,8 @@ export const workspaces: WorkspaceSummary[] = [
     id: toWorkspaceId('macbook-air-02', '/Users/zine/space/project/agent-lab'),
     host: 'macbook-air-02',
     path: toWorkspacePath('/Users/zine/space/project/agent-lab'),
+    available: true,
+    notice: null,
     sessions: [
       {
         id: toSessionId('s-4'),
@@ -116,11 +120,35 @@ export const workspaces: WorkspaceSummary[] = [
   },
 ];
 
+export const unreachableWorkspaces: WorkspaceSummary[] = [
+  {
+    id: toWorkspaceId('studio', '/Users/zine/space/project/studio-lab'),
+    host: 'studio',
+    path: toWorkspacePath('/Users/zine/space/project/studio-lab'),
+    available: false,
+    notice: '连接 host 失败: 隧道已断开',
+    sessions: [],
+  },
+];
+
+export const unknownHostWorkspaces: WorkspaceSummary[] = [
+  {
+    id: toWorkspaceId('retired-studio', '/Users/zine/space/project/old'),
+    host: 'retired-studio',
+    path: toWorkspacePath('/Users/zine/space/project/old'),
+    available: false,
+    notice: '未知 host，host 表里没有这个名字',
+    sessions: [],
+  },
+];
+
 export const workspaceWithoutSessions: WorkspaceSummary[] = [
   {
     id: toWorkspaceId('local', '/Users/zine/space/empty'),
     host: 'local',
     path: toWorkspacePath('/Users/zine/space/project/durable'),
+    available: true,
+    notice: null,
     sessions: [],
   },
 ];

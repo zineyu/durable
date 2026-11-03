@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { SessionListItem } from './SessionListItem';
-import { toWorkspacePath } from '../view/ids';
 import { WorkspaceGroup } from './WorkspaceGroup';
-import { workspaces } from '../fixtures/view';
+import { unreachableHost, workspaces } from '../fixtures/view';
+import { toWorkspacePath } from '../view/ids';
 
 const meta = {
   title: 'Components/WorkspaceGroup',
@@ -47,6 +47,16 @@ export const Collapsed: Story = {
     sessionCount: 1,
     defaultOpen: false,
     children: null,
+  },
+};
+
+export const HostUnavailable: Story = {
+  args: {
+    host: 'studio',
+    path: toWorkspacePath('/Users/zine/space/project/studio-lab'),
+    sessionCount: 0,
+    writesDisabled: true,
+    children: <p>{unreachableHost.notice}</p>,
   },
 };
 

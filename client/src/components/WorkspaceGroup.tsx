@@ -11,6 +11,8 @@ export type WorkspaceGroupProps = {
   sessionCount: number;
   children: ReactNode;
   defaultOpen?: boolean;
+  /// host 不可用时禁用写操作：新建 session 与移除 workspace。
+  writesDisabled?: boolean;
   onCreateSession?: () => void;
   onRemove?: () => void;
 };
@@ -21,6 +23,7 @@ export function WorkspaceGroup({
   sessionCount,
   children,
   defaultOpen = true,
+  writesDisabled = false,
   onCreateSession,
   onRemove,
 }: WorkspaceGroupProps): ReactElement {
@@ -45,6 +48,7 @@ export function WorkspaceGroup({
         <IconButton
           icon="plus"
           label={`在 ${path} 下新建 session`}
+          disabled={writesDisabled}
           onClick={() => onCreateSession?.()}
         />
         <IconButton
@@ -52,6 +56,7 @@ export function WorkspaceGroup({
           label={`移除 workspace：${path}`}
           tone="danger"
           className={styles.remove}
+          disabled={writesDisabled}
           onClick={() => onRemove?.()}
         />
       </div>

@@ -1,5 +1,5 @@
 import type { HostName } from '../api/generated/HostName';
-import { hostOrderedSessions } from './derived';
+import { hostOrderedSessions } from './ordering';
 import type { HostView, PaletteSession, SessionSummary } from './types';
 import type { SessionId } from './ids';
 

@@ -7,19 +7,18 @@ import type { RunRecord } from '../api/generated/RunRecord';
 import type { SessionMetadata } from '../api/generated/SessionMetadata';
 import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import {
+  defaultWorkspaceHost,
   hasSession,
-  hostGroups,
-  hostOrderedSessions,
   hostViewOf,
   hostViews,
   missingBodyIds,
-  orderedSessions,
   paletteSessions,
   runningEntries,
   sessionSummaries,
   sessionView,
   workspaceSummaries,
 } from './derived';
+import { hostGroups, hostOrderedSessions, orderedSessions } from './ordering';
 import { cacheOf } from './body-cache.fixture';
 import { begin } from './body-cache';
 import { toQueueItemId, toSessionId } from './ids';
@@ -222,6 +221,39 @@ describe('session 摘要', () => {
 
     expect(view.available).toBe(false);
     expect(view.notice).toBe('不可达');
+  });
+
+  it('不可用 host 的 workspace 给出说明且会话列表为空，未知 host 用固定说明', () => {
+    const value = state({
+      hosts: [host('local'), host('studio', 'unreachable')],
+      workspaces: [workspaceA, workspaceB, { host: 'retired', path: '/work/c', registeredAt: 30 }],
+      sessions: [session('s-a', '/work/a', 100), session('s-b', '/work/b', 200)],
+    });
+
+    expect(
+      workspaceSummaries(value).map((workspace) => [
+        workspace.path,
+        workspace.available,
+        workspace.sessions.length,
+        workspace.notice,
+      ]),
+    ).toEqual([
+      ['/work/a', true, 1, null],
+      ['/work/c', false, 0, '未知 host，host 表里没有这个名字'],
+      ['/work/b', false, 0, '隧道已断开'],
+    ]);
+  });
+
+  it('注册 workspace 的默认 host 跟着选中 host，没有选中时取第一个可用 host', () => {
+    const hosts = hostViews(
+      state({ hosts: [host('local', 'unreachable'), host('studio')] }),
+    );
+
+    expect(defaultWorkspaceHost(hosts, 'local')).toBe('local');
+    expect(defaultWorkspaceHost(hosts, null)).toBe('studio');
+    expect(defaultWorkspaceHost([], null)).toBe('');
+    expect(defaultWorkspaceHost(hostViews(state({ hosts: [host('local', 'unreachable')] })), null))
+      .toBe('local');
   });
 
   it('快捷键顺序沿用侧栏顺序', () => {

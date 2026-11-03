@@ -5,11 +5,13 @@ import { ToolCard } from './ToolCard';
 import { Transcript } from './Transcript';
 import { UserMessage } from './UserMessage';
 import { codeSample } from '../fixtures/view';
+import { toSessionId } from '../view/ids';
 
 const meta = {
   title: 'Components/Transcript',
   component: Transcript,
   parameters: { layout: 'fullscreen', frame: 'content' },
+  args: { sessionId: toSessionId('s-1') },
 } satisfies Meta<typeof Transcript>;
 
 export default meta;

@@ -32,9 +32,8 @@ export type SidebarProps = {
   onRemoveHost?: (host: HostName) => void;
   onToggleHost?: (host: HostView) => void;
   onReconnectHost?: (host: HostName) => void;
-  /// host 不可用或未知时的说明，替换空列表提示。
-  notice?: string | null;
-  commandsDisabled?: boolean;
+  /// host 不可用时禁用注册 workspace 的入口。
+  registerDisabled?: boolean;
   running?: RunningEntry[];
   onSelectRunning?: (sessionId: SessionId) => void;
   onCancelRunning?: (sessionId: SessionId) => void;
@@ -63,8 +62,7 @@ export function Sidebar({
   onRemoveHost,
   onToggleHost,
   onReconnectHost,
-  notice = null,
-  commandsDisabled = false,
+  registerDisabled = false,
   running = [],
   onSelectRunning,
   onCancelRunning,
@@ -105,9 +103,7 @@ export function Sidebar({
         {...(onCancelRunning ? { onCancel: onCancelRunning } : {})}
       />
       <div className={styles.list}>
-        {notice !== null ? (
-          <p className={styles.notice}>{notice}</p>
-        ) : workspaces.length === 0 ? (
+        {workspaces.length === 0 ? (
           <p className={styles.empty}>还没有 workspace。注册一个目录后即可创建 session。</p>
         ) : null}
         {workspaces.map((workspace) => (
@@ -116,11 +112,16 @@ export function Sidebar({
             host={workspace.host}
             path={workspace.path}
             sessionCount={workspace.sessions.length}
+            writesDisabled={!workspace.available}
             {...(onCreateSession ? { onCreateSession: () => { onCreateSession(workspace.host, workspace.path); } } : {})}
             {...(onRemoveWorkspace ? { onRemove: () => { onRemoveWorkspace(workspace.host, workspace.path); } } : {})}
           >
             {workspace.sessions.length === 0 ? (
-              <p className={styles.emptySessions}>暂无 session</p>
+              workspace.available ? (
+                <p className={styles.emptySessions}>暂无 session</p>
+              ) : (
+                <p className={styles.notice}>{workspace.notice}</p>
+              )
             ) : null}
             {workspace.sessions.map((session) => (
               <SessionListItem
@@ -144,7 +145,7 @@ export function Sidebar({
           variant="secondary"
           onClick={onAddWorkspace}
           className={styles.addButton}
-          disabled={commandsDisabled}
+          disabled={registerDisabled}
         >
           注册 workspace
         </Button>

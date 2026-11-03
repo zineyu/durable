@@ -58,3 +58,4 @@
 | [0052](0052-tool-call-identity-and-ending.md) | 一次工具调用只有一个身份与一种终止 | 已接受。细化 ADR 0015 的工具契约，删去其中 `NoTools` 的保留；补充 ADR 0049 取消翻译点的工具一侧 | 一个 `ToolCall` 贯穿引擎与传输；`ToolBox` 返回 `ToolEnd` 两种终止，`?` 无法旁路宿主丢失；删除 `ToolErrorCode::LinkClosed` 与 `NoTools`；错答复按断链处理。 |
 | [0053](0053-session-view-defined-by-changeset.md) | session 视图的定义只来自提交处的变更清单 | 已接受。细化 ADR 0042 的「入口是唯一的视图推导点」，补充 ADR 0013 的队列长度约定与 ADR 0046 的不变量用例清单 | 队列长度与 `busy` 只由变更清单推导，`match` 不带兜底分支；`session_head` SQL 视图只读回同一条规则；视图只由 `Store::command_view` 在提交处产出。 |
 | [0054](0054-error-classification-without-payload-free-copy.md) | 错误分类不再复制一份无载荷枚举 | 已接受。细化 ADR 0043 的分类形状 | 删除 `StoreErrorKind`：`StoreError::class()` 与 `code_of(&StoreError)` 直接匹配十九个带载荷变体，枚举从三个减到两个，一条机械映射与它的自反测试表消失。 |
+| [0055](0055-client-follow-ups.md) | 客户端收尾：滚动恢复、不可用 host 的说明与连接状态升级 | 已接受。细化 ADR 0048 的客户端部分与 ADR 0017 的派生视图接线 | transcript 滚动位置按 session 存入浏览器存储并在每次提交后重试恢复；不可用说明落在 `WorkspaceSummary.notice`；不可用 host 只禁用依赖它的写操作；连续 3 次重连失败升级为「已断开」。 |

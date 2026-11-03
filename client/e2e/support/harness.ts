@@ -82,13 +82,27 @@ export class Harness {
   }
 
   /// 在指定 host 的 workspace 下创建 session，返回 session id。
-  async createSession(workspace: string, host = 'local'): Promise<string> {
+  async createSession(workspace: string, host = 'local', title: string | null = null): Promise<string> {
     const session = await this.request<SessionMetadata>('POST', '/api/sessions', {
       host,
       workspace,
-      title: null,
+      title,
     });
     return session.id;
+  }
+
+  /// 注册一台本机 host。它自己拉起一个 executor 子进程。
+  async registerHost(name: string, kind: 'local' | 'ssh', target: string | null): Promise<void> {
+    await this.request('POST', '/api/hosts', { name, kind, target });
+  }
+
+  /// 停用或启用一个 host。停用后它的状态变为 `unreachable`。
+  async setHostEnabled(name: string, enabled: boolean): Promise<void> {
+    await this.request('PATCH', `/api/hosts/${encodeURIComponent(name)}`, {
+      name: null,
+      target: null,
+      enabled,
+    });
   }
 
   async sessionTree(sessionId: string): Promise<SessionTreeSnapshot> {
@@ -102,12 +116,22 @@ export class Harness {
     return await this.request<BootstrapResponse>('GET', '/api/bootstrap');
   }
 
-  /// 用同一端口与同一数据库重启 agent，模拟进程重启与客户端重连。
-  async restartAgent(): Promise<void> {
-    const listen = new URL(this.agentUrl).host;
+  /// 杀掉 agent 进程，模拟长时间离线。
+  async stopAgent(): Promise<void> {
     await this.agent.stop();
+  }
+
+  /// 在同一端口与同一数据库上重新拉起 agent。调用方负责先停掉旧进程。
+  async startAgent(): Promise<void> {
+    const listen = new URL(this.agentUrl).host;
     this.agent = await this.relaunchAgent(listen);
     this.agentUrl = this.agent.url;
+  }
+
+  /// 用同一端口与同一数据库重启 agent，模拟进程重启与客户端重连。
+  async restartAgent(): Promise<void> {
+    await this.stopAgent();
+    await this.startAgent();
   }
 
   /// 结束整套栈并删除临时目录。任一步失败都不阻断其余步骤。

@@ -7,7 +7,7 @@ import type { WorkspaceMetadata } from '../api/generated/WorkspaceMetadata';
 import { bodyText } from './content';
 import { cachedParts, needs } from './body-cache';
 import { toQueueItemId, toSessionId, toWorkspaceId, toWorkspacePath } from './ids';
-import { hostStatusLabel, hostStatusTone, retryNote, runFailureLabel, sessionStateOf } from './labels';
+import { hostNotice, hostStatusLabel, hostStatusTone, retryNote, runFailureLabel, sessionStateOf } from './labels';
 import type { ClientState, SessionTreeState } from './state';
 import type {
   BranchPosition,
@@ -37,25 +37,38 @@ export function sessionSummaries(state: ClientState): SessionSummary[] {
 
 export function workspaceSummaries(state: ClientState): WorkspaceSummary[] {
   const rows = summaryRows(state);
-  const available = new Set(
-    hostViews(state)
-      .filter((view) => view.available)
-      .map((view) => view.name),
-  );
-  return [...state.workspaces].sort(compareWorkspaces).map((workspace) => ({
-    id: toWorkspaceId(workspace.host, workspace.path),
-    host: workspace.host,
-    path: toWorkspacePath(workspace.path),
-    sessions: available.has(workspace.host)
-      ? rows
-          .filter(
-            (row) =>
-              row.session.host === workspace.host && row.session.workspace === workspace.path,
-          )
-          .sort((left, right) => right.session.updatedAt - left.session.updatedAt)
-          .map((row) => row.summary)
-      : [],
-  }));
+  const hosts = new Map(hostViews(state).map((view) => [view.name, view]));
+  return [...state.workspaces].sort(compareWorkspaces).map((workspace) => {
+    const host = hosts.get(workspace.host);
+    const available = host?.available === true;
+    return {
+      id: toWorkspaceId(workspace.host, workspace.path),
+      host: workspace.host,
+      path: toWorkspacePath(workspace.path),
+      available,
+      notice: hostNotice(host),
+      sessions: available
+        ? rows
+            .filter(
+              (row) =>
+                row.session.host === workspace.host && row.session.workspace === workspace.path,
+            )
+            .sort((left, right) => right.session.updatedAt - left.session.updatedAt)
+            .map((row) => row.summary)
+        : [],
+    };
+  });
+}
+
+/// 注册 workspace 对话框的默认 host：当前选中的 host，否则第一个可用的 host，
+/// 否则 host 表的第一项，都没有时为空串。
+/// 规格 user story R-19：写操作跟着当前 host，而不是一个写死的名字。
+export function defaultWorkspaceHost(hosts: HostView[], selected: HostName | null): string {
+  if (selected !== null) {
+    return selected;
+  }
+  const available = hosts.find((host) => host.available);
+  return available?.name ?? hosts[0]?.name ?? '';
 }
 
 /// 全部 host 的呈现视图，顺序沿用 host 表。
@@ -79,11 +92,6 @@ export function hostViewOf(record: HostRecord): HostView {
     target: record.target,
     enabled: record.enabled,
   };
-}
-
-/// 侧栏展示顺序下的全部 session，供快捷键在同一顺序里切换。
-export function orderedSessions(workspaces: WorkspaceSummary[]): SessionSummary[] {
-  return workspaces.flatMap((workspace) => workspace.sessions);
 }
 
 export function sessionView(state: ClientState, sessionId: string): SessionView | null {
@@ -126,40 +134,6 @@ export function runningEntries(state: ClientState): RunningEntry[] {
       (left.startedAt ?? Number.MAX_SAFE_INTEGER) - (right.startedAt ?? Number.MAX_SAFE_INTEGER) ||
       left.host.localeCompare(right.host) ||
       left.sessionId.localeCompare(right.sessionId),
-  );
-}
-
-/// 按 host 分组的条目。组的先后与组内顺序由分组函数决定。
-export type HostGroup<T> = {
-  host: HostName;
-  entries: T[];
-};
-
-/// 相邻同 host 的条目合成一组，输入顺序不变。正在运行面板据此把同一台机器上的 run 并在一起。
-export function hostGroups(entries: RunningEntry[]): HostGroup<RunningEntry>[] {
-  const groups: HostGroup<RunningEntry>[] = [];
-  for (const entry of entries) {
-    const group = groups.at(-1);
-    if (group?.host === entry.host) {
-      group.entries.push(entry);
-    } else {
-      groups.push({ host: entry.host, entries: [entry] });
-    }
-  }
-  return groups;
-}
-
-/// 命令面板的 session 顺序：host 顺序沿用 host 表，组内最近更新的在前。
-export function hostOrderedSessions(
-  sessions: PaletteSession[],
-  hosts: HostView[],
-): PaletteSession[] {
-  const order = new Map(hosts.map((host, index) => [host.name, index]));
-  return [...sessions].sort(
-    (left, right) =>
-      (order.get(left.host) ?? Number.MAX_SAFE_INTEGER) -
-        (order.get(right.host) ?? Number.MAX_SAFE_INTEGER) ||
-      right.updatedAt - left.updatedAt,
   );
 }
 

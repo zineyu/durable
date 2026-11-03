@@ -12,7 +12,7 @@ import { Sidebar } from '../components/Sidebar';
 import { ToolCard } from '../components/ToolCard';
 import { Transcript } from '../components/Transcript';
 import { UserMessage } from '../components/UserMessage';
-import { codeSample, hosts, modelName, queueItems, workspaces } from '../fixtures/view';
+import { codeSample, hosts, modelName, queueItems, unreachableWorkspaces, workspaces } from '../fixtures/view';
 import { toSessionId, toWorkspacePath } from '../view/ids';
 
 const meta = {
@@ -59,7 +59,7 @@ export const Running: Story = {
         state="running"
         connection="connected"
       />
-      <Transcript>
+      <Transcript sessionId={toSessionId('s-1')}>
         <UserMessage text="把 ui 的静态资源改为内嵌，并确认 SSE 不被缓冲。" />
         <AssistantMessage state="complete">
           <p>先确认 ui 的构建顺序，再验证反代路径。</p>
@@ -99,7 +99,7 @@ export const Idle: Story = {
         state="idle"
         connection="connected"
       />
-      <Transcript>
+      <Transcript sessionId={toSessionId('s-1')}>
         <UserMessage text="检查 ts-rs 的输出是否与前端消费的类型一致。" />
         <AssistantMessage state="complete">
           <p>生成文件已提交，CI 会在重新生成后比较差异。</p>
@@ -133,7 +133,7 @@ export const SearchOpen: Story = {
         onStep={() => undefined}
         onClose={() => undefined}
       />
-      <Transcript>
+      <Transcript sessionId={toSessionId('s-1')}>
         <UserMessage text="实现迁移并在重启后恢复队列。" />
         <AssistantMessage state="complete">
           <p>迁移已经完成，接下来需要补恢复路径的测试。</p>
@@ -159,7 +159,7 @@ export const Failed: Story = {
         state="idle"
         connection="reconnecting"
       />
-      <Transcript>
+      <Transcript sessionId={toSessionId('s-1')}>
         <UserMessage text="实现迁移并在重启后恢复队列。" />
         <AssistantMessage state="failed" note="模型上游错误：连接被拒绝。队列将继续执行下一项。">
           <p>迁移已经完成，接下来需要补</p>
@@ -185,7 +185,7 @@ export const NoSession: Story = {
         state="idle"
         connection="disconnected"
       />
-      <Transcript>
+      <Transcript sessionId={toSessionId('s-1')}>
         <AssistantMessage state="complete">
           <p>从左侧选择 session，或者注册新的 workspace 后创建 session。</p>
         </AssistantMessage>
@@ -203,10 +203,9 @@ export const UnavailableHost: Story = {
           hosts={hosts}
           selectedHost="studio"
           sessions={[]}
-          notice="连接 host 失败: 隧道已断开"
-          commandsDisabled
+          registerDisabled
           modelName=""
-          workspaces={[]}
+          workspaces={unreachableWorkspaces}
           selectedSessionId={null}
         />
       }
@@ -238,7 +237,7 @@ export const NoHosts: Story = {
           modelName=""
           workspaces={[]}
           selectedSessionId={null}
-          commandsDisabled
+          registerDisabled
         />
       }
     >

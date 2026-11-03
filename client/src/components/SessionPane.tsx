@@ -16,7 +16,7 @@ import { SearchBar } from './SearchBar';
 import { Transcript } from './Transcript';
 import { UserMessage } from './UserMessage';
 import { bodyText } from '../view/content';
-import { toWorkspacePath } from '../view/ids';
+import { toSessionId, toWorkspacePath } from '../view/ids';
 import { searchTranscript, stepHit } from '../view/search';
 import { markdownFileName, sessionMarkdown } from '../view/session-markdown';
 import type {
@@ -215,7 +215,7 @@ export function SessionPane({
           onClose={closeSearch}
         />
       ) : null}
-      <Transcript>
+      <Transcript sessionId={toSessionId(sessionId)}>
         {entries.length === 0 && pending.length === 0 ? (
           <EmptyState title="还没有消息" description="在下方输入框提交第一条消息。" />
         ) : (

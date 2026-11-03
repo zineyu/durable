@@ -69,6 +69,7 @@ export function HostSwitcher({
         <div className={styles.panel}>
           {hosts.length === 0 ? <p className={styles.empty}>还没有 host</p> : null}
           {hosts.map((host) => {
+            const hostSessions = sessions.filter((session) => session.host === host.name);
             return (
               <section key={host.name} className={styles.host} aria-label={`host ${host.name}`}>
                 <div className={styles.hostHeader}>
@@ -82,7 +83,7 @@ export function HostSwitcher({
                 <p className={styles.target}>
                   {host.kind === 'ssh' ? host.target : '本机'}
                 </p>
-                {host.detail === null ? null : (
+                {host.notice === null ? null : (
                   <p className={styles.detail}>{host.notice}</p>
                 )}
                 <div className={styles.hostActions}>
@@ -104,6 +105,7 @@ export function HostSwitcher({
                     icon="pencil"
                     label={`重命名 host：${host.name}`}
                     size="sm"
+                    disabled={!host.available}
                     onClick={() => { close(); onRename?.(host.name); }}
                   />
                   <IconButton
@@ -111,16 +113,16 @@ export function HostSwitcher({
                     label={`删除 host：${host.name}`}
                     tone="danger"
                     size="sm"
+                    disabled={!host.available}
                     onClick={() => { close(); onRemove?.(host.name); }}
                   />
                 </div>
-                <ul className={styles.sessions}>
-                  {sessions.filter((session) => session.host === host.name).length === 0 ? (
-                    <li className={styles.empty}>这个 host 没有 session</li>
-                  ) : null}
-                  {sessions
-                    .filter((session) => session.host === host.name)
-                    .map((session) => (
+                {host.available ? (
+                  <ul className={styles.sessions}>
+                    {hostSessions.length === 0 ? (
+                      <li className={styles.empty}>这个 host 没有 session</li>
+                    ) : null}
+                    {hostSessions.map((session) => (
                       <li key={session.id}>
                         <button
                           type="button"
@@ -135,7 +137,8 @@ export function HostSwitcher({
                         </button>
                       </li>
                     ))}
-                </ul>
+                  </ul>
+                ) : null}
               </section>
             );
           })}

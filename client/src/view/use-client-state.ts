@@ -4,6 +4,14 @@ import { api } from '../api/client';
 import type { ApiFailure, ApiResult } from '../api/client';
 import { openEventStream } from '../api/events';
 import type { EventStream } from '../api/events';
+import {
+  connectionFailed,
+  connectionNeverOpened,
+  connectionOpened,
+  freshReconnectProgress,
+  reconnectState,
+} from './connection';
+import type { ConnectionAttempt, ReconnectProgress } from './connection';
 import { hasSession } from './derived';
 import { snapshotCursor } from './state';
 import { initialClientState, reduce } from './reducer';
@@ -45,6 +53,7 @@ export function useClientState(selection: Selection): ClientController {
   const streamRef = useRef<EventStream | null>(null);
   const cursorRef = useRef<number | null>(null);
   const selectionRef = useRef<Selection>(selection);
+  const progressRef = useRef<ReconnectProgress>(freshReconnectProgress);
 
   useEffect(() => {
     cursorRef.current = state.lastEventId;
@@ -57,6 +66,11 @@ export function useClientState(selection: Selection): ClientController {
   useEffect(() => {
     const liveness = new AbortController();
     let retry: ReturnType<typeof setTimeout> | null = null;
+
+    const reportConnection = (attempt: ConnectionAttempt) => {
+      progressRef.current = attempt.progress;
+      dispatch({ type: 'connection', connection: attempt.state });
+    };
 
     const delay = (milliseconds: number) =>
       new Promise<void>((resolve) => {
@@ -89,28 +103,56 @@ export function useClientState(selection: Selection): ClientController {
       return cursor;
     };
 
-    const reconnect = async () => {
+    /// 重试到拿到可用快照为止。首次进入循环时的失败交给 `onFirstFailure`，
+    /// 之后的失败按连续次数累计。中止时返回 `null`。
+    const waitForSnapshot = async (onFirstFailure: () => void): Promise<number | null> => {
+      let first = true;
       for (;;) {
         const cursor = await syncSnapshot();
         if (liveness.signal.aborted) {
-          return;
+          return null;
         }
         if (cursor !== null) {
-          streamRef.current?.resume(cursor);
-          return;
+          return cursor;
+        }
+        if (first) {
+          onFirstFailure();
+          first = false;
+        } else {
+          reportConnection(connectionFailed(progressRef.current));
         }
         await delay(RECONNECT_DELAY_MS);
         if (liveness.signal.aborted) {
-          return;
+          return null;
         }
       }
+    };
+
+    const reconnect = async () => {
+      const cursor = await waitForSnapshot(() => {
+        reportConnection(connectionFailed(progressRef.current));
+      });
+      if (cursor === null || liveness.signal.aborted) {
+        return;
+      }
+      streamRef.current?.resume(cursor);
     };
 
     const connect = (maxEventId: number) => {
       const cursor = snapshotCursor(cursorRef.current, maxEventId);
       streamRef.current = openEventStream(cursor, {
         onEvent: (event) => { dispatch({ type: 'stream', event }); },
-        onState: (connection) => { dispatch({ type: 'connection', connection }); },
+        onState: (connection) => {
+          if (connection === 'connected') {
+            reportConnection(connectionOpened());
+            return;
+          }
+          /// 已升级为「已断开」时，一次新的连接尝试不把状态降回「重连中」。
+          if (reconnectState(progressRef.current) === 'disconnected') {
+            return;
+          }
+          dispatch({ type: 'connection', connection });
+        },
         onDisconnect: () => {
           void reconnect();
         },
@@ -118,12 +160,10 @@ export function useClientState(selection: Selection): ClientController {
     };
 
     void (async () => {
-      const cursor = await syncSnapshot();
-      if (liveness.signal.aborted) {
-        return;
-      }
-      if (cursor === null) {
-        dispatch({ type: 'connection', connection: 'disconnected' });
+      const cursor = await waitForSnapshot(() => {
+        reportConnection(connectionNeverOpened());
+      });
+      if (cursor === null || liveness.signal.aborted) {
         return;
       }
       connect(cursor);

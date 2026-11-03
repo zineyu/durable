@@ -4,7 +4,8 @@ import { toSessionId } from '../view/ids';
 import {
   hosts,
   modelName,
-  unreachableHost,
+  unknownHostWorkspaces,
+  unreachableWorkspaces,
   workspaceWithoutSessions,
   workspaces,
 } from '../fixtures/view';
@@ -74,12 +75,11 @@ export const DeleteConfirm: Story = {
 export const UnreachableHost: Story = {
   args: {
     ...base,
-    selectedHost: unreachableHost.name,
-    workspaces: [],
+    selectedHost: 'studio',
+    workspaces: unreachableWorkspaces,
     sessions: [],
     selectedSessionId: null,
-    notice: unreachableHost.detail,
-    commandsDisabled: true,
+    registerDisabled: true,
   },
 };
 
@@ -87,11 +87,10 @@ export const UnknownHost: Story = {
   args: {
     ...base,
     selectedHost: 'retired-studio',
-    workspaces: [],
+    workspaces: unknownHostWorkspaces,
     sessions: [],
     selectedSessionId: null,
-    notice: '未知 host，host 表里没有这个名字',
-    commandsDisabled: true,
+    registerDisabled: true,
   },
 };
 
