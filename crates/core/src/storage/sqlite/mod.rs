@@ -1,7 +1,9 @@
 //! SQLite 后端：连接、迁移、查询与共享辅助。
-//! 变更落库在 `apply`，行解码在 `rows`；schema 在同级 `migrations/`。
+//! 变更落库在 `apply`，行解码在 `rows`，恢复后不变量在 `invariants`；
+//! schema 在同级 `migrations/`。
 
 mod apply;
+mod invariants;
 mod message;
 mod rows;
 
@@ -74,6 +76,18 @@ impl SqliteStorage {
 
     pub(crate) fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// 把整份数据库复制到 `target`。目标文件必须不存在。
+    ///
+    /// `VACUUM INTO` 在一个读事务里写出一份一致的副本，因此副本恰好是
+    /// 「某个提交已完成、下一次提交尚未开始」的时刻。
+    pub(crate) async fn copy_to(&self, target: &Path) -> Result<(), StoreError> {
+        sqlx::query("VACUUM INTO ?1")
+            .bind(target.to_string_lossy().as_ref())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 
     pub(crate) async fn hosts(&self) -> Result<Vec<HostMetadata>, StoreError> {

@@ -6,6 +6,7 @@ mod branch;
 mod command;
 mod compaction;
 mod host;
+mod invariants;
 mod queue;
 mod run;
 mod session;
@@ -13,7 +14,8 @@ mod workspace;
 
 pub use self::command::{Command, SessionCommand};
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::Mutex;
 
@@ -46,6 +48,10 @@ pub struct Store {
     storage: SqliteStorage,
     line: Mutex<()>,
     bus: EventBus,
+    /// 每次提交成功后留一份数据库副本的目录。`None` 表示不记录。
+    commit_snapshots: Option<PathBuf>,
+    /// 已提交的次数。记录副本时它同时是副本的序号。
+    commits: AtomicU64,
 }
 
 impl Store {
@@ -60,12 +66,49 @@ impl Store {
     ///
     /// 副作用：创建数据库目录、数据库文件与表。
     pub async fn open(path: &Path) -> Result<Self, StoreError> {
+        Self::open_inner(path, None).await
+    }
+
+    /// 与 [`Store::open`] 相同，并在每次提交成功后在 `directory` 留一份数据库副本
+    /// `prefix-<n>.sqlite`（`n` 是提交序号，从 1 起）。
+    ///
+    /// 事务是原子的，因此一次崩溃只可能落在「某个提交已完成、下一个尚未开始」之间，
+    /// 或落在一个未提交的事务里（回滚后等价于前一个副本）。全部副本因此就是全部崩溃点，
+    /// 崩溃前缀矩阵逐个打开副本并重启，见 ADR 0056。
+    ///
+    /// # Errors
+    ///
+    /// 与 [`Store::open`] 相同；`directory` 无法建立时返回 [`StoreError::DatabaseDirectory`]。
+    ///
+    /// 副作用：创建数据库目录、数据库文件、表，以及每提交一份副本。
+    pub async fn open_recording(path: &Path, directory: &Path) -> Result<Self, StoreError> {
+        tokio::fs::create_dir_all(directory)
+            .await
+            .map_err(|error| StoreError::DatabaseDirectory {
+                path: directory.to_path_buf(),
+                message: error.to_string(),
+            })?;
+        Self::open_inner(path, Some(directory.to_path_buf())).await
+    }
+
+    async fn open_inner(
+        path: &Path,
+        commit_snapshots: Option<PathBuf>,
+    ) -> Result<Self, StoreError> {
         tracing::debug!(database = %path.display(), "打开 SQLite");
         Ok(Self {
             storage: SqliteStorage::open(path).await?,
             line: Mutex::new(()),
             bus: EventBus::default(),
+            commit_snapshots,
+            commits: AtomicU64::new(0),
         })
+    }
+
+    /// 已提交的次数。崩溃前缀矩阵用它把副作用对齐到提交点。
+    #[must_use]
+    pub fn commits(&self) -> u64 {
+        self.commits.load(Ordering::SeqCst)
     }
 
     /// 进程内事件总线。事实事件在提交成功后发布。
@@ -98,6 +141,18 @@ impl Store {
         self.storage.events_after(after).await
     }
 
+    /// 提交点副本。失败只记日志：事务已经提交，副本缺失不该让写命令失败。
+    async fn record_commit(&self) {
+        let Some(directory) = self.commit_snapshots.as_ref() else {
+            return;
+        };
+        let prefix = self.commits.fetch_add(1, Ordering::SeqCst) + 1;
+        let target = directory.join(format!("prefix-{prefix:06}.sqlite"));
+        if let Err(error) = self.storage.copy_to(&target).await {
+            tracing::warn!(path = %target.display(), error = %error, "提交点副本写入失败");
+        }
+    }
+
     /// 提交一次变更；事务成功后才发布事实事件。
     ///
     /// `session` 是本次命令推导出的 session 视图，落在每条事件行的信封上。
@@ -107,6 +162,7 @@ impl Store {
         session: Option<&SessionMetadata>,
     ) -> Result<Vec<CommittedEvent>, StoreError> {
         let committed = self.storage.apply(changes, session).await?;
+        self.record_commit().await;
         for event in &committed {
             self.bus.publish(StreamEvent::Fact {
                 id: event.id,

@@ -37,7 +37,7 @@ pub use message::{
 pub use queue::{QueueItem, SubmitMode};
 pub use run::{RunFailure, RunFailureCode, RunRecord, RunStatus, RunStatusError};
 pub use session::{SessionMetadata, SessionRecord, SessionTreeSnapshot, SessionView};
-pub use storage::Snapshot;
+pub use storage::{InvariantKind, InvariantViolation, Snapshot};
 pub use store::{Command, RunStart, SessionCommand, Store};
 pub use stream::{DeltaKind, EventBus, ResyncReason, StreamEvent};
 pub use tool::{
