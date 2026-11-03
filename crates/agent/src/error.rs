@@ -1,6 +1,6 @@
 //! HTTP 错误信封：状态码与错误码的映射。
-//! 分类与结局类别由内核给出（`durable::StoreErrorKind`、`durable::StoreErrorClass`），
-//! 本模块只把分类穷尽映射为协议码，不再自行判断错误性质。
+//! 结局类别由内核给出（`durable::StoreErrorClass`），本模块把变体穷尽映射为协议码，
+//! 不再自行判断错误性质。
 
 use axum::Json;
 use axum::http::StatusCode;
@@ -8,7 +8,7 @@ use axum::response::{IntoResponse, Response};
 use durable::link::WorkspaceCheckError;
 use durable::{
     HostNameError, MessageIdError, MessageTextError, QueueItemIdError, SessionIdError,
-    SessionTitleError, StoreError, StoreErrorClass, StoreErrorKind, WorkspacePathError,
+    SessionTitleError, StoreError, StoreErrorClass, WorkspacePathError,
 };
 
 use crate::protocol::{ErrorCode, ErrorResponse};
@@ -21,11 +21,6 @@ pub struct ApiError {
 }
 
 impl ApiError {
-    /// 由内核错误分类构造信封。`From<StoreError>` 与分类表测试共用这一条路径。
-    fn from_kind(kind: StoreErrorKind, message: String) -> Self {
-        Self::new(code_of(kind), status_of(kind.class()), message)
-    }
-
     fn new(code: ErrorCode, status: StatusCode, message: String) -> Self {
         Self {
             code,
@@ -164,32 +159,32 @@ impl From<MessageTextError> for ApiError {
 
 impl From<StoreError> for ApiError {
     fn from(error: StoreError) -> Self {
-        Self::from_kind(error.kind(), error.to_string())
+        Self::new(code_of(&error), status_of(error.class()), error.to_string())
     }
 }
 
-/// 分类到协议码。穷尽匹配：新增分类时编译器要求在这里给出协议码。
-fn code_of(kind: StoreErrorKind) -> ErrorCode {
-    match kind {
-        StoreErrorKind::Database
-        | StoreErrorKind::Migration
-        | StoreErrorKind::DatabaseDirectory
-        | StoreErrorKind::Serialization
-        | StoreErrorKind::CorruptedData
-        | StoreErrorKind::LegacyDatabase
-        | StoreErrorKind::Invariant => ErrorCode::Internal,
-        StoreErrorKind::WorkspaceDuplicate => ErrorCode::WorkspaceDuplicate,
-        StoreErrorKind::WorkspaceNotFound => ErrorCode::WorkspaceNotFound,
-        StoreErrorKind::WorkspaceNotEmpty => ErrorCode::WorkspaceNotEmpty,
-        StoreErrorKind::SessionNotFound => ErrorCode::SessionNotFound,
-        StoreErrorKind::QueueItemNotFound => ErrorCode::QueueItemNotFound,
-        StoreErrorKind::MessageNotFound => ErrorCode::MessageNotFound,
-        StoreErrorKind::MessageRoleMismatch => ErrorCode::MessageRoleMismatch,
-        StoreErrorKind::RunInProgress => ErrorCode::RunInProgress,
-        StoreErrorKind::QueueNotEmpty => ErrorCode::QueueNotEmpty,
-        StoreErrorKind::HostNameTaken => ErrorCode::HostNameTaken,
-        StoreErrorKind::HostNotFound => ErrorCode::HostNotFound,
-        StoreErrorKind::HostNotEmpty => ErrorCode::HostInUse,
+/// 变体到协议码。穷尽匹配：新增变体时编译器要求在这里给出协议码。
+fn code_of(error: &StoreError) -> ErrorCode {
+    match error {
+        StoreError::Database(_)
+        | StoreError::Migration(_)
+        | StoreError::DatabaseDirectory { .. }
+        | StoreError::Serialization(_)
+        | StoreError::CorruptedData(_)
+        | StoreError::LegacyDatabase(_)
+        | StoreError::Invariant(_) => ErrorCode::Internal,
+        StoreError::WorkspaceDuplicate(_) => ErrorCode::WorkspaceDuplicate,
+        StoreError::WorkspaceNotFound(_) => ErrorCode::WorkspaceNotFound,
+        StoreError::WorkspaceNotEmpty(_) => ErrorCode::WorkspaceNotEmpty,
+        StoreError::SessionNotFound(_) => ErrorCode::SessionNotFound,
+        StoreError::QueueItemNotFound(_, _) => ErrorCode::QueueItemNotFound,
+        StoreError::MessageNotFound(_, _) => ErrorCode::MessageNotFound,
+        StoreError::MessageRoleMismatch(_, _) => ErrorCode::MessageRoleMismatch,
+        StoreError::RunInProgress(_) => ErrorCode::RunInProgress,
+        StoreError::QueueNotEmpty(_) => ErrorCode::QueueNotEmpty,
+        StoreError::HostNameTaken(_) => ErrorCode::HostNameTaken,
+        StoreError::HostNotFound(_) => ErrorCode::HostNotFound,
+        StoreError::HostNotEmpty(_, _) => ErrorCode::HostInUse,
     }
 }
 
@@ -221,73 +216,144 @@ impl IntoResponse for ApiError {
 #[cfg(test)]
 mod tests {
     use axum::response::IntoResponse;
-    use durable::{StoreError, StoreErrorClass, StoreErrorKind};
+    use durable::{
+        HostName, MessageId, MessageRole, QueueItemId, SessionId, StoreError, StoreErrorClass,
+        WorkspacePath,
+    };
 
     use super::{ApiError, code_of, status_of};
     use crate::protocol::ErrorCode;
 
-    /// 分类到协议码与状态码的独立事实源。
-    const TABLE: [(StoreErrorKind, ErrorCode, u16); 19] = [
-        (StoreErrorKind::Database, ErrorCode::Internal, 500),
-        (StoreErrorKind::Migration, ErrorCode::Internal, 500),
-        (StoreErrorKind::DatabaseDirectory, ErrorCode::Internal, 500),
-        (StoreErrorKind::Serialization, ErrorCode::Internal, 500),
-        (StoreErrorKind::CorruptedData, ErrorCode::Internal, 500),
-        (StoreErrorKind::LegacyDatabase, ErrorCode::Internal, 500),
-        (StoreErrorKind::Invariant, ErrorCode::Internal, 500),
-        (
-            StoreErrorKind::WorkspaceDuplicate,
-            ErrorCode::WorkspaceDuplicate,
-            409,
-        ),
-        (
-            StoreErrorKind::WorkspaceNotFound,
-            ErrorCode::WorkspaceNotFound,
-            404,
-        ),
-        (
-            StoreErrorKind::WorkspaceNotEmpty,
-            ErrorCode::WorkspaceNotEmpty,
-            409,
-        ),
-        (
-            StoreErrorKind::SessionNotFound,
-            ErrorCode::SessionNotFound,
-            404,
-        ),
-        (
-            StoreErrorKind::QueueItemNotFound,
-            ErrorCode::QueueItemNotFound,
-            404,
-        ),
-        (
-            StoreErrorKind::MessageNotFound,
-            ErrorCode::MessageNotFound,
-            404,
-        ),
-        (
-            StoreErrorKind::MessageRoleMismatch,
-            ErrorCode::MessageRoleMismatch,
-            422,
-        ),
-        (StoreErrorKind::RunInProgress, ErrorCode::RunInProgress, 409),
-        (StoreErrorKind::QueueNotEmpty, ErrorCode::QueueNotEmpty, 409),
-        (StoreErrorKind::HostNameTaken, ErrorCode::HostNameTaken, 409),
-        (StoreErrorKind::HostNotFound, ErrorCode::HostNotFound, 404),
-        (StoreErrorKind::HostNotEmpty, ErrorCode::HostInUse, 409),
-    ];
+    /// 归到 `Internal` 的变体：协议码不区分它们的差别。
+    fn internal_errors() -> Vec<(StoreError, ErrorCode, u16)> {
+        vec![
+            (
+                StoreError::Database(sqlx::Error::RowNotFound),
+                ErrorCode::Internal,
+                500,
+            ),
+            (
+                StoreError::Migration(sqlx::migrate::MigrateError::VersionMissing(1)),
+                ErrorCode::Internal,
+                500,
+            ),
+            (
+                StoreError::DatabaseDirectory {
+                    path: "/nowhere".into(),
+                    message: "测试".to_owned(),
+                },
+                ErrorCode::Internal,
+                500,
+            ),
+            (
+                StoreError::Serialization(
+                    serde_json::from_str::<i32>("不是 JSON").expect_err("解析失败"),
+                ),
+                ErrorCode::Internal,
+                500,
+            ),
+            (
+                StoreError::CorruptedData("message_part.body".to_owned()),
+                ErrorCode::Internal,
+                500,
+            ),
+            (
+                StoreError::LegacyDatabase("/nowhere/old.sqlite".into()),
+                ErrorCode::Internal,
+                500,
+            ),
+            (
+                StoreError::Invariant("测试".to_owned()),
+                ErrorCode::Internal,
+                500,
+            ),
+        ]
+    }
 
-    /// ADR 0043：分类到协议码与状态码的映射穷尽，状态码取自结局类别。
+    /// 各自有专属协议码的变体。
+    fn mapped_errors() -> Vec<(StoreError, ErrorCode, u16)> {
+        let workspace = WorkspacePath::parse("/workspace").expect("合法 workspace 路径");
+        let session = SessionId::parse("session").expect("合法 session id");
+        let message = MessageId::parse(7).expect("合法消息 id");
+        let queue_item = QueueItemId::parse(3).expect("合法队列项 id");
+        let host = HostName::parse("local").expect("合法 host 名");
+        vec![
+            (
+                StoreError::WorkspaceDuplicate(workspace.clone()),
+                ErrorCode::WorkspaceDuplicate,
+                409,
+            ),
+            (
+                StoreError::WorkspaceNotFound(workspace.clone()),
+                ErrorCode::WorkspaceNotFound,
+                404,
+            ),
+            (
+                StoreError::WorkspaceNotEmpty(workspace),
+                ErrorCode::WorkspaceNotEmpty,
+                409,
+            ),
+            (
+                StoreError::SessionNotFound(session.clone()),
+                ErrorCode::SessionNotFound,
+                404,
+            ),
+            (
+                StoreError::QueueItemNotFound(session.clone(), queue_item),
+                ErrorCode::QueueItemNotFound,
+                404,
+            ),
+            (
+                StoreError::MessageNotFound(session.clone(), message),
+                ErrorCode::MessageNotFound,
+                404,
+            ),
+            (
+                StoreError::MessageRoleMismatch(message, MessageRole::User),
+                ErrorCode::MessageRoleMismatch,
+                422,
+            ),
+            (
+                StoreError::RunInProgress(session.clone()),
+                ErrorCode::RunInProgress,
+                409,
+            ),
+            (
+                StoreError::QueueNotEmpty(session),
+                ErrorCode::QueueNotEmpty,
+                409,
+            ),
+            (
+                StoreError::HostNameTaken(host.clone()),
+                ErrorCode::HostNameTaken,
+                409,
+            ),
+            (
+                StoreError::HostNotFound(host.clone()),
+                ErrorCode::HostNotFound,
+                404,
+            ),
+            (StoreError::HostNotEmpty(host, 2), ErrorCode::HostInUse, 409),
+        ]
+    }
+
+    /// 每个变体的协议码与状态码。这是独立事实源：新增变体时必须在这里表态。
+    fn every_error() -> Vec<(StoreError, ErrorCode, u16)> {
+        let mut all = internal_errors();
+        all.extend(mapped_errors());
+        all
+    }
+
+    /// ADR 0043 与 ADR 0054：变体到协议码与状态码的映射穷尽，状态码取自结局类别。
     #[test]
-    fn maps_every_kind_to_its_code_and_its_class_status() {
-        for (kind, code, status) in TABLE {
-            assert_eq!(code_of(kind), code, "{kind:?}");
-            let response = ApiError::from_kind(kind, String::new()).into_response();
+    fn maps_every_error_to_its_code_and_its_class_status() {
+        for (error, code, status) in every_error() {
+            assert_eq!(code_of(&error), code, "{error}");
+            let response = ApiError::from(error).into_response();
             assert_eq!(
                 response.status().as_u16(),
                 status,
-                "{kind:?} 的状态码取自 {:?}",
-                kind.class()
+                "状态码取自变体的结局类别"
             );
         }
     }
@@ -299,7 +365,7 @@ mod tests {
             path: std::path::PathBuf::from("/nowhere"),
             message: "测试".to_owned(),
         };
-        assert_eq!(error.kind().class(), StoreErrorClass::StorageFailure);
+        assert_eq!(error.class(), StoreErrorClass::StorageFailure);
         let response = ApiError::from(error).into_response();
         assert_eq!(
             response.status(),
