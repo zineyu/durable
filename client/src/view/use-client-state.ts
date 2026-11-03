@@ -63,7 +63,7 @@ export function useClientState(selection: Selection): ClientController {
         retry = setTimeout(resolve, milliseconds);
       });
 
-    const refresh = async (): Promise<number | null> => {
+    const syncSnapshot = async (): Promise<number | null> => {
       const outcome = await api.bootstrap();
       if (liveness.signal.aborted) {
         return null;
@@ -91,7 +91,7 @@ export function useClientState(selection: Selection): ClientController {
 
     const reconnect = async () => {
       for (;;) {
-        const cursor = await refresh();
+        const cursor = await syncSnapshot();
         if (liveness.signal.aborted) {
           return;
         }
@@ -118,17 +118,14 @@ export function useClientState(selection: Selection): ClientController {
     };
 
     void (async () => {
-      const outcome = await api.bootstrap();
+      const cursor = await syncSnapshot();
       if (liveness.signal.aborted) {
         return;
       }
-      if (!outcome.ok) {
-        report(outcome.error);
+      if (cursor === null) {
         dispatch({ type: 'connection', connection: 'disconnected' });
         return;
       }
-      const cursor = snapshotCursor(cursorRef.current, outcome.value.maxEventId);
-      dispatch({ type: 'bootstrap', bootstrap: outcome.value });
       connect(cursor);
     })();
 
