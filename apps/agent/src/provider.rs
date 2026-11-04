@@ -1,4 +1,4 @@
-//! `OpenAI` 兼容 provider：请求构造、流式解析与限流错误分类。
+//! `OpenAI` 兼容 provider：请求构造、客户端超时、流式解析与限流错误分类。
 //! 重试决策在 `engine/step`。
 
 use std::fmt;
@@ -94,6 +94,8 @@ pub enum ChatChunk {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProviderError {
     Request(String),
+    /// 客户端时限到点：从开始连接到响应正文读完没有完成。次数配置在 `DURABLE_MODEL_TIMEOUT_MS`。
+    Timeout(Duration),
     /// 上游返回非成功状态。`retry_after` 来自 `Retry-After` 头，只解释秒数形式。
     Status {
         status: u16,
@@ -132,6 +134,9 @@ impl fmt::Display for ProviderError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Request(message) => write!(formatter, "模型请求失败: {message}"),
+            Self::Timeout(limit) => {
+                write!(formatter, "模型请求超过 {} 毫秒没有完成", limit.as_millis())
+            }
             Self::Status {
                 status,
                 message,
@@ -173,16 +178,23 @@ pub struct OpenAiProvider {
     base_url: String,
     api_key: String,
     model: String,
+    timeout: Duration,
 }
 
 impl OpenAiProvider {
     #[must_use]
     pub fn new(config: &ModelConfig) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            // 超时挂在客户端：从开始连接算到响应正文读完。构建失败只可能是 TLS 后端不可用，
+            // 此时退回默认客户端，请求失败比启动失败更可诊断。
+            client: reqwest::Client::builder()
+                .timeout(config.model_timeout)
+                .build()
+                .unwrap_or_default(),
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             api_key: config.api_key.clone(),
             model: config.model_name.clone(),
+            timeout: config.model_timeout,
         }
     }
 
@@ -226,7 +238,7 @@ impl ModelProvider for OpenAiProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|error| ProviderError::Request(error.to_string()))?;
+            .map_err(|error| request_error(&error, self.timeout))?;
         let status = response.status();
         if !status.is_success() {
             let retry_after = retry_after(&response);
@@ -240,7 +252,18 @@ impl ModelProvider for OpenAiProvider {
                 retry_after,
             });
         }
-        Ok(parse_stream(response))
+        Ok(parse_stream(response, self.timeout))
+    }
+}
+
+/// 请求过程中的传输错误：超时单独成一支，其余仍是请求失败。
+///
+/// 两处都要走这里：`send()` 没有拿到响应头时，与读响应体时（流在中间停滞）。
+fn request_error(error: &reqwest::Error, limit: Duration) -> ProviderError {
+    if error.is_timeout() {
+        ProviderError::Timeout(limit)
+    } else {
+        ProviderError::Request(error.to_string())
     }
 }
 
@@ -255,12 +278,12 @@ fn retry_after(response: &reqwest::Response) -> Option<Duration> {
 }
 
 /// 把 SSE 响应体解析为增量与工具调用片段。
-fn parse_stream(response: reqwest::Response) -> ChatStream {
+fn parse_stream(response: reqwest::Response, limit: Duration) -> ChatStream {
     Box::pin(async_stream::try_stream! {
         let mut buffer: Vec<u8> = Vec::new();
         let mut body = response.bytes_stream();
         while let Some(chunk) = body.next().await {
-            let bytes = chunk.map_err(|error| ProviderError::Request(error.to_string()))?;
+            let bytes = chunk.map_err(|error| request_error(&error, limit))?;
             buffer.extend_from_slice(&bytes);
             while let Some(position) = buffer.iter().position(|byte| *byte == b'\n') {
                 let line: Vec<u8> = buffer.drain(..=position).collect();

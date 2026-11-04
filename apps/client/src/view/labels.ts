@@ -54,6 +54,7 @@ export const toolStateLabel: Record<ToolState, string> = {
 export const runFailureLabel: Record<RunFailureCode, string> = {
   model_upstream: '模型上游错误',
   model_rate_limited: '供应商限流',
+  model_timeout: '模型请求超时',
   context_limit_exceeded: '上下文超限',
   step_limit_exceeded: '步数超限',
   storage_failed: '本地存储失败',

@@ -13,8 +13,8 @@ use durable::{
     ToolResultState,
 };
 use support::{
-    declare_tool, dispatch_tool, enqueue, facts_after, lose_tool, max_event_id, store_with_session,
-    text, tree,
+    append_assistant, declare_tool, dispatch_tool, enqueue, facts_after, lose_tool, max_event_id,
+    store_with_session, text, tree,
 };
 
 /// 一次命令提交内的事件 id 连续递增，互不重复。
@@ -242,15 +242,15 @@ async fn run_lifecycle_facts_keep_their_order() {
         .await
         .active_leaf
         .expect("run 的用户节点");
-    let assistant = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("回答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let assistant = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("回答")],
+    )
+    .await
+    .expect("assistant 入树");
     store
         .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await

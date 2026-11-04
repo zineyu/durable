@@ -6,7 +6,7 @@ mod support;
 use std::sync::Arc;
 
 use durable::{ContentPart, FactEvent, MessageRole};
-use support::{enqueue, max_event_id, queue_texts, store_with_session};
+use support::{append_assistant, enqueue, max_event_id, queue_texts, store_with_session};
 
 /// 并发的入队命令各自提交一次，队列项数与事件条数一致，队列顺序等于提交顺序。
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -72,15 +72,15 @@ async fn concurrent_appends_extend_one_chain() {
         let run = start.run.id;
         tasks.push(tokio::spawn(async move {
             let id = store.mint_message_id().await.expect("铸造消息 id");
-            store
-                .append_assistant(
-                    &session,
-                    run,
-                    id,
-                    vec![ContentPart::text(format!("回复 {index}"))],
-                )
-                .await
-                .expect("assistant 入树")
+            append_assistant(
+                &store,
+                &session,
+                run,
+                id,
+                vec![ContentPart::text(format!("回复 {index}"))],
+            )
+            .await
+            .expect("assistant 入树")
         }));
     }
     for task in tasks {

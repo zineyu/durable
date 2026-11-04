@@ -162,7 +162,7 @@ async fn lost_observations_land_as_unknown() {
     );
 }
 
-/// 模型步骤与压缩的登记与下发都不写行；观测才是消息入树的那一刻。
+/// 模型步骤与压缩的登记、下发与丢失观测都不写行；观测才是消息入树的那一刻。
 #[tokio::test]
 async fn model_steps_and_compactions_write_no_row_before_the_observation() {
     let (_directory, store, session, run) = fixture().await;
@@ -246,6 +246,39 @@ async fn model_steps_and_compactions_write_no_row_before_the_observation() {
             .iter()
             .any(|node| node.id == compaction),
         "压缩消息入树"
+    );
+
+    // 丢失观测同样不写行：超时的证据就是「已下发、没观测」（ADR 0059）。
+    timed_out_model_step_writes_no_row(&store, &session, run).await;
+}
+
+/// 模型步骤报告超时时，账本只收到一条丢失观测，库里什么都没有。
+async fn timed_out_model_step_writes_no_row(store: &Store, session: &SessionId, run: RunId) {
+    let before = max_event_id(store).await;
+    let nodes_before = tree(store, session).await.nodes.len();
+    let message = store.mint_message_id().await.expect("铸造消息 id");
+    let dispatched = dispatch(
+        store,
+        declare(
+            store,
+            EffectIntent::model_step(session.clone(), run, message),
+        )
+        .await
+        .expect("登记写入成功"),
+    )
+    .await
+    .expect("发货写入成功");
+    let outcome = perform(store, dispatched, |_token| async {
+        Outcome::Lost(Lost::Timeout)
+    })
+    .await
+    .expect("超时结论写入成功");
+    assert_eq!(outcome, Outcome::Lost(Lost::Timeout), "超时原样返回");
+    assert_eq!(max_event_id(store).await, before, "丢失观测不写事实事件");
+    assert_eq!(
+        tree(store, session).await.nodes.len(),
+        nodes_before,
+        "丢失观测不写消息行"
     );
 }
 

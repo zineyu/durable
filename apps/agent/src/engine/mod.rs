@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use durable::{
-    EffectClass, EffectIntent, EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunId,
-    RunStart, RunStatus, SessionId, Store, StoreError, ToolResultState,
+    EffectClass, EffectIntent, EventBus, MessageRole, RunFailure, RunFailureCode, RunId, RunStart,
+    RunStatus, SessionId, Store, StoreError, ToolResultState,
 };
 use effects::policy::{Evidence, Replay, settle};
 use effects::token::{Ledger, Lost, Transition};
@@ -64,14 +64,11 @@ enum StreamOpen {
 
 /// 一次模型调用的结束方式。
 enum StepEnd {
-    /// 流正常结束，带回本步定型的消息 id 与内容块。
-    Completed {
-        id: MessageId,
-        parts: Vec<durable::ContentPart>,
-    },
+    /// 流正常结束，本步已定型入树。
+    Completed,
     /// 被取消；已写入进度的部分输出保留，恢复时入树为已中断消息。
     Cancelled,
-    /// 上游失败。
+    /// 上游失败或超时。
     Failure(RunFailure),
 }
 
@@ -304,15 +301,7 @@ impl RunEngine {
                         .stream_step(session, start.run.id, &transcript, cancellation)
                         .await
                     {
-                        StepEnd::Completed { id, parts } => {
-                            if let Err(error) = self
-                                .store
-                                .append_assistant(session, start.run.id, id, parts)
-                                .await
-                            {
-                                return failed(storage_failure(&error));
-                            }
-                        }
+                        StepEnd::Completed => {}
                         StepEnd::Cancelled => return cancelled(),
                         StepEnd::Failure(failure) => {
                             if failure.code != RunFailureCode::ContextLimitExceeded {
@@ -439,6 +428,23 @@ impl RunEngine {
         }
         Ok(())
     }
+    /// 本步丢失观测：账本记一条。模型步骤与压缩的丢失观测不写行（ADR 0060）。
+    pub(super) async fn lose_observation(
+        &self,
+        session: &SessionId,
+        intent: EffectIntent,
+        lost: Lost,
+    ) {
+        let reason = lost.to_string();
+        if let Err(error) = self.store.write(Transition::Lost(intent, lost)).await {
+            tracing::warn!(
+                session = %session.as_str(),
+                reason = %reason,
+                error = %error,
+                "写入丢失观测失败"
+            );
+        }
+    }
 }
 
 /// 未观测态对应的证据强度。有结局的节点不参与恢复判定。
@@ -498,5 +504,13 @@ pub(super) fn storage_failure(error: &StoreError) -> RunFailure {
     RunFailure {
         code: RunFailureCode::StorageFailed,
         message: error.to_string(),
+    }
+}
+
+/// 模型请求超过客户端时限的结局。模型步骤与压缩共用这一份文案。
+pub(super) fn timeout_failure(limit: Duration) -> RunFailure {
+    RunFailure {
+        code: RunFailureCode::ModelTimeout,
+        message: crate::provider::ProviderError::Timeout(limit).to_string(),
     }
 }

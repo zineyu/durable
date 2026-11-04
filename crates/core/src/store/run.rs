@@ -198,6 +198,8 @@ impl Store {
     ///
     /// 输入：session、所属 run、步开始时铸造的消息 id 与全部内容块。
     ///
+    /// 只有落点表调用它：引擎经 [`EffectObservation::Assistant`](crate::EffectObservation) 写入（ADR 0060）。
+    ///
     /// # Errors
     ///
     /// - `StoreError::SessionNotFound`：session 不存在。
@@ -206,7 +208,7 @@ impl Store {
     /// - `StoreError::Invariant`：run 的用户节点缺失。
     ///
     /// 副作用：写入 assistant 节点、active leaf 与 `message_appended` 事实事件。
-    pub async fn append_assistant(
+    pub(crate) async fn append_assistant(
         &self,
         session: &SessionId,
         run_id: RunId,

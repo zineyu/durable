@@ -20,8 +20,8 @@ use agent::{
     ToolEnd, ToolResultState, WorkspacePath,
 };
 use async_trait::async_trait;
-use durable::{ContentPart, EffectIntent};
-use effects::token::Dispatched;
+use durable::{ContentPart, EffectIntent, EffectObservation};
+use effects::token::{Dispatched, Ledger, Transition};
 use tokio::sync::broadcast;
 
 /// 只回答宿主丢失的执行端。
@@ -100,16 +100,16 @@ async fn host_gone_writes_unknown_for_every_call_in_the_batch() {
         .expect("队列里有该 run");
     let assistant = store.mint_message_id().await.expect("分配消息 id");
     store
-        .append_assistant(
-            &session,
-            start.run.id,
-            assistant,
-            vec![
-                ContentPart::tool_call("call_a", "read_file", r#"{"path":"a.txt"}"#),
-                ContentPart::tool_call("call_b", "read_file", r#"{"path":"b.txt"}"#),
-                ContentPart::tool_call("call_c", "read_file", r#"{"path":"c.txt"}"#),
-            ],
-        )
+        .write(Transition::Observed(
+            EffectIntent::model_step(session.clone(), start.run.id, assistant),
+            EffectObservation::Assistant {
+                parts: vec![
+                    ContentPart::tool_call("call_a", "read_file", r#"{"path":"a.txt"}"#),
+                    ContentPart::tool_call("call_b", "read_file", r#"{"path":"b.txt"}"#),
+                    ContentPart::tool_call("call_c", "read_file", r#"{"path":"c.txt"}"#),
+                ],
+            },
+        ))
         .await
         .expect("写入带调用的 assistant 消息");
 

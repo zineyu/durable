@@ -53,3 +53,5 @@
 **未登记的工具名没有类别。** 模型可能请求一个不在定义表里的工具名，执行端对它的回答是一次失败，因此这条调用一定没有副作用。`EffectIntent::unregistered_tool` 让它的证据照常落在 tool 节点上（否则 assistant 的调用与结果不再配对），但不计入覆盖率；恢复判定按 `Redo` 处置。
 
 **两个工具写方法收为 crate 内可见。** `append_tool` 与 `set_tool_state` 只剩落点表调用，其中「已登记」的写入是幂等的：同一节点、同一调用重复登记不写行，重启后才能在已有节点上重跑。`append_assistant` 与 `append_compaction` 仍被引擎直接调用，它们随模型步骤与压缩的接线（`#82`）一起收口。
+
+**四个写方法都已收口（`#82`）。** 引擎不再直接调用 `append_assistant` 与 `append_compaction`：模型步骤与压缩先登记、再发货（都不写行），收货时经 `Transition::Observed` 把消息入树。四个写方法因此都是 `pub(crate)`，证据的落点判定是接口上的唯一入口，而不只是实现上的。测试要造一条已定型的消息时也走落点表（`crates/core/tests/support` 的两个辅助）。

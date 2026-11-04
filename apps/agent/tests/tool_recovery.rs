@@ -18,8 +18,8 @@ use agent::{
     ToolEnd, ToolOutcome, ToolResultState, WorkspacePath,
 };
 use async_trait::async_trait;
-use durable::{ContentPart, EffectClass, EffectIntent};
-use effects::token::{Dispatched, declare, dispatch};
+use durable::{ContentPart, EffectClass, EffectIntent, EffectObservation};
+use effects::token::{Dispatched, Ledger, Transition, declare, dispatch};
 use tokio::sync::{Mutex, broadcast};
 
 /// tool 节点停在哪个提交点。`NoNode` 表示 assistant 已入树、tool 节点还没入树。
@@ -121,12 +121,12 @@ async fn fixture(call_name: &str, prefix: Prefix) -> Fixture {
         .expect("队列里有该 run");
     let assistant = store.mint_message_id().await.expect("分配消息 id");
     store
-        .append_assistant(
-            &session,
-            start.run.id,
-            assistant,
-            vec![ContentPart::tool_call("call_1", call_name, "{}")],
-        )
+        .write(Transition::Observed(
+            EffectIntent::model_step(session.clone(), start.run.id, assistant),
+            EffectObservation::Assistant {
+                parts: vec![ContentPart::tool_call("call_1", call_name, "{}")],
+            },
+        ))
         .await
         .expect("写入带调用的 assistant 消息");
 

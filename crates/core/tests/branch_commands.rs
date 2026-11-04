@@ -11,7 +11,10 @@ mod support;
 use durable::{
     ContentPart, FactEvent, MessageId, MessageRole, RunStatus, SessionId, Store, StoreError,
 };
-use support::{add_session, enqueue, facts_after, max_event_id, store_with_session, text, tree};
+use support::{
+    add_session, append_assistant, append_compaction, enqueue, facts_after, max_event_id,
+    store_with_session, text, tree,
+};
 use tempfile::TempDir;
 
 /// 一个已有用户节点与 assistant 回答、run 已结束的 session。
@@ -25,15 +28,15 @@ async fn answered() -> (TempDir, Store, SessionId, MessageId, MessageId) {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let assistant = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("回答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let assistant = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("回答")],
+    )
+    .await
+    .expect("assistant 入树");
     store
         .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
@@ -149,15 +152,15 @@ async fn retry_assistant_message_queues_parent_without_new_node() {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let retried = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("重答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let retried = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("重答")],
+    )
+    .await
+    .expect("assistant 入树");
     assert_eq!(retried.parent_id, Some(user), "新回答与原回答同父");
     let tree = tree(&store, &session).await;
     assert!(
@@ -185,15 +188,15 @@ async fn retry_assistant_message_requires_a_user_ancestor() {
         .run
         .id;
 
-    let rootless = store
-        .append_assistant(
-            &session,
-            run,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("没有父节点")],
-        )
-        .await
-        .expect("assistant 入树");
+    let rootless = append_assistant(
+        &store,
+        &session,
+        run,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("没有父节点")],
+    )
+    .await
+    .expect("assistant 入树");
     let error = store
         .retry_assistant_message(&session, rootless.id)
         .await
@@ -203,23 +206,23 @@ async fn retry_assistant_message_requires_a_user_ancestor() {
         "缺少父节点是 Invariant，实际为 {error:?}"
     );
 
-    store
-        .append_compaction(
-            &session,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("摘要")],
-        )
-        .await
-        .expect("压缩入树");
-    let orphan = store
-        .append_assistant(
-            &session,
-            run,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("压缩之后")],
-        )
-        .await
-        .expect("assistant 入树");
+    append_compaction(
+        &store,
+        &session,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("摘要")],
+    )
+    .await
+    .expect("压缩入树");
+    let orphan = append_assistant(
+        &store,
+        &session,
+        run,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("压缩之后")],
+    )
+    .await
+    .expect("assistant 入树");
     let error = store
         .retry_assistant_message(&session, orphan.id)
         .await
@@ -240,15 +243,15 @@ async fn switch_active_leaf_moves_to_subtree_leaf_without_touching_nodes() {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let second = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("第二个回答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let second = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("第二个回答")],
+    )
+    .await
+    .expect("assistant 入树");
     store
         .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
@@ -264,15 +267,15 @@ async fn switch_active_leaf_moves_to_subtree_leaf_without_touching_nodes() {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let alternate = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("另一个回答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let alternate = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("另一个回答")],
+    )
+    .await
+    .expect("assistant 入树");
     store
         .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await

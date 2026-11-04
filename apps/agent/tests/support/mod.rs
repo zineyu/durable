@@ -86,6 +86,7 @@ pub(crate) struct Harness {
     pub limits: agent::ToolLimits,
     executor: PathBuf,
     heartbeat: Duration,
+    model_timeout: Duration,
     executor_pid: Option<u32>,
     agent: TestAgent,
     pub client: reqwest::Client,
@@ -98,6 +99,21 @@ impl Harness {
 
     pub(crate) async fn start_with(config: agent::EngineConfig, scripts: Vec<Script>) -> Harness {
         Harness::start_with_limits(config, scripts, agent::ToolLimits::default()).await
+    }
+
+    /// 用给定的模型请求客户端时限启动：超时用例把它缩到毫秒，不必真的等。
+    pub(crate) async fn start_with_model_timeout(
+        config: agent::EngineConfig,
+        scripts: Vec<Script>,
+        model_timeout: Duration,
+    ) -> Harness {
+        Harness::start_configured(options::Options {
+            config,
+            scripts,
+            model_timeout,
+            ..options::Options::default()
+        })
+        .await
     }
 
     pub(crate) async fn start_with_limits(
@@ -124,45 +140,34 @@ impl Harness {
         .await
     }
 
-    async fn start_configured(options: options::Options) -> Harness {
+    async fn start_configured(mut options: options::Options) -> Harness {
         let directory = tempfile::tempdir().expect("创建临时目录");
         let database = directory.path().join("agent.sqlite");
-        let provider = ScriptedProvider::start(options.scripts).await;
-        Harness::open(
-            directory,
-            database,
-            provider,
-            options.config,
-            options.limits,
-            options.executor,
-            options.heartbeat,
-        )
-        .await
+        let provider = ScriptedProvider::start(std::mem::take(&mut options.scripts)).await;
+        Harness::open(directory, database, provider, options).await
     }
 
     async fn open(
         directory: TempDir,
         database: PathBuf,
         provider: ScriptedProvider,
-        config: agent::EngineConfig,
-        limits: agent::ToolLimits,
-        executor: PathBuf,
-        heartbeat: Duration,
+        options: options::Options,
     ) -> Harness {
         let model = agent::ModelConfig {
             base_url: provider.base_url(),
             api_key: "test-key".to_owned(),
             model_name: "test-model".to_owned(),
+            model_timeout: options.model_timeout,
         };
         let runtime = Arc::new(agent::OpenAiProvider::new(&model));
         let (agent, hosts) = TestAgent::start(
             &database,
-            &executor,
-            limits,
-            heartbeat,
+            &options.executor,
+            options.limits,
+            options.heartbeat,
             "test-model",
             runtime,
-            config,
+            options.config,
         )
         .await;
         let executor_pid = await_local_executor_pid(&hosts).await;
@@ -170,10 +175,11 @@ impl Harness {
             directory,
             database,
             provider,
-            config,
-            limits,
-            executor,
-            heartbeat,
+            config: options.config,
+            limits: options.limits,
+            executor: options.executor,
+            heartbeat: options.heartbeat,
+            model_timeout: options.model_timeout,
             executor_pid,
             agent,
             client: reqwest::Client::new(),
@@ -189,12 +195,23 @@ impl Harness {
             limits,
             executor,
             heartbeat,
+            model_timeout,
             agent,
             ..
         } = self;
         agent.shutdown().await;
         Harness::open(
-            directory, database, provider, config, limits, executor, heartbeat,
+            directory,
+            database,
+            provider,
+            options::Options {
+                config,
+                limits,
+                executor,
+                heartbeat,
+                model_timeout,
+                scripts: Vec::new(),
+            },
         )
         .await
     }
@@ -549,6 +566,7 @@ mod options {
         pub limits: agent::ToolLimits,
         pub executor: PathBuf,
         pub heartbeat: Duration,
+        pub model_timeout: Duration,
     }
 
     impl Default for Options {
@@ -559,6 +577,7 @@ mod options {
                 limits: agent::ToolLimits::default(),
                 executor: process::executor_binary(),
                 heartbeat: agent::HEARTBEAT_INTERVAL,
+                model_timeout: Duration::from_millis(agent::DEFAULT_MODEL_TIMEOUT_MS as u64),
             }
         }
     }

@@ -22,8 +22,9 @@ mod sse;
 
 pub use api::{AgentState, router, serve};
 pub use config::{
-    CONTEXT_CHAR_LIMIT, ConfigError, EngineConfig, MAX_STEPS, MODEL_API_KEY, MODEL_BASE_URL,
-    MODEL_NAME, ModelConfig, engine_config_from_env, model_config_from_env,
+    CONTEXT_CHAR_LIMIT, ConfigError, DEFAULT_MODEL_TIMEOUT_MS, EngineConfig, MAX_STEPS,
+    MODEL_API_KEY, MODEL_BASE_URL, MODEL_NAME, MODEL_TIMEOUT_MS, ModelConfig,
+    engine_config_from_env, model_config_from_env,
 };
 pub use durable::link::{Operation, Reply, WorkspaceCheckError};
 pub use durable::{

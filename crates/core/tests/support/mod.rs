@@ -9,11 +9,11 @@
 )]
 
 use durable::{
-    EffectClass, EffectIntent, EffectObservation, FactEvent, HostKind, HostName, MessageId,
-    MessageText, QueueItem, RunId, SessionId, SessionTitle, SessionTreeSnapshot, Store, SubmitMode,
-    ToolResultState, WorkspacePath,
+    ContentPart, EffectClass, EffectIntent, EffectObservation, FactEvent, HostKind, HostName,
+    MessageId, MessageNode, MessageText, QueueItem, RunId, SessionId, SessionTitle,
+    SessionTreeSnapshot, Store, StoreError, SubmitMode, ToolResultState, WorkspacePath,
 };
-use effects::token::{Abandon, Outcome, abandon, declare, dispatch, perform};
+use effects::token::{Abandon, Ledger, Outcome, Transition, abandon, declare, dispatch, perform};
 use tempfile::TempDir;
 
 /// `local` host 的名字。夹具里的 workspace 都登记在它名下。
@@ -173,6 +173,50 @@ pub(crate) async fn observe_tool(
     })
     .await
     .expect("工具结局写入成功");
+}
+
+/// 一步模型回复入树：走落点表的唯一入口，测试因此不直接调用 crate 内可见的写入方法。
+pub(crate) async fn append_assistant(
+    store: &Store,
+    session: &SessionId,
+    run: RunId,
+    id: MessageId,
+    parts: Vec<ContentPart>,
+) -> Result<MessageNode, StoreError> {
+    store
+        .write(Transition::Observed(
+            EffectIntent::model_step(session.clone(), run, id),
+            EffectObservation::Assistant { parts },
+        ))
+        .await?;
+    Ok(node_of(store, session, id).await)
+}
+
+/// 压缩消息入树，同样走落点表。
+pub(crate) async fn append_compaction(
+    store: &Store,
+    session: &SessionId,
+    id: MessageId,
+    parts: Vec<ContentPart>,
+) -> Result<MessageNode, StoreError> {
+    store
+        .write(Transition::Observed(
+            EffectIntent::compaction(session.clone(), id),
+            EffectObservation::Compaction { parts },
+        ))
+        .await?;
+    Ok(node_of(store, session, id).await)
+}
+
+/// 读回刚刚入树的节点。写入之后它一定在 transcript 上。
+async fn node_of(store: &Store, session: &SessionId, id: MessageId) -> MessageNode {
+    store
+        .transcript(session)
+        .await
+        .expect("读取 transcript")
+        .into_iter()
+        .find(|node| node.id == id)
+        .expect("刚入树的节点在 transcript 里")
 }
 
 /// 经落点表放弃一个已登记的工具调用：它一定没有执行，结局写「结果未知」。

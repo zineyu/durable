@@ -9,7 +9,7 @@
 mod support;
 
 use durable::{ContentPart, MessageRole, RunFailure, RunStatus, SessionTreeSnapshot, Store};
-use support::{enqueue, facts_after, max_event_id, store_with_session, tree};
+use support::{append_assistant, enqueue, facts_after, max_event_id, store_with_session, tree};
 
 /// 启动一次 run，返回 run id 与本次 run 的用户节点 id。
 async fn start(store: &Store, session: &durable::SessionId) -> (durable::RunId, i64) {
@@ -119,10 +119,15 @@ async fn committing_the_step_and_clearing_progress_share_one_transaction() {
         .await
         .expect("写入进度");
     let id = store.mint_message_id().await.expect("铸造消息 id");
-    store
-        .append_assistant(&session, run, id, vec![ContentPart::text("已经写了一半。")])
-        .await
-        .expect("定型 assistant");
+    append_assistant(
+        &store,
+        &session,
+        run,
+        id,
+        vec![ContentPart::text("已经写了一半。")],
+    )
+    .await
+    .expect("定型 assistant");
 
     assert_eq!(
         store
@@ -139,9 +144,14 @@ async fn committing_the_step_and_clearing_progress_share_one_transaction() {
         .write_progress(&session, run, "第二段")
         .await
         .expect("写入进度");
-    let failed = store
-        .append_assistant(&session, run, id, vec![ContentPart::text("重复的 id")])
-        .await;
+    let failed = append_assistant(
+        &store,
+        &session,
+        run,
+        id,
+        vec![ContentPart::text("重复的 id")],
+    )
+    .await;
     assert!(failed.is_err(), "重复的消息 id 让事务失败");
     assert_eq!(
         store
@@ -317,10 +327,15 @@ async fn interrupted_message_keeps_its_marker_after_a_later_step() {
         .expect("progress 非空时入树");
 
     let id = store.mint_message_id().await.expect("铸造消息 id");
-    store
-        .append_assistant(&session, run, id, vec![ContentPart::text("续写完成。")])
-        .await
-        .expect("定型 assistant");
+    append_assistant(
+        &store,
+        &session,
+        run,
+        id,
+        vec![ContentPart::text("续写完成。")],
+    )
+    .await
+    .expect("定型 assistant");
 
     let transcript = store.transcript(&session).await.expect("读取 transcript");
     assert_eq!(transcript.len(), 3, "用户、已中断、续跑各一条");

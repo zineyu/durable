@@ -384,7 +384,29 @@ impl Store {
                     .await
                     .map(|_| ())
             }
-            Subject::ModelStep { .. } | Subject::Compaction { .. } => Ok(()),
+            Subject::ModelStep {
+                session,
+                run,
+                message,
+            } => {
+                tracing::debug!(
+                    session = %session.as_str(),
+                    run = run.get(),
+                    message = message.get(),
+                    reason = %lost,
+                    "模型步骤丢失观测，不写行"
+                );
+                Ok(())
+            }
+            Subject::Compaction { session, message } => {
+                tracing::debug!(
+                    session = %session.as_str(),
+                    message = message.get(),
+                    reason = %lost,
+                    "压缩丢失观测，不写行"
+                );
+                Ok(())
+            }
         }
     }
 }

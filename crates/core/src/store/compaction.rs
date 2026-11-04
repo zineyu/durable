@@ -11,6 +11,8 @@ impl Store {
     ///
     /// 输入：session 身份、已铸造的消息 id 与摘要的内容块。
     ///
+    /// 只有落点表调用它：引擎经 [`EffectObservation::Compaction`](crate::EffectObservation) 写入（ADR 0060）。
+    ///
     /// # Errors
     ///
     /// - `StoreError::SessionNotFound`：session 不存在。
@@ -18,7 +20,7 @@ impl Store {
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
     /// 副作用：写入压缩节点、active leaf 与 `message_appended`、`active_leaf_changed` 事实事件。
-    pub async fn append_compaction(
+    pub(crate) async fn append_compaction(
         &self,
         session: &SessionId,
         id: MessageId,

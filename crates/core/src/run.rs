@@ -61,6 +61,9 @@ pub enum RunFailureCode {
     ModelUpstream,
     /// 供应商限流（HTTP 429 或带 `Retry-After` 的响应），重试耗尽后仍限流。
     ModelRateLimited,
+    /// 模型请求超过客户端时限：链路还在，但不再等。与取消分开表达。
+    /// 见 ADR 0059。
+    ModelTimeout,
     ContextLimitExceeded,
     StepLimitExceeded,
     /// link 断开：host 不可达，在途工具调用的结局未知。见 ADR 0048。

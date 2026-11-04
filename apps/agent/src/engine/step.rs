@@ -4,12 +4,16 @@
 use std::time::{Duration, Instant};
 
 use durable::{
-    ContentPart, MessageId, MessageNode, RunFailure, RunFailureCode, RunId, SessionId, StreamEvent,
+    ContentPart, EffectIntent, EffectObservation, MessageId, MessageNode, RunFailure,
+    RunFailureCode, RunId, SessionId, StreamEvent,
 };
+use effects::token::{Dispatched, Ledger, Lost, Transition, declare, dispatch};
 use futures_util::StreamExt;
 
 use crate::engine::progress::ProgressThrottle;
-use crate::engine::{RunEngine, StepEnd, StreamOpen, ToolCallBuilder, storage_failure};
+use crate::engine::{
+    RunEngine, StepEnd, StreamOpen, ToolCallBuilder, storage_failure, timeout_failure,
+};
 use crate::provider::{ChatChunk, ChatMessage, ProviderError};
 use durable::Cancellation;
 
@@ -24,6 +28,9 @@ impl RunEngine {
     ///
     /// 正文按 `progress_interval` 节流写入 run 的进度，因此流中途崩溃或取消时已产生的
     /// 部分输出不会丢失。推理与未完成的工具调用不写入。
+    ///
+    /// 证据走许可证：登记与发货不写行（意图由消息 id 与进度表达），收货把消息入树，
+    /// 超时与取消写成丢失观测（ADR 0060）。
     pub(super) async fn stream_step(
         &self,
         session: &SessionId,
@@ -39,11 +46,66 @@ impl RunEngine {
             Ok(messages) => messages,
             Err(failure) => return StepEnd::Failure(failure),
         };
-        let mut stream = match self.open_stream(session, &messages, cancellation).await {
+        let intent = EffectIntent::model_step(session.clone(), run, id);
+        let declared = match declare(self.store.as_ref(), intent).await {
+            Ok(declared) => declared,
+            Err(error) => return StepEnd::Failure(storage_failure(&error)),
+        };
+        let dispatched = match dispatch(self.store.as_ref(), declared).await {
+            Ok(dispatched) => dispatched,
+            Err(error) => return StepEnd::Failure(storage_failure(&error)),
+        };
+        let intent = dispatched.intent().clone();
+        match self
+            .read_stream(dispatched, session, run, id, &messages, cancellation)
+            .await
+        {
+            StepStream::Completed { parts } => {
+                let observation = EffectObservation::Assistant {
+                    parts: parts.clone(),
+                };
+                match self
+                    .store
+                    .write(Transition::Observed(intent, observation))
+                    .await
+                {
+                    Ok(()) => StepEnd::Completed,
+                    Err(error) => StepEnd::Failure(storage_failure(&error)),
+                }
+            }
+            StepStream::Timeout(limit) => {
+                self.lose_observation(session, intent, Lost::Timeout).await;
+                StepEnd::Failure(timeout_failure(limit))
+            }
+            StepStream::Cancelled => {
+                self.lose_observation(session, intent, Lost::Cancelled)
+                    .await;
+                StepEnd::Cancelled
+            }
+            // 上游失败没有观测可写：这一步没有产生消息，落点表本来也不写行。
+            StepStream::Failed(failure) => StepEnd::Failure(failure),
+        }
+    }
+
+    /// 读一轮模型流。许可证按值传入：只有已下发的步骤才执行到这里（ADR 0037）。
+    /// 模型步骤没有执行端，许可证因此只作证明，不交给下游。
+    async fn read_stream(
+        &self,
+        _witness: Dispatched<EffectIntent>,
+        session: &SessionId,
+        run: RunId,
+        id: MessageId,
+        messages: &[ChatMessage],
+        cancellation: &Cancellation,
+    ) -> StepStream {
+        let mut stream = match self.open_stream(session, messages, cancellation).await {
             StreamOpen::Opened(stream) => stream,
-            StreamOpen::Cancelled => return StepEnd::Cancelled,
+            StreamOpen::Cancelled => return StepStream::Cancelled,
+            StreamOpen::Failed(ProviderError::Timeout(limit)) => {
+                return StepStream::Timeout(limit);
+            }
             StreamOpen::Failed(error) => {
-                return StepEnd::Failure(RunFailure {
+                return StepStream::Failed(RunFailure {
                     code: failure_code(&error),
                     message: error.to_string(),
                 });
@@ -56,14 +118,15 @@ impl RunEngine {
         loop {
             let next = tokio::select! {
                 biased;
-                () = cancellation.cancelled() => return StepEnd::Cancelled,
+                () = cancellation.cancelled() => return StepStream::Cancelled,
                 item = StreamExt::next(&mut stream) => item,
             };
             match next {
                 None => break,
+                Some(Err(ProviderError::Timeout(limit))) => return StepStream::Timeout(limit),
                 Some(Err(error)) => {
-                    return StepEnd::Failure(RunFailure {
-                        code: RunFailureCode::ModelUpstream,
+                    return StepStream::Failed(RunFailure {
+                        code: failure_code(&error),
                         message: error.to_string(),
                     });
                 }
@@ -83,7 +146,7 @@ impl RunEngine {
                 }
                 Some(Ok(ChatChunk::ToolCall {
                     index,
-                    id,
+                    id: call_id,
                     name,
                     arguments,
                 })) => {
@@ -93,8 +156,8 @@ impl RunEngine {
                     let Some(builder) = builders.get_mut(index) else {
                         continue;
                     };
-                    if let Some(id) = id {
-                        builder.id = Some(id);
+                    if let Some(call_id) = call_id {
+                        builder.id = Some(call_id);
                     }
                     if let Some(name) = name {
                         builder.name = Some(name);
@@ -103,8 +166,7 @@ impl RunEngine {
                 }
             }
         }
-        StepEnd::Completed {
-            id,
+        StepStream::Completed {
             parts: assemble_parts(reasoning, text, builders),
         }
     }
@@ -233,8 +295,24 @@ fn assemble_parts(
     parts
 }
 
-/// 限流用稳定类别；其余上游失败仍是 `ModelUpstream`。
+/// 一轮模型流的结束方式。
+#[derive(Debug)]
+enum StepStream {
+    /// 流正常结束，带回本步定型的全部内容块。
+    Completed { parts: Vec<ContentPart> },
+    /// 客户端时限到点：链路还在，但不再等。
+    Timeout(Duration),
+    /// 被取消。
+    Cancelled,
+    /// 上游失败。
+    Failed(RunFailure),
+}
+
+/// 限流用稳定类别；超时用 `model_timeout`；其余上游失败仍是 `model_upstream`。
 fn failure_code(error: &ProviderError) -> RunFailureCode {
+    if matches!(error, ProviderError::Timeout(_)) {
+        return RunFailureCode::ModelTimeout;
+    }
     if error.is_rate_limited() {
         RunFailureCode::ModelRateLimited
     } else {

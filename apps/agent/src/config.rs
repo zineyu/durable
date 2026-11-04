@@ -8,6 +8,8 @@ use std::time::Duration;
 pub const MODEL_BASE_URL: &str = "DURABLE_MODEL_BASE_URL";
 pub const MODEL_API_KEY: &str = "DURABLE_MODEL_API_KEY";
 pub const MODEL_NAME: &str = "DURABLE_MODEL_NAME";
+/// 一次模型请求从开始到读完响应的客户端时限，单位毫秒。
+pub const MODEL_TIMEOUT_MS: &str = "DURABLE_MODEL_TIMEOUT_MS";
 pub const CONTEXT_CHAR_LIMIT: &str = "DURABLE_CONTEXT_CHAR_LIMIT";
 pub const MAX_STEPS: &str = "DURABLE_MAX_STEPS";
 /// 流式进度提交的最小间隔，单位毫秒。
@@ -15,6 +17,8 @@ pub(crate) const PROGRESS_INTERVAL_MS: &str = "DURABLE_PROGRESS_INTERVAL_MS";
 pub(crate) const MODEL_RETRY_LIMIT: &str = "DURABLE_MODEL_RETRY_LIMIT";
 pub(crate) const MODEL_RETRY_BACKOFF_MS: &str = "DURABLE_MODEL_RETRY_BACKOFF_MS";
 
+/// 模型请求客户端时限的默认值，单位毫秒。
+pub const DEFAULT_MODEL_TIMEOUT_MS: usize = 600_000;
 const DEFAULT_CONTEXT_CHAR_LIMIT: usize = 200_000;
 const DEFAULT_MAX_STEPS: usize = 50;
 const DEFAULT_PROGRESS_INTERVAL_MS: usize = 100;
@@ -26,6 +30,9 @@ pub struct ModelConfig {
     pub base_url: String,
     pub api_key: String,
     pub model_name: String,
+    /// 一次模型请求的总时限：从开始连接到响应正文读完。超时归 provider 客户端，
+    /// 引擎只按「丢失观测」收尾（ADR 0059）。
+    pub model_timeout: Duration,
 }
 
 /// run 引擎的边界配置。
@@ -81,10 +88,12 @@ impl std::error::Error for ConfigError {}
 /// - [`ConfigError::Missing`]：`DURABLE_MODEL_BASE_URL`、`DURABLE_MODEL_API_KEY` 或
 ///   `DURABLE_MODEL_NAME` 未设置或为空。
 /// - [`ConfigError::NotUnicode`]：已设置的配置不是 UTF-8。
+/// - [`ConfigError::InvalidNumber`]：`DURABLE_MODEL_TIMEOUT_MS` 不是正整数。
 pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
     let base_url = read_required(MODEL_BASE_URL)?;
     let api_key = read_required(MODEL_API_KEY)?;
     let model_name = read_required(MODEL_NAME)?;
+    let model_timeout = read_positive(MODEL_TIMEOUT_MS, DEFAULT_MODEL_TIMEOUT_MS)?;
     let missing: Vec<&'static str> = [
         (MODEL_BASE_URL, base_url.is_none()),
         (MODEL_API_KEY, api_key.is_none()),
@@ -98,6 +107,7 @@ pub fn model_config_from_env() -> Result<ModelConfig, ConfigError> {
             base_url,
             api_key,
             model_name,
+            model_timeout: Duration::from_millis(to_u64(model_timeout)),
         }),
         _ => Err(ConfigError::Missing(missing)),
     }
@@ -114,16 +124,21 @@ pub fn engine_config_from_env() -> Result<EngineConfig, ConfigError> {
     Ok(EngineConfig {
         context_char_limit: read_positive(CONTEXT_CHAR_LIMIT, defaults.context_char_limit)?,
         max_steps: read_positive(MAX_STEPS, defaults.max_steps)?,
-        progress_interval: Duration::from_millis(read_positive(
+        progress_interval: Duration::from_millis(to_u64(read_positive(
             PROGRESS_INTERVAL_MS,
             defaults.progress_interval.as_millis() as usize,
-        )? as u64),
+        )?)),
         model_retry_limit: read_count(MODEL_RETRY_LIMIT, defaults.model_retry_limit)?,
-        model_retry_backoff: Duration::from_millis(read_positive(
+        model_retry_backoff: Duration::from_millis(to_u64(read_positive(
             MODEL_RETRY_BACKOFF_MS,
             defaults.model_retry_backoff.as_millis() as usize,
-        )? as u64),
+        )?)),
     })
+}
+
+/// 毫秒配置转成时长。`usize` 到 `u64` 的转换在 64 位平台上恒等，在 32 位平台上扩大。
+fn to_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
 }
 
 fn read_required(name: &'static str) -> Result<Option<String>, ConfigError> {

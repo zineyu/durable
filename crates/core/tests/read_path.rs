@@ -9,7 +9,10 @@
 mod support;
 
 use durable::{ContentPart, MessageId, MessageRole, RunStatus, SessionId, Store};
-use support::{add_session, enqueue, open_store, store_with_session, text, tree};
+use support::{
+    add_session, append_assistant, append_compaction, enqueue, open_store, store_with_session,
+    text, tree,
+};
 
 /// 一个已完成的问答。
 async fn answered(store: &Store, session: &SessionId) -> (MessageId, MessageId) {
@@ -19,15 +22,15 @@ async fn answered(store: &Store, session: &SessionId) -> (MessageId, MessageId) 
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let assistant = store
-        .append_assistant(
-            session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("回答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let assistant = append_assistant(
+        store,
+        session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("回答")],
+    )
+    .await
+    .expect("assistant 入树");
     store
         .finish_run(session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await
@@ -43,14 +46,14 @@ async fn answered(store: &Store, session: &SessionId) -> (MessageId, MessageId) 
 async fn transcript_stops_at_compaction() {
     let (_directory, store, session) = store_with_session().await;
     answered(&store, &session).await;
-    let compaction = store
-        .append_compaction(
-            &session,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("摘要")],
-        )
-        .await
-        .expect("压缩入树");
+    let compaction = append_compaction(
+        &store,
+        &session,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("摘要")],
+    )
+    .await
+    .expect("压缩入树");
     enqueue(&store, &session, "后续").await;
     store
         .start_run(&session)
@@ -89,15 +92,15 @@ async fn transcript_follows_the_active_branch() {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let alternate = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("另一个回答")],
-        )
-        .await
-        .expect("assistant 入树");
+    let alternate = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("另一个回答")],
+    )
+    .await
+    .expect("assistant 入树");
     store
         .finish_run(&session, &start.run, RunStatus::Succeeded, None, Some(1))
         .await

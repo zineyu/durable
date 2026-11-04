@@ -9,7 +9,10 @@
 mod support;
 
 use durable::{ContentPart, FactEvent, MessageId, MessageSkeleton, SessionId, Store};
-use support::{chain_ids, enqueue, facts_after, max_event_id, steer, store_with_session, tree};
+use support::{
+    append_assistant, chain_ids, enqueue, facts_after, max_event_id, steer, store_with_session,
+    tree,
+};
 
 /// 树上节点的骨架。
 async fn node(store: &Store, session: &SessionId, id: MessageId) -> MessageSkeleton {
@@ -38,26 +41,26 @@ async fn steered_chain() -> (tempfile::TempDir, SteeredChain) {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let first = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("第一步")],
-        )
-        .await
-        .expect("assistant 入树");
+    let first = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("第一步")],
+    )
+    .await
+    .expect("assistant 入树");
     let item = steer(&store, &session, "插话").await;
     let steered = item.anchor.expect("插话锚定节点");
-    let later = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("第二步")],
-        )
-        .await
-        .expect("assistant 入树");
+    let later = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("第二步")],
+    )
+    .await
+    .expect("assistant 入树");
 
     assert_eq!(
         node(&store, &session, steered).await.parent_id,
@@ -166,15 +169,15 @@ async fn downgrade_keeps_node_and_marks_item_queued() {
         .await
         .expect("启动 run")
         .expect("队列非空时启动 run");
-    let first = store
-        .append_assistant(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            vec![ContentPart::text("第一步")],
-        )
-        .await
-        .expect("assistant 入树");
+    let first = append_assistant(
+        &store,
+        &session,
+        start.run.id,
+        store.mint_message_id().await.expect("铸造消息 id"),
+        vec![ContentPart::text("第一步")],
+    )
+    .await
+    .expect("assistant 入树");
     let item = steer(&store, &session, "插话").await;
     let steered = item.anchor.expect("插话锚定节点");
     assert_eq!(
