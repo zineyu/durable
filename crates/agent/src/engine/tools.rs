@@ -49,7 +49,7 @@ impl RunEngine {
                 .map_err(|error| storage_failure(&error))?;
             let call = pending.call;
             // 可恢复状态先落库，再执行（ADR 0037）。
-            self.finish_call(session, message_id, &call.id, ToolResultState::Dispatched)
+            self.set_tool_state(session, message_id, &call.id, ToolResultState::Dispatched)
                 .await
                 .map_err(|error| storage_failure(&error))?;
             tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
@@ -69,7 +69,7 @@ impl RunEngine {
                         error = %closed,
                         "link 已断开，本次调用结局未知"
                     );
-                    self.finish_call(session, message_id, &call.id, ToolResultState::Unknown)
+                    self.set_tool_state(session, message_id, &call.id, ToolResultState::Unknown)
                         .await
                         .map_err(|error| storage_failure(&error))?;
                     self.abandon_tools(session, start.run.id, remaining.collect())
@@ -81,7 +81,7 @@ impl RunEngine {
                     });
                 }
             };
-            self.finish_call(session, message_id, &call.id, state)
+            self.set_tool_state(session, message_id, &call.id, state)
                 .await
                 .map_err(|error| storage_failure(&error))?;
             if cancellation.is_cancelled() {
@@ -94,8 +94,8 @@ impl RunEngine {
         Ok(ToolLoopEnd::Completed)
     }
 
-    /// 把结局写回 tool 节点。
-    async fn finish_call(
+    /// 写入 tool 节点的工具结果状态：下发前、结局、结果未知三个时刻共用它。
+    async fn set_tool_state(
         &self,
         session: &SessionId,
         message_id: MessageId,
@@ -134,7 +134,7 @@ impl RunEngine {
     ) -> Result<(), StoreError> {
         for pending in pending {
             let message_id = self.ensure_tool_node(session, run_id, &pending).await?;
-            self.finish_call(
+            self.set_tool_state(
                 session,
                 message_id,
                 &pending.call.id,
