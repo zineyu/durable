@@ -1,0 +1,12 @@
+import{n as e}from"./rolldown-runtime-sJBDdmOt.js";import{n as t}from"./iframe-D44eIQOB.js";import{n,t as r}from"./Icon-CcpWt1uh.js";var i,a,o,s,c,l,u,d;function f(){return(f=e((()=>{i=`_button_18i6q_1`,a=`_sm_18i6q_15`,o=`_md_18i6q_20`,s=`_neutral_18i6q_25`,c=`_danger_18i6q_30`,l=`_lg_18i6q_44`,u=`_primary_18i6q_49`,d={button:i,sm:a,md:o,neutral:s,danger:c,lg:l,primary:u}})))()}function p({icon:e,label:t,tone:n=`neutral`,size:i=`sm`,className:a,...o}){let s=[d.button,d[n],d[i],a].filter(Boolean).join(` `);return(0,m.jsx)(`button`,{type:`button`,className:s,"aria-label":t,title:t,...o,children:(0,m.jsx)(r,{name:e})})}var m;function h(){return(h=e((()=>{n(),f(),m=t(),p.__docgenInfo={description:``,methods:[],displayName:`IconButton`,props:{icon:{required:!0,tsType:{name:`union`,raw:`| 'pencil'
+| 'trash'
+| 'close'
+| 'more'
+| 'send'
+| 'retry'
+| 'stop'
+| 'plus'
+| 'search'
+| 'download'
+| 'up'
+| 'down'`,elements:[{name:`literal`,value:`'pencil'`},{name:`literal`,value:`'trash'`},{name:`literal`,value:`'close'`},{name:`literal`,value:`'more'`},{name:`literal`,value:`'send'`},{name:`literal`,value:`'retry'`},{name:`literal`,value:`'stop'`},{name:`literal`,value:`'plus'`},{name:`literal`,value:`'search'`},{name:`literal`,value:`'download'`},{name:`literal`,value:`'up'`},{name:`literal`,value:`'down'`}]},description:``},label:{required:!0,tsType:{name:`string`},description:``},tone:{required:!1,tsType:{name:`union`,raw:`'neutral' | 'danger' | 'primary'`,elements:[{name:`literal`,value:`'neutral'`},{name:`literal`,value:`'danger'`},{name:`literal`,value:`'primary'`}]},description:``,defaultValue:{value:`'neutral'`,computed:!1}},size:{required:!1,tsType:{name:`union`,raw:`'sm' | 'md' | 'lg'`,elements:[{name:`literal`,value:`'sm'`},{name:`literal`,value:`'md'`},{name:`literal`,value:`'lg'`}]},description:``,defaultValue:{value:`'sm'`,computed:!1}}}}})))()}export{h as n,p as t};

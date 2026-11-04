@@ -5,16 +5,16 @@
 
 ## 背景
 
-两份规格各自从 1 开始编号。于是 `规格 user story 3` 在 `crates/hub` 指「名称重复时报错」，在 `crates/agent` 指「workspace 身份是规范化路径」。追溯检查只能判断「这个编号在某份规格里存在」，因此写错规格也通过。
+两份规格各自从 1 开始编号。于是 `规格 user story 3` 在 `crates/hub` 指「名称重复时报错」，在 `apps/agent` 指「workspace 身份是规范化路径」。追溯检查只能判断「这个编号在某份规格里存在」，因此写错规格也通过。
 
-改动前的检查确实漏过：`crates/agent/tests/run.rs` 有三处、`crates/hub/tests/*` 有五处，注释讲的是 ADR 0027 至 0031 的决定，编号却写成 user story；这些编号在另一份规格里也存在，检查一路放行。
+改动前的检查确实漏过：`apps/agent/tests/run.rs` 有三处、`crates/hub/tests/*` 有五处，注释讲的是 ADR 0027 至 0031 的决定，编号却写成 user story；这些编号在另一份规格里也存在，检查一路放行。
 
 ## 决策
 
 - **编号带前缀。** 每份规格一个前缀，登记在 `scripts/check-spec-links.sh`。当前 `docs/specs/rust-react-coding-agent.md` 用 `A-`，`docs/specs/remote-ssh-process-model.md` 用 `R-`；`H-` 随 ADR 0048 删除。
 - **编号写进条目本身。** 条目写成 `- **A-1** 作为用户，…` 的无序列表，不依赖 Markdown 有序列表自动编号。插入条目时只有被插入位置之后的编号需要改，渲染不会再与文字里的编号错位。
 - **引用写全编号。** `规格 user story A-16`；一行引用多条写 `规格 user story A-16 与 A-19`。
-- **归属按目录判定。** `crates/executor/**` 只允许引用 `R-`，其余路径允许 `A-` 与 `R-`。把某份规格的需求写进不属于它的代码，是失败。`H-` 随 ADR 0048 删除。
+- **归属按目录判定。** `apps/executor/**` 只允许引用 `R-`，其余路径允许 `A-` 与 `R-`。把某份规格的需求写进不属于它的代码，是失败。`H-` 随 ADR 0048 删除。
 - **不属于规格的决定改为引用 ADR。** 写作 `ADR 0031：…`，不再套用 user story 句式。追溯检查只解析 user story 引用，ADR 引用不参与。
 - **新增规格必须登记前缀。** `scripts/check-spec-links.sh` 的 `spec_of` 是前缀与文件的映射；`docs/specs/` 下出现未登记的文件即失败。
 

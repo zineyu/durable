@@ -1,5 +1,5 @@
 //! host 表：注册、更新、删除、读取与状态事实。
-//! host 的运行状态与 link 在 `crates/agent`；写命令入口在 `command`。
+//! host 的运行状态与 link 在 `apps/agent`；写命令入口在 `command`。
 
 use super::Store;
 use crate::error::StoreError;

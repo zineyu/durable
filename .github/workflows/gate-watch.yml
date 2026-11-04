@@ -27,14 +27,15 @@ jobs:
           base="origin/${BASE_REF}"
           paths=(
             .github
-            client/eslint.config.js
-            client/stylelint.config.mjs
-            client/tsconfig.json
+            apps/client/eslint.config.js
+            apps/client/stylelint.config.mjs
+            apps/client/tsconfig.json
             clippy.toml
             deny.toml
             rustfmt.toml
             scripts/lint-fast.sh
             scripts/lint.sh
+            scripts/task.sh
             "scripts/check-*.sh"
           )
           git diff --name-only "${base}...HEAD" -- "${paths[@]}" > changed.txt

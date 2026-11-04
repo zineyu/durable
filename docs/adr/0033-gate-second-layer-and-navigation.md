@@ -21,7 +21,7 @@ ADR-0032 让 lint 告警阻断并禁用抑制，覆盖的是「写错的代码�
 
 ### 规模预算
 
-单个文件的上限：`crates/*/src` 与 `crates/*/tests` 下 Rust 600 行，`client/src` 下 TS/TSX 400 行，排除 `*.test.ts(x)` 与 `src/api/generated/`。
+单个文件的上限：`crates/*/src`、`crates/*/tests`、`apps/*/src` 与 `apps/*/tests` 下 Rust 600 行，`apps/client/src` 下 TS/TSX 400 行，排除 `*.test.ts(x)` 与 `src/api/generated/`。
 
 集成测试同样计入。测试文件越长，agent 越难找到「这条断言写在哪」，而新增用例总是落在最近的文件里，因此测试与源码用同一套上限。存量超限登记在 `scripts/source-budget.allow`，登记值只许变小；文件回到默认上限以内时必须删除登记行。
 
@@ -33,7 +33,7 @@ ADR-0032 让 lint 告警阻断并禁用抑制，覆盖的是「写错的代码�
 
 ### 门禁自锁放在 PR 上，不放在 lint 里
 
-`.github/workflows/gate-watch.yml` 在 `pull_request` 上比对基线与 HEAD 的门禁文件：`scripts/lint*.sh`、`scripts/check-*.sh`、`clippy.toml`、`deny.toml`、`rustfmt.toml`、`client/eslint.config.js`、`client/tsconfig.json`、`client/stylelint.config.mjs`、`Cargo.toml` 的 `[workspace.lints]` 段，以及 `.github/` 全部。命中时在 PR 上发一条评论列出改动文件。评论带固定标记：重复运行更新同一条，改动撤销时删除。
+`.github/workflows/gate-watch.yml` 在 `pull_request` 上比对基线与 HEAD 的门禁文件：`scripts/lint*.sh`、`scripts/check-*.sh`、`clippy.toml`、`deny.toml`、`rustfmt.toml`、`apps/client/eslint.config.js`、`apps/client/tsconfig.json`、`apps/client/stylelint.config.mjs`、`Cargo.toml` 的 `[workspace.lints]` 段，以及 `.github/` 全部。命中时在 PR 上发一条评论列出改动文件。评论带固定标记：重复运行更新同一条，改动撤销时删除。
 
 `Cargo.toml` 只比较 `[workspace.lints]` 段，因为依赖版本升级每月都有，整文件比较会把它们全部算成门禁改动。
 
@@ -43,12 +43,12 @@ ADR-0032 让 lint 告警阻断并禁用抑制，覆盖的是「写错的代码�
 
 - 规格追溯：代码与测试写 `规格 user story A-16`，`scripts/check-spec-links.sh` 断言该编号在对应规格中存在且前缀与目录归属匹配（ADR 0034）。未被引用的编号只打印清单，不阻断，因为规格先行是常态。
 - 类型清单：`docs/api/types.md` 与 TS 类型由同一命令 `scripts/typegen.sh` 生成，`durable-test` 重新生成后比对两个路径。清单从生成文件派生，不重复类型定义。
-- 类型导出覆盖：`scripts/check-typegen-coverage.sh` 收集 `crates/*/src` 里每个 `#[derive(TS)]` 的类型名，断言 `client/src/api/generated/<Name>.ts` 存在。生成文件一致只能证明「导出的都正确」，覆盖检查补上「该导出的都导出了」这一半。
+- 类型导出覆盖：`scripts/check-typegen-coverage.sh` 收集 `crates/*/src` 与 `apps/*/src` 里每个 `#[derive(TS)]` 的类型名，断言 `apps/client/src/api/generated/<Name>.ts` 存在。生成文件一致只能证明「导出的都正确」，覆盖检查补上「该导出的都导出了」这一半。
 - 术语表：`scripts/check-glossary.sh` 断言 `docs/glossary.md` 里标识符形状的反引号术语能在 `crates/` 或 `client/` 里找到。URL 模板一类自然语言片段不参与检查。
 
 ## 可导航性
 
-- 每个 `crates/*/src` 模块的第一行是 `//!`，写「本模块负责什么」与「不属于它的在哪」。这一行从代码取事实，不复述文件名：读者据此决定「该改哪里」和「不该改哪里」。
+- 每个 `crates/*/src` 与 `apps/*/src` 模块的第一行是 `//!`，写「本模块负责什么」与「不属于它的在哪」。这一行从代码取事实，不复述文件名：读者据此决定「该改哪里」和「不该改哪里」。
 - `docs/adr/README.md` 是 ADR 索引：编号、标题、状态、结论一句。结论压缩自各篇「决策」段。
 - `AGENTS.md` 增加 crate 模块导航与「任务 → 文件」映射。agent 从任务直接跳到落点，不必先遍历目录。
 

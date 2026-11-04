@@ -1,5 +1,5 @@
 //! run 的生命周期写入：开始、定型 assistant、工具节点的结局四态、流式进度与结束。
-//! 调度与 run 动作判定在 `crates/agent/src/engine`；队列项在此之前写入 `queue`。
+//! 调度与 run 动作判定在 `apps/agent/src/engine`；队列项在此之前写入 `queue`。
 
 use super::{Store, append_node};
 use crate::change::Changeset;

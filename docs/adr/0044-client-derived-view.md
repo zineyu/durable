@@ -16,7 +16,7 @@ ADR 0017 要求全部业务状态由纯 reducer 推导，组件只接收派生�
 
 ## 决策
 
-**派生层是纯函数，不进 reducer。** 新模块 `client/src/view/derived.ts` 从分片推导呈现所需的视图，不持有状态，不产生事实。订阅分片的调用点按分片对象为键 `useMemo`，分片换代即重算。分片不可变，因此不需要失效逻辑，reducer 的语义不变。
+**派生层是纯函数，不进 reducer。** 新模块 `apps/client/src/view/derived.ts` 从分片推导呈现所需的视图，不持有状态，不产生事实。订阅分片的调用点按分片对象为键 `useMemo`，分片换代即重算。分片不可变，因此不需要失效逻辑，reducer 的语义不变。
 
 **两级构造。** `sessionSummaries` 计算节点内全部 session 的摘要，代价足够低，必须全算，供侧栏、命令面板与运行中列表使用。`sessionView` 计算完整视图：transcript（消息连同正文、展示状态与说明、分支序号与相邻 id）、工具结局、队列、占位与空闲判定；代价与 transcript 长度相关，只算当前可见的 session。完整视图内嵌摘要，摘要的实现只有 `sessionSummaries` 一处。
 

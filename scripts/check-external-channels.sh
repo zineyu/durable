@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 外部通道门禁：网络、子进程、文件写入、后台任务只允许出现在白名单里。
 # 白名单是 scripts/external-channels.allow，逐文件逐类登记并写理由。
-# 范围是产品代码：crates/*/src 与 client/src。测试、Storybook 与生成物不在范围内，
+# 范围是产品代码：crates/*/src 与 apps/*/src。测试、Storybook 与生成物不在范围内，
 # 理由见 docs/adr/0057-external-channel-gate.md。
 # 已跟踪与未跟踪的文件一并算入：写完文件立刻跑本脚本，与提交前跑，结果必须相同。
 set -euo pipefail
@@ -88,9 +88,9 @@ contains_pair() {
 }
 
 {
-  git ls-files 'crates/*/src/*.rs' 'client/src/*.ts' 'client/src/*.tsx'
-  git ls-files --others --exclude-standard 'crates/*/src/*.rs' 'client/src/*.ts' 'client/src/*.tsx'
-} | grep -Ev '\.test\.tsx?$|\.stories\.tsx?$|\.fixture\.tsx?$|^client/src/api/generated/' |
+  git ls-files 'crates/*/src/*.rs' 'apps/*/src/*.rs' 'apps/client/src/*.ts' 'apps/client/src/*.tsx'
+  git ls-files --others --exclude-standard 'crates/*/src/*.rs' 'apps/*/src/*.rs' 'apps/client/src/*.ts' 'apps/client/src/*.tsx'
+} | grep -Ev '\.test\.tsx?$|\.stories\.tsx?$|\.fixture\.tsx?$|^apps/client/src/api/generated/' |
   sort -u > "$work/files" || true
 
 if [ ! -s "$work/files" ]; then

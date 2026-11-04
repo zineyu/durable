@@ -18,7 +18,7 @@
 
 ## 决策
 
-**一个 module 持有条目表与重试预算。** 新增 `client/src/view/body-cache.ts`，类型 `BodyCache`，内部是 `Record<number, Entry>`；`Entry` 是带阶段的联合：`ready(attempts)`、`pending(attempts)`、`cached(parts)`、`failed(attempts)`，没有条目即「未曾请求」。互斥规则不再存在，因为一条消息在一个时刻只有一个阶段。
+**一个 module 持有条目表与重试预算。** 新增 `apps/client/src/view/body-cache.ts`，类型 `BodyCache`，内部是 `Record<number, Entry>`；`Entry` 是带阶段的联合：`ready(attempts)`、`pending(attempts)`、`cached(parts)`、`failed(attempts)`，没有条目即「未曾请求」。互斥规则不再存在，因为一条消息在一个时刻只有一个阶段。
 
 **interface 只有动作与纯读。** 动作七个：`begin(ids)`、`arrive(ids, bodies)`、`fail(ids)`、`retry(ids)`、`invalidate(id)`、`forget(ids)`、`reload(ids)`。纯读三个：`needs(ids)`、`cachedParts(id)`、`retrying()`。`Entry` 与条目表不导出。
 

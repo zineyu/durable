@@ -1,9 +1,9 @@
 target/
 .devenv/
 node_modules/
-client/dist/
-client/storybook-static/
-client/screenshots/
+apps/client/dist/
+apps/client/storybook-static/
+apps/client/screenshots/
 .screenshots/
 .DS_Store
 test-results/

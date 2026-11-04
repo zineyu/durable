@@ -29,23 +29,23 @@ jobs:
         run: nix profile install nixpkgs#devenv
 
       - name: Install client dependencies
-        run: devenv shell -- bash -c 'cd client && npm ci'
+        run: devenv shell -- bash -c 'cd apps/client && npm ci'
 
       - name: Build client
-        run: devenv shell -- bash -c 'cd client && npm run build'
+        run: devenv shell -- bash -c 'cd apps/client && npm run build'
 
       - name: Repository checks
         run: devenv shell -- durable-test
 
       - name: Install Playwright browser
-        run: devenv shell -- bash -c 'cd client && npx playwright install --with-deps chromium'
+        run: devenv shell -- bash -c 'cd apps/client && npx playwright install --with-deps chromium'
 
       - name: End-to-end tests
         run: devenv shell -- durable-e2e
 
       - name: Build Storybook
-        run: devenv shell -- bash -c 'cd client && npm run build-storybook'
+        run: devenv shell -- bash -c 'cd apps/client && npm run build-storybook'
 
       - name: Chromatic
         if: env.CHROMATIC_PROJECT_TOKEN != ''
-        run: devenv shell -- bash -c 'cd client && npx chromatic --storybook-build-dir=storybook-static'
+        run: devenv shell -- bash -c 'cd apps/client && npx chromatic --storybook-build-dir=storybook-static'

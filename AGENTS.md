@@ -5,7 +5,7 @@
 - 规格：`docs/specs/rust-react-coding-agent.md`（主 issue 的正文即该规格）。
 - 架构决策：`docs/adr/`。
 - 领域术语：`docs/glossary.md`。代码、提交说明与文档使用术语表词汇。
-- 客户端命令、Storybook 画框与截图：`client/README.md`。
+- 客户端命令、Storybook 画框与截图：`apps/client/README.md`。
 
 ## 目标：任意位置崩溃都能自动恢复
 
@@ -18,16 +18,21 @@
 
 ## 目录
 
+本仓库是 monorepo：可部署端在 `apps/`，库 crate 在 `crates/`，将来共享的 Node 包在 `packages/`。目录布局由 `scripts/check-layout.sh` 钉住，理由见 `docs/adr/0058-monorepo-layout.md`。
+
 | 路径 | 职责 |
 | --- | --- |
+| `apps/agent` | agent 二进制；HTTP/SSE 协议、编译期内嵌的 `apps/client/dist` 与 `ts-rs` 导出入口 |
+| `apps/executor` | host 上的工具执行端；经 link 帧执行四个工具，不持有数据库 |
+| `apps/client` | React + Vite + TypeScript 客户端 |
 | `crates/core` | 领域与持久化内核（包名 `durable`）；领域类型、`ts-rs` 派生、单一写入线与 SQLite 存储 |
 | `crates/runtime` | 进程级支撑（包名 `runtime`）；平台标准目录解析与日志初始化 |
-| `crates/agent` | agent 二进制；HTTP/SSE 协议、编译期内嵌的 `client/dist` 与 `ts-rs` 导出入口 |
-| `crates/executor` | host 上的工具执行端；经 link 帧执行四个工具，不持有数据库 |
 | `crates/effects` | 通用副作用库（包名 `effects`）；类别表、能力令牌与覆盖率，不依赖领域内核 |
-| `client` | React + Vite + TypeScript 客户端 |
+| `packages` | 预留：将来被多个端共享的 Node 包。现在没有包，因此没有这个目录 |
 | `docs` | 规格、ADR（索引见 `docs/adr/README.md`）、术语表 |
-| `scripts` | 门禁与检查脚本；编辑时跑 `bash scripts/lint-fast.sh` |
+| `scripts` | 任务编排、门禁与检查脚本；编辑时跑 `bash scripts/lint-fast.sh` |
+
+目录与包名不同：`crates/core` 的包名是 `durable`。`scripts/task.sh --list` 给出全部包与它们的目录。
 
 ## crate 导航
 
@@ -63,59 +68,76 @@
 | `provider.rs` | OpenAI 兼容 provider 与 SSE 解析 |
 | `link/` | link 的 agent 侧：`mod.rs` 按请求 id 复用帧、管子进程，`closed.rs` 是断链说明，`transport.rs` 组装本地与 SSH 两种传输，`ssh.rs` 探测远端平台并推送执行端，`tools.rs` 是 `ToolBox` 与 `RemoteTools` |
 | `hosts/` | host 注册表：表项、命令、快照与心跳。`lifecycle.rs` 是状态机：`HostState`、`HostEvent`、代号与 link，唯一写入口是 `apply`；`connect.rs` 只报告一次连接尝试的结果与退避重连 |
-| `assets.rs` | 编译期内嵌的 `client/dist`：MIME、SPA 回落与 `/api` 的 404 |
+| `assets.rs` | 编译期内嵌的 `apps/client/dist`：MIME、SPA 回落与 `/api` 的 404 |
 | `sse.rs` | 单一全局事件流：回放、实时与 resync |
 | `protocol.rs` | 对外协议 DTO 与协议版本 |
 | `config.rs`、`error.rs` | 配置解析、HTTP 错误信封 |
 
 `executor`：`main.rs` 读帧、派发请求与请求生命周期；`tools/` 四个工具，`paths.rs` 管 workspace 边界。
 
-`client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer、派生视图与状态推导；`components/`、`stories/`、`styles/`。
+`apps/client/src`：`api/` 协议客户端与生成类型；`view/` 纯 reducer、派生视图与状态推导；`components/`、`stories/`、`styles/`。
 
 ## 模块头
 
-`crates/*/src` 下每个模块的第一行是 `//!`，写「本模块负责什么」与「不属于它的在哪」。新增模块必须带这一行；移动职责时同步改，否则下一轮会照着过期的说明改错文件。
+`crates/*/src` 与 `apps/*/src` 下每个模块的第一行是 `//!`，写「本模块负责什么」与「不属于它的在哪」。新增模块必须带这一行；移动职责时同步改，否则下一轮会照着过期的说明改错文件。
 
 ## 任务 → 文件
 
 | 我要改… | 从这里开始 |
 | --- | --- |
-| agent 的 HTTP 接口 | `crates/agent/src/api.rs` 的路由表与处理器，DTO 在 `protocol.rs` |
-| SSE 事件载荷 | `crates/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
+| agent 的 HTTP 接口 | `apps/agent/src/api.rs` 的路由表与处理器，DTO 在 `protocol.rs` |
+| SSE 事件载荷 | `apps/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
 | 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `change.rs` |
-| 新的 LLM 工具 | `crates/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
-| link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `crates/agent/src/link/mod.rs`，传输在 `link/transport.rs`、`link/ssh.rs`，executor 侧在 `crates/executor/src/main.rs` |
+| 新的 LLM 工具 | `apps/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
+| link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `apps/agent/src/link/mod.rs`，传输在 `link/transport.rs`、`link/ssh.rs`，executor 侧在 `apps/executor/src/main.rs` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
-| host 表命令或 host 快照 | `crates/agent/src/hosts/mod.rs`，路由在 `api.rs`；状态与说明的迁移在 `hosts/lifecycle.rs` |
-| 协议类型与 TS 生成 | `crates/agent/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
-| 客户端状态推导 | 事实归约在 `client/src/view/reducer.ts` 与 `state.ts`，呈现所需的派生在 `derived.ts` |
-| 客户端写命令与对话框 | `client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
-| 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
+| host 表命令或 host 快照 | `apps/agent/src/hosts/mod.rs`，路由在 `api.rs`；状态与说明的迁移在 `hosts/lifecycle.rs` |
+| 协议类型与 TS 生成 | `apps/agent/src/lib.rs` 的 `export_types`，再跑 `durable-typegen` |
+| 客户端状态推导 | 事实归约在 `apps/client/src/view/reducer.ts` 与 `state.ts`，呈现所需的派生在 `derived.ts` |
+| 客户端写命令与对话框 | `apps/client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
+| 样式 token 与组件样式 | `apps/client/src/styles/tokens.css` 与组件同名 `*.module.css` |
 | 副作用类别、许可证与覆盖率 | `crates/effects/src/policy.rs` 的类别表，`token.rs` 的四条流程，`coverage.rs` 的缺口 |
 | 新增一条外部通道（网络、子进程、文件写入、后台任务） | `scripts/external-channels.allow` 补一行「<路径> <类别> # 理由」，见 `docs/adr/0057-external-channel-gate.md` |
-| 集成测试 | `crates/*/tests/`，脚手架在 `tests/support/` |
-| 浏览器端到端测试 | `client/e2e/` |
+| 集成测试 | `crates/*/tests/` 与 `apps/*/tests/`，脚手架在 `tests/support/` |
+| 浏览器端到端测试 | `apps/client/e2e/` |
 
 ## 命令
 
-所有命令经 `devenv shell --` 执行。首次使用先安装客户端依赖：`devenv shell -- bash -c 'cd client && npm ci'`。
+所有命令经 `devenv shell --` 执行。首次使用先安装客户端依赖：`devenv shell -- bash -c 'cd apps/client && npm ci'`。
 
 | 命令 | 作用 |
 | --- | --- |
-| `devenv shell -- durable-build` | 先构建 client，再构建 Rust workspace |
+| `devenv shell -- durable-build` | 先构建 Node 包，再构建 Rust 包；顺序由 `scripts/task.sh build` 决定 |
 | `devenv shell -- durable-lint` | 全部静态检查，不含测试 |
 | `devenv shell -- durable-lint-fast` | 只含秒级静态检查，编辑时反复运行 |
-| `devenv shell -- durable-lint-crate <crate>` | 只跑一个 crate 的 clippy（含测试目标，告警即错）。快 lane 不含 clippy，改 Rust 时用它 |
+| `devenv shell -- durable-lint-package <包名>` | 只跑一个包的静态检查（Rust 含测试目标，告警即错）。快 lane 不含 clippy，改 Rust 时用它 |
 | `devenv shell -- durable-test` | 提交前的全部检查：lint 与测试 |
 | `devenv shell -- durable-e2e` | 端到端测试：构建后由 Playwright 驱动真实 agent 与浏览器 |
 | `devenv shell -- durable-typegen` | 重新生成 TS 协议类型 |
 | `devenv shell -- storybook` | Storybook 开发服务器 |
 
-`durable-test` 先跑 `durable-lint`，再跑 `cargo test --workspace`、Vitest 与 TS 类型一致性比对。提交前必须全部通过。
+`durable-test` 先跑 `durable-lint`，再跑 `scripts/task.sh test`（Node 包先构建再测试，然后逐 Rust 包测试），最后比对 TS 类型与 `docs/api/types.md`。提交前必须全部通过。
+
+## 任务编排
+
+`scripts/task.sh` 是跨包的任务入口。它从 `cargo metadata` 与 `apps/*/package.json`、`packages/*/package.json` 发现包，按包声明的入口展开任务；没有声明某个任务的包被跳过。
+
+| 用法 | 作用 |
+| --- | --- |
+| `scripts/task.sh build` | 每个包的构建命令；Node 包先于 Rust 包 |
+| `scripts/task.sh lint` | 每个包的静态检查 |
+| `scripts/task.sh test` | 每个包的测试；先构建所有 Node 包 |
+| `scripts/task.sh e2e` | 声明了端到端测试的包 |
+| `scripts/task.sh typegen` | 声明了 `export-types-<包名>` 二进制的包 |
+| `scripts/task.sh <任务> --package <包名>` | 只跑一个包 |
+| `scripts/task.sh <任务> --kind rust\|node` | 只跑一类包 |
+| `scripts/task.sh --list` | 按「类别、包名、目录、任务」四列打印发现结果 |
+
+新增一个包只需放到 `apps/` 或 `packages/` 并带 `Cargo.toml` 或 `package.json`：它立刻出现在上面每个任务里，不需要修改脚本。门禁脚本不做包的特判。
 
 门禁本体是版本库里的两条脚本，`devenv.nix` 只负责转调：
 
-- `scripts/lint-fast.sh`：`cargo fmt --all --check`、`cargo check --workspace --all-targets`、ESLint（`--max-warnings=0`）、stylelint、`tsc --noEmit`。快 lane 不含 clippy：clippy 的 pedantic 集只出现在慢 lane，因此改 Rust 时另跑 `durable-lint-crate <crate>`。
+- `scripts/lint-fast.sh`：`cargo fmt --all --check`、`cargo check --workspace --all-targets`、`scripts/task.sh lint --kind node`（ESLint `--max-warnings=0`、stylelint、`tsc --noEmit`）。快 lane 不含 clippy：clippy 的 pedantic 集只出现在慢 lane，因此改 Rust 时另跑 `durable-lint-package <包名>`。
 - `scripts/lint.sh`：先跑快 lane，再加 `cargo clippy --workspace --all-targets -- -D warnings`、`RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --lib --document-private-items`、`cargo machete`、`cargo deny check`、`typos`、`taplo fmt --check`、`actionlint`、`shellcheck scripts/*.sh`、`nixfmt --check devenv.nix`，最后跑 `scripts/check-*.sh`。
 
 规则与理由见 `docs/adr/0032-strict-lint-gate.md`。
@@ -125,11 +147,11 @@
 所有告警与错误都阻断。代码里不允许出现抑制：
 
 - Rust 用 `#[expect(<lint>, reason = "…")]`，不用 `#[allow]`。`#[expect]` 在不触发时自身报错，因此过时抑制会被发现。
-- 生产代码（`crates/*/src/`）不出现 `#[expect]`。环境所限的最小例外已在 ADR-0032 列出。
+- 生产代码（`crates/*/src/` 与 `apps/*/src/`）不出现 `#[expect]`。环境所限的最小例外已在 ADR-0032 列出。
 - 测试脚手架在文件头用一条 `#![expect(…, reason = "…")]`，不逐行散放。
 - TS 侧 `reportUnusedDisableDirectives` 为错误；新代码不应需要 `eslint-disable`。
 
-`durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 agent 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
+`durable-e2e` 不包含在 `durable-test` 内：它需要构建产物与 Playwright 浏览器，首次使用先运行 `devenv shell -- bash -c 'cd apps/client && npx playwright install chromium'`。涉及浏览器行为、SSE 断线重连或 agent 重启的改动必须运行它。见 `docs/adr/0025-browser-e2e.md`。
 
 ## 手工验证：SSH 传输
 
@@ -144,16 +166,17 @@
 
 ## 规模与依赖预算
 
-- 规模预算：`crates/*/src` 与 `crates/*/tests` 下单个 Rust 文件 600 行，`client/src` 下单个 TS/TSX 文件 400 行（不含 `*.test.ts(x)` 与 `src/api/generated/`）。超限必须拆文件；存量欠账登记在 `scripts/source-budget.allow`，登记值只许变小。
+- 规模预算：`crates/*/src`、`crates/*/tests`、`apps/*/src` 与 `apps/*/tests` 下单个 Rust 文件 600 行，`apps/client/src` 下单个 TS/TSX 文件 400 行（不含 `*.test.ts(x)` 与 `src/api/generated/`）。超限必须拆文件；存量欠账登记在 `scripts/source-budget.allow`，登记值只许变小。
 - 依赖白名单：每个包的直接依赖（含 dev 依赖）都登记在 `deps.allow`，新增依赖必须先写明理由。
+- 布局：`apps/` 与 `packages/` 下每个目录必须是被 `scripts/task.sh` 发现的包，`crates/` 下只放库 crate。
 
-两条检查由 `scripts/check-source-budget.sh` 与 `scripts/check-deps.sh` 执行，已包含在 `durable-lint` 内。
+三条检查由 `scripts/check-source-budget.sh`、`scripts/check-deps.sh` 与 `scripts/check-layout.sh` 执行，已包含在 `durable-lint` 内。
 
 门禁本身不写在检查脚本里：`.github/workflows/gate-watch.yml` 在 PR 上比对门禁文件与 `.github/` 的改动，命中时评论提醒审查者，不阻断合并。
 
 ## 外部通道
 
-网络、子进程、文件写入与后台任务只允许出现在 `scripts/external-channels.allow` 登记过的文件里。登记行写「<路径> <类别> # 理由」，未登记、已失效、重复与格式错误都失败。范围是产品代码：`crates/*/src` 与 `client/src`；测试、Storybook 与生成物不在范围内。
+网络、子进程、文件写入与后台任务只允许出现在 `scripts/external-channels.allow` 登记过的文件里。登记行写「<路径> <类别> # 理由」，未登记、已失效、重复与格式错误都失败。范围是产品代码：`crates/*/src` 与 `apps/*/src`；测试、Storybook 与生成物不在范围内。
 
 脚本 `scripts/check-external-channels.sh`，已包含在 `durable-lint` 内。理由与识别式见 `docs/adr/0057-external-channel-gate.md`。
 
@@ -161,7 +184,7 @@
 
 - 规格追溯：代码与测试里的 `规格 user story A-16` 或 `规格 user story R-16` 必须对应 `docs/specs/` 里存在的编号，且前缀与所在目录匹配；不属于规格的决定写 `ADR 00NN：…`。未被引用的编号只打印清单，不阻断。脚本 `scripts/check-spec-links.sh`。
 - 类型清单：`docs/api/types.md` 与 TS 类型同一来源、同一命令生成，`durable-test` 比对两者，见「生成物」。
-- 术语表：`docs/glossary.md` 里标识符形状的反引号术语必须能在 `crates/` 或 `client/` 里找到，否则视为过时。脚本 `scripts/check-glossary.sh`。
+- 术语表：`docs/glossary.md` 里标识符形状的反引号术语必须能在 `crates/` 或 `apps/` 里找到，否则视为过时。脚本 `scripts/check-glossary.sh`。
 
 ## 日志与路径
 
@@ -169,20 +192,20 @@
 
 ## 构建顺序
 
-`agent` 在编译期读取 `client/dist`，缺失或过期时行为不可预期。任何 Rust 构建之前先构建 client；`durable-build` 已按此顺序执行。
+`agent` 在编译期读取 `apps/client/dist`，缺失或过期时行为不可预期。任何 Rust 构建之前先构建 client；`durable-build` 已按此顺序执行。
 
 ## 生成物
 
-`client/src/api/generated/` 与 `docs/api/types.md` 由 `ts-rs` 导出生成，不手写。Rust 协议类型变更后运行 `devenv shell -- durable-typegen`，并把生成文件的变更一并提交。`durable-typegen` 的实现是 `scripts/typegen.sh`，`durable-test` 会重新生成后比对这两个路径。
+`apps/client/src/api/generated/` 与 `docs/api/types.md` 由 `ts-rs` 导出生成，不手写。Rust 协议类型变更后运行 `devenv shell -- durable-typegen`，并把生成文件的变更一并提交。`durable-typegen` 的实现是 `scripts/typegen.sh`，`durable-test` 会重新生成后比对这两个路径。
 
 ## 前端约定
 
-- 组件只消费 `client/src/styles/tokens.css` 的语义 token，不写颜色字面量与硬编码长度。
+- 组件只消费 `apps/client/src/styles/tokens.css` 的语义 token，不写颜色字面量与硬编码长度。
 - 页面不含注释性说明。
-- `client/src/view/` 下的纯函数模块即使只有一个调用方也保留：它们从组件与 hook 里取出纯逻辑，由 Vitest 直接断言（ADR 0007 第二条 seam）。合并回去之前，先确认原有测试有别的落点。
+- `apps/client/src/view/` 下的纯函数模块即使只有一个调用方也保留：它们从组件与 hook 里取出纯逻辑，由 Vitest 直接断言（ADR 0007 第二条 seam）。合并回去之前，先确认原有测试有别的落点。
 - 组件样式由确定性检查与截图脚本断言：见 `docs/adr/0010-client-style-verification.md`。
 - ESLint 开启类型感知严格集：禁止 `any`、非空断言与未处理联合分支。
 
 ## 工作区噪声
 
-工作区包含 devenv 与构建产物目录：`.devenv/`、`target/`、`client/dist/`、`client/storybook-static/`、`client/screenshots/`、`client/test-results/`、`client/playwright-report/`。扫描仓库使用 `rg` 或 `git ls-files`，不要用 `find .`。
+工作区包含 devenv 与构建产物目录：`.devenv/`、`target/`、`apps/client/dist/`、`apps/client/storybook-static/`、`apps/client/screenshots/`、`apps/client/test-results/`、`apps/client/playwright-report/`。扫描仓库使用 `rg` 或 `git ls-files`，不要用 `find .`。

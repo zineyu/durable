@@ -1,5 +1,5 @@
 //! host 名、host 种类、host 元数据与 host 状态：host 名即身份。
-//! host 的运行状态与 link 在 `crates/agent` 的 host registry；落库在 `store/host`。
+//! host 的运行状态与 link 在 `apps/agent` 的 host registry；落库在 `store/host`。
 
 use std::fmt;
 

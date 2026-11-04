@@ -1,5 +1,5 @@
 //! 内核错误：写命令的失败原因与它的结局类别。
-//! 对外 HTTP 错误信封在 `crates/agent/src/error`。
+//! 对外 HTTP 错误信封在 `apps/agent/src/error`。
 
 use std::path::PathBuf;
 

@@ -24,7 +24,7 @@ ADR 实施期间，浏览器端到端测试立即发现了一个这样的缺陷�
 
 脚本队列按模型请求顺序消费。脚本种类为纯文本、工具调用、先流式返回再挂起（用于观察运行中的 run）、非成功状态。挂起脚本由测试显式释放。
 
-用例位于 `client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。它不属于 `durable-test`：它需要构建产物与 Playwright 浏览器，且比单元测试慢。
+用例位于 `apps/client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。它不属于 `durable-test`：它需要构建产物与 Playwright 浏览器，且比单元测试慢。
 
 ## 后果
 

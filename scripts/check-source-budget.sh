@@ -10,9 +10,9 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
 {
-  git ls-files 'crates/*/src/*.rs' 'crates/*/tests/*.rs' 'client/src/*.ts' 'client/src/*.tsx'
-  git ls-files --others --exclude-standard 'crates/*/src/*.rs' 'crates/*/tests/*.rs' 'client/src/*.ts' 'client/src/*.tsx'
-} | grep -Ev '^client/src/api/generated/|\.test\.tsx?$' |
+  git ls-files 'crates/*/src/*.rs' 'crates/*/tests/*.rs' 'apps/*/src/*.rs' 'apps/*/tests/*.rs' 'apps/client/src/*.ts' 'apps/client/src/*.tsx'
+  git ls-files --others --exclude-standard 'crates/*/src/*.rs' 'crates/*/tests/*.rs' 'apps/*/src/*.rs' 'apps/*/tests/*.rs' 'apps/client/src/*.ts' 'apps/client/src/*.tsx'
+} | grep -Ev '^apps/client/src/api/generated/|\.test\.tsx?$' |
   sort -u > "$work/files"
 
 xargs wc -l < "$work/files" > "$work/sizes"

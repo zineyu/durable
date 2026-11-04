@@ -16,13 +16,13 @@ while read -r term; do
   case "$term" in
     '' | *[!A-Za-z0-9_:.]*) continue ;;
   esac
-  if ! git grep -qF --untracked -- "$term" -- crates client; then
+  if ! git grep -qF --untracked -- "$term" -- crates apps; then
     printf '%s\n' "$term" >> "$work/missing.txt"
   fi
 done < "$work/terms.txt"
 
 if [ -s "$work/missing.txt" ]; then
-  printf '术语表里这些术语在 crates/ 与 client/ 中找不到，可能已过时：\n' >&2
+  printf '术语表里这些术语在 crates/ 与 apps/ 中找不到，可能已过时：\n' >&2
   sed 's/^/  /' "$work/missing.txt" >&2
   exit 1
 fi

@@ -12,7 +12,7 @@ cargo machete
 cargo deny check
 
 typos
-taplo fmt --check Cargo.toml crates/*/Cargo.toml deny.toml clippy.toml rustfmt.toml
+taplo fmt --check Cargo.toml crates/*/Cargo.toml apps/*/Cargo.toml deny.toml clippy.toml rustfmt.toml
 actionlint
 shellcheck scripts/*.sh
 nixfmt --check devenv.nix

@@ -7,18 +7,18 @@ cd "$(dirname "$0")/.."
 # 文件名的排序决定清单里各节的顺序：强制 C 排序，任何机器与地区设置产出同一份清单。
 export LC_ALL=C
 
-generated=client/src/api/generated
+generated=apps/client/src/api/generated
 manifest=docs/api/types.md
 
 rm -f "$generated"/*.ts
-cargo run --quiet -p agent --bin export-types-agent
+bash scripts/task.sh typegen
 
 mkdir -p "$(dirname "$manifest")"
 {
   cat <<'HEADER'
 # 协议类型清单
 
-由 `devenv shell -- durable-typegen` 从 Rust 类型生成，与 `client/src/api/generated/` 同一来源。不要手改。
+由 `devenv shell -- durable-typegen` 从 Rust 类型生成，与 `apps/client/src/api/generated/` 同一来源。不要手改。
 
 HEADER
   for file in "$generated"/*.ts; do

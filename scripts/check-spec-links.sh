@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 规格追溯：代码里引用的 user story 编号必须在 docs/specs 里存在，
-# 且前缀与所在目录匹配：crates/executor 引用 R-，
+# 且前缀与所在目录匹配：apps/executor 引用 R-，
 # 其余 crate 允许 A- 与 R-。
 # 未被任何代码引用的编号只打印清单，不阻断。
 # 已跟踪与未跟踪的文件一并算入：写完文件立刻跑本脚本，与提交前跑，结果必须相同。
@@ -44,10 +44,10 @@ done
 : > "$work/refs.txt"
 : > "$work/problems.txt"
 
-git grep -nE --untracked '规格 user story' -- crates client |
+git grep -nE --untracked '规格 user story' -- crates apps |
   while IFS=: read -r file line rest; do
     case "$file" in
-      crates/executor/*) prefix=R ;;
+      apps/executor/*) prefix=R ;;
       *) prefix=AR ;;
     esac
     found=$(printf '%s\n' "$rest" | sed 's/.*规格 user story//' | grep -oE '[AR]-[0-9]+' || true)

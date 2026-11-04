@@ -258,7 +258,7 @@ stateDiagram-v2
 
 ### Seam 4：浏览器端到端
 
-**形态**：Playwright 启动真实 `agent` 进程（它自带 `executor` 子进程），使用临时 SQLite 与临时 workspace，并指向脚本化 OpenAI 兼容 SSE 服务；Chromium 加载 `agent` 托管的客户端，用可访问名称驱动完整用户流程。用例位于 `client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。
+**形态**：Playwright 启动真实 `agent` 进程（它自带 `executor` 子进程），使用临时 SQLite 与临时 workspace，并指向脚本化 OpenAI 兼容 SSE 服务；Chromium 加载 `agent` 托管的客户端，用可访问名称驱动完整用户流程。用例位于 `apps/client/e2e/`，执行入口为 `devenv shell -- durable-e2e`。
 
 **防止**：浏览器渲染与事件流接线错误；断线重连与 `agent` 重启；客户端与真实协议之间的字段错位。决策见 `docs/adr/0025-browser-e2e.md`。
 

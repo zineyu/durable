@@ -1,0 +1,12 @@
+import{n as e}from"./rolldown-runtime-sJBDdmOt.js";import{n as t}from"./iframe-D44eIQOB.js";var n,r;function i(){return(i=e((()=>{n=`_icon_1g56y_1`,r={icon:n}})))()}function a({name:e}){return(0,o.jsx)(`svg`,{className:r.icon,"data-name":e,viewBox:`0 0 24 24`,"aria-hidden":`true`,focusable:`false`,children:s[e]})}var o,s;function c(){return(c=e((()=>{i(),o=t(),s={pencil:(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(`path`,{d:`M4 20h4l10-10a2.83 2.83 0 0 0-4-4L4 16v4Z`}),(0,o.jsx)(`path`,{d:`M13.5 6.5l4 4`})]}),trash:(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(`path`,{d:`M4 7h16`}),(0,o.jsx)(`path`,{d:`M9 7V5h6v2`}),(0,o.jsx)(`path`,{d:`M6.5 7l1 13h9l1-13`}),(0,o.jsx)(`path`,{d:`M10 11v6M14 11v6`})]}),close:(0,o.jsx)(`path`,{d:`M6 6l12 12M18 6 6 18`}),more:(0,o.jsx)(`path`,{d:`M5 12h.01M12 12h.01M19 12h.01`}),send:(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(`path`,{d:`M12 19V5`}),(0,o.jsx)(`path`,{d:`M6 11l6-6 6 6`})]}),retry:(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(`path`,{d:`M3 12a9 9 0 1 0 3-6.7`}),(0,o.jsx)(`path`,{d:`M3 4v5h5`})]}),stop:(0,o.jsx)(`rect`,{x:`6`,y:`6`,width:`12`,height:`12`,rx:`2`}),plus:(0,o.jsx)(`path`,{d:`M12 5v14M5 12h14`}),search:(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(`circle`,{cx:`11`,cy:`11`,r:`7`}),(0,o.jsx)(`path`,{d:`M20 20l-4.5-4.5`})]}),download:(0,o.jsxs)(o.Fragment,{children:[(0,o.jsx)(`path`,{d:`M12 4v12`}),(0,o.jsx)(`path`,{d:`M7 11l5 5 5-5`}),(0,o.jsx)(`path`,{d:`M4 20h16`})]}),up:(0,o.jsx)(`path`,{d:`M6 14l6-6 6 6`}),down:(0,o.jsx)(`path`,{d:`M6 10l6 6 6-6`})},a.__docgenInfo={description:``,methods:[],displayName:`Icon`,props:{name:{required:!0,tsType:{name:`union`,raw:`| 'pencil'
+| 'trash'
+| 'close'
+| 'more'
+| 'send'
+| 'retry'
+| 'stop'
+| 'plus'
+| 'search'
+| 'download'
+| 'up'
+| 'down'`,elements:[{name:`literal`,value:`'pencil'`},{name:`literal`,value:`'trash'`},{name:`literal`,value:`'close'`},{name:`literal`,value:`'more'`},{name:`literal`,value:`'send'`},{name:`literal`,value:`'retry'`},{name:`literal`,value:`'stop'`},{name:`literal`,value:`'plus'`},{name:`literal`,value:`'search'`},{name:`literal`,value:`'download'`},{name:`literal`,value:`'up'`},{name:`literal`,value:`'down'`}]},description:``}}}})))()}export{c as n,a as t};

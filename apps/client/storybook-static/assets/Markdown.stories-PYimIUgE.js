@@ -1,0 +1,5 @@
+import{n as e}from"./rolldown-runtime-sJBDdmOt.js";import{i as t,r as n}from"./view-DEOqBxbE.js";import{n as r,t as i}from"./Markdown-CR0P4UAV.js";var a,o,s,c,l,u,d;function f(){return(f=e((()=>{r(),n(),a={title:`Components/Markdown`,component:i,parameters:{layout:`fullscreen`,frame:`content`}},o={args:{text:[`## 写文件的前置条件`,``,`父目录必须已经存在。工具不会隐式创建目录。`,``,`失败时错误作为工具结果回传模型，run 继续。`].join(`
+`)}},s={args:{text:`${t}\n\n路径用行内代码标注：\`apps/agent/src/sse.rs\`。`}},c={args:{text:[`重新生成协议类型：`,``,"```bash",`devenv shell -- durable-typegen`,"```"].join(`
+`)}},l={args:{text:[`排队规则：`,``,`- session 内 FIFO`,`- 全局并发槽位默认 4`,``,`1. 入队即持久化`,`2. run 结束后取下一项`].join(`
+`)}},u={args:{text:[`取消一次运行中的 run 时，server 中止在途模型请求、杀掉 bash 进程组，把已收到的部分 assistant 文本作为已取消消息保留，队列继续执行下一项。`,``,`重启 agent 时，仍为 running 的 run 被标记为 failed，原因为进程中断。`].join(`
+`)}},d=[`Paragraphs`,`InlineCode`,`FencedCode`,`Lists`,`LongParagraph`]})))()}f();export{c as FencedCode,s as InlineCode,l as Lists,u as LongParagraph,o as Paragraphs,d as __namedExportsOrder,a as default};

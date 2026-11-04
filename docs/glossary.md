@@ -94,7 +94,7 @@
 | 取消信号 | 中止在途模型请求与工具执行的显式信号。跨 link 时以取消帧传递。取消后 run 以 `cancelled` 结束，未定型的内容丢弃。 |
 | bootstrap | 客户端启动时获取的元数据快照与事件游标。 |
 | 客户端状态 | 浏览器内由纯 reducer 从 bootstrap、事实事件、token 增量与 session 树快照归约出的状态：host 表、workspace、session 与当前 session 的树。呈现所需的数据不在此处，由派生视图给出。 |
-| 派生视图 | 由客户端状态经纯函数推导出的呈现数据，代码在 `client/src/view/derived.ts`。session 摘要全算；完整视图只对可见 session 计算。组件只接收派生后的 props，不读状态。 |
+| 派生视图 | 由客户端状态经纯函数推导出的呈现数据，代码在 `apps/client/src/view/derived.ts`。session 摘要全算；完整视图只对可见 session 计算。组件只接收派生后的 props，不读状态。 |
 | session 摘要 | 一个 session 的标题、状态、未读数、最近结局、队列长度与更新时间。侧栏分组、命令面板与运行中列表读它。 |
 | session 派生视图 | 一个 session 的完整派生数据：摘要、transcript（消息连同正文、消息状态与说明、分支位置）、工具结局、队列、未定型占位与空闲判定。主面板、session 内搜索与 Markdown 导出读它。 |
 | 命令面板 | `Ctrl/⌘+K` 打开的单一面板。分 session（跨 host）、动作与 host 三组，条目可模糊过滤并用键盘执行。 |

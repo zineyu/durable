@@ -2,9 +2,9 @@
 members = [
   "crates/core",
   "crates/runtime",
-  "crates/agent",
+  "apps/agent",
   "crates/effects",
-  "crates/executor",
+  "apps/executor",
 ]
 resolver = "3"
 

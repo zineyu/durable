@@ -9,13 +9,13 @@ ADR 0032 让 lint 告警阻断，覆盖「写错的代码」。ADR 0033 让门�
 
 一个 coding agent 最省力的做法是就地加一条通道：在组件里写一次 `fetch`，在某个模块里 `tokio::spawn` 一条后台任务，在工具之外直接 `std::fs::write`。这些改动编译通过、测试通过、评审时混在功能改动里，唯一的信号是审查者恰好看见。
 
-本仓库已经把多数通道收在单一入口：模型请求只在 `agent/src/provider.rs`，进程只在 `agent/src/link`，文件写入只在 `executor` 的四个工具与 `core` 的存储，客户端请求只在 `client/src/api`。缺的是让「第二条通道」在提交前失败。
+本仓库已经把多数通道收在单一入口：模型请求只在 `agent/src/provider.rs`，进程只在 `agent/src/link`，文件写入只在 `executor` 的四个工具与 `core` 的存储，客户端请求只在 `apps/client/src/api`。缺的是让「第二条通道」在提交前失败。
 
 ## 决策
 
 ### 四类通道，一张白名单
 
-`scripts/check-external-channels.sh` 在 `crates/*/src` 与 `client/src` 里识别四类通道，命中必须登记在 `scripts/external-channels.allow`：
+`scripts/check-external-channels.sh` 在 `crates/*/src` 与 `apps/*/src` 里识别四类通道，命中必须登记在 `scripts/external-channels.allow`：
 
 | 类别 | 识别什么 | 例子 |
 | --- | --- | --- |
@@ -34,9 +34,9 @@ ADR 0032 让 lint 告警阻断，覆盖「写错的代码」。ADR 0033 让门�
 
 ### 范围是产品代码
 
-检查 `crates/*/src` 与 `client/src`，排除 `*.test.ts(x)`、`*.stories.tsx`、`*.fixture.ts` 与 `client/src/api/generated/`。`crates/*/tests` 不在范围内。
+检查 `crates/*/src` 与 `apps/*/src`，排除 `*.test.ts(x)`、`*.stories.tsx`、`*.fixture.ts` 与 `apps/client/src/api/generated/`。`crates/*/tests` 不在范围内。
 
-理由是信号与噪声之比：测试不进产品，而每个集成测试都要启动 agent 二进制、建临时目录、绑随机端口。把它们全部登记进来，白名单会翻倍，真正的第二条通道反而更难看见。`crates/*/src` 里的 `#[cfg(test)]` 模块仍在范围内，因为排除它需要对每个文件做语法判断，而这类命中很少（当前只有 `executor/src/tools/paths.rs` 一处）。
+理由是信号与噪声之比：测试不进产品，而每个集成测试都要启动 agent 二进制、建临时目录、绑随机端口。把它们全部登记进来，白名单会翻倍，真正的第二条通道反而更难看见。`crates/*/src` 与 `apps/*/src` 里的 `#[cfg(test)]` 模块仍在范围内，因为排除它需要对每个文件做语法判断，而这类命中很少（当前只有 `executor/src/tools/paths.rs` 一处）。
 
 ### 与单一写入线同层
 

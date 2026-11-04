@@ -7,7 +7,7 @@
 
 ADR 0007 定义了两条 seam：`agent` 的 HTTP API 与 client 纯 reducer。ADR 0025 增加浏览器端到端 seam，说明 seam 清单不是封闭集合。
 
-`crates/core` 承载 ADR 0012 的全部不变量：单一写入线、changeset 原子提交、提交成功后才广播、快照水位。这些不变量此前只由 `crates/agent/tests/*` 间接验证。那条路径要经过 HTTP 处理、进程启动、临时 workspace、临时 SQLite、脚本化 provider 与 SSE。内核的一处错误要跨过三层才可见，断言失败时无法区分错误属于内核、协议还是进程。
+`crates/core` 承载 ADR 0012 的全部不变量：单一写入线、changeset 原子提交、提交成功后才广播、快照水位。这些不变量此前只由 `apps/agent/tests/*` 间接验证。那条路径要经过 HTTP 处理、进程启动、临时 workspace、临时 SQLite、脚本化 provider 与 SSE。内核的一处错误要跨过三层才可见，断言失败时无法区分错误属于内核、协议还是进程。
 
 两类行为在端到端测试里无法稳定复现：同一个 `Store` 上并发写命令的读-改-写顺序取决于调度；「事务失败不广播」需要在提交点同时观察事件表与进程内事件总线。
 

@@ -1,5 +1,5 @@
 //! link 帧：agent 与 executor 在标准输入输出上交换的长度前缀 JSON 帧。
-//! 帧的驱动在 `crates/agent/src/link`，工具执行在 `crates/executor`。
+//! 帧的驱动在 `apps/agent/src/link`，工具执行在 `apps/executor`。
 
 use std::fmt;
 use std::io;

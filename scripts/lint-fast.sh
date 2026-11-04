@@ -6,9 +6,4 @@ cd "$(dirname "$0")/.."
 
 cargo fmt --all --check
 cargo check --workspace --all-targets
-(
-  cd client
-  npm run lint
-  npm run lint:css
-  npm run typecheck
-)
+bash scripts/task.sh lint --kind node

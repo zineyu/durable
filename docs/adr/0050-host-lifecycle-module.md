@@ -52,5 +52,5 @@
 - 事实序列不变：本机 host 启动仍只写两条 host 事实，重启后的事件计数不变。
 - 重放历史时看到的是写入当时的文案；文案改动只影响此后写入的事实。
 - `hosts/mod.rs` 缩小为注册表：表项、命令、快照与心跳；`connect.rs` 只报告一次尝试的结果。
-- 不新增跨进程 seam：测试是 `lifecycle.rs` 的模块内单测（枚举事件序列）与既有的 `crates/agent/tests/hosts.rs`。后者需要一条不拉子进程的 `LinkHandle`，由 `#[cfg(test)]` 的构造函数给出。
+- 不新增跨进程 seam：测试是 `lifecycle.rs` 的模块内单测（枚举事件序列）与既有的 `apps/agent/tests/hosts.rs`。后者需要一条不拉子进程的 `LinkHandle`，由 `#[cfg(test)]` 的构造函数给出。
 - `docs/glossary.md` 新增「状态原因」与「连接尝试」，并把「状态说明」改为「状态原因的渲染」。

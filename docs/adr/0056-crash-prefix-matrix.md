@@ -18,7 +18,7 @@ ADR 0037 的后果里写着：「恢复逻辑的测试必须能杀掉进程：�
 
 **提交点副本**。`Store::open_recording(path, directory)` 在每次提交成功后写一份 `prefix-<n>.sqlite`（`VACUUM INTO`，一个读事务里写出一致的副本）。生产路径用 `Store::open`，`Option<PathBuf>` 为 `None`，不产生任何副本，也不多一次 IO。`Store::commits()` 暴露已提交次数，夹具用它把副作用对齐到提交点。
 
-**矩阵逐个重启**。`crates/agent/tests/crash_matrix.rs` 跑一个场景（Seam 六：真 `Store` + 替身执行端），拿到全部副本，然后对每个副本：打开、`RunEngine::recover()`、跑到静止，断言五条性质——恢复收敛；`check_invariants()` 为空；崩溃前的链仍是重启后链的前缀；没有停在执行中的工具节点；非幂等调用跨「崩溃前 + 重启后」至多执行一次，幂等调用至多两次，且重跑过的调用必须留下结局。另有一条用例把已知缺陷 #67（未下发的非幂等调用被写成「结果未知」）固定成断言，修好时它会强制更新。
+**矩阵逐个重启**。`apps/agent/tests/crash_matrix.rs` 跑一个场景（Seam 六：真 `Store` + 替身执行端），拿到全部副本，然后对每个副本：打开、`RunEngine::recover()`、跑到静止，断言五条性质——恢复收敛；`check_invariants()` 为空；崩溃前的链仍是重启后链的前缀；没有停在执行中的工具节点；非幂等调用跨「崩溃前 + 重启后」至多执行一次，幂等调用至多两次，且重跑过的调用必须留下结局。另有一条用例把已知缺陷 #67（未下发的非幂等调用被写成「结果未知」）固定成断言，修好时它会强制更新。
 
 **不变量成为领域检查**。`Store::check_invariants()` 返回违例清单，九类：同 session 多条 running run、`progress` 留在已结束的 run 上、没有 running run 却有执行中的工具节点、同一调用多个结局节点、结局找不到调用、active leaf 不在树上、队列锚点不在树上、id 分配器落后、已结束 run 里声明的调用缺结局。`RunEngine::recover` 在**修复之后、驱动之前**检查一次并只记日志；矩阵把它当硬断言。
 

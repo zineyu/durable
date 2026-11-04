@@ -9,7 +9,7 @@ Rust 与 TS 之间的契约必须可验证一致。
 
 ## 决策
 
-ts-rs 从 Rust 类型生成 TS，生成文件提交到 `client/src/api/generated/`，CI 重新生成后 diff 必须为空。CI 依次执行 cargo fmt、clippy、cargo test、类型一致性检查、npm lint、typecheck、vitest、storybook build、Chromatic 发布与视觉门禁。
+ts-rs 从 Rust 类型生成 TS，生成文件提交到 `apps/client/src/api/generated/`，CI 重新生成后 diff 必须为空。CI 依次执行 cargo fmt、clippy、cargo test、类型一致性检查、npm lint、typecheck、vitest、storybook build、Chromatic 发布与视觉门禁。
 
 ## 后果
 

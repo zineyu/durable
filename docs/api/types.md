@@ -1,6 +1,6 @@
 # 协议类型清单
 
-由 `devenv shell -- durable-typegen` 从 Rust 类型生成，与 `client/src/api/generated/` 同一来源。不要手改。
+由 `devenv shell -- durable-typegen` 从 Rust 类型生成，与 `apps/client/src/api/generated/` 同一来源。不要手改。
 
 ## BootstrapResponse
 

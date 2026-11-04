@@ -194,7 +194,7 @@ SSH 传输与安装不做自动化测试。发布检查清单里有一条手工�
 ## Further Notes
 
 - 决策记录：ADR 0048（进程模型反转为 remote-ssh 形状）取代 ADR 0001 的二进制划分与 ADR 0021 至 ADR 0024 的总线与分片决策。ADR 0015 的工具契约、ADR 0037 的「结果未知」、ADR 0047 的续跑全部保留。
-- 规格编号新增 `R-` 前缀。`scripts/check-spec-links.sh` 已把 `R-` 映射到本文件，并把 `crates/executor` 归到 `R-`，其余 crate 允许 `A-` 与 `R-`。
+- 规格编号新增 `R-` 前缀。`scripts/check-spec-links.sh` 已把 `R-` 映射到本文件，并把 `apps/executor` 归到 `R-`，其余 crate 允许 `A-` 与 `R-`。
 - 主规格 `docs/specs/rust-react-coding-agent.md` 已按本规格修订；`multi-node-hub.md` 已删除，规格追溯脚本不再有 `H` 前缀。
 - 建议的纵向切片顺序，每片独立通过 `durable-test`：① 内核收敛迁移基线并新增 host 表与 workspace 的 host 列；② `agent` 吸收静态资源与路由，host 表命令上线，客户端 URL 与分组改造；③ 新增 `executor` crate 与本地传输，工具调用改走帧；④ 删除 `hub` crate 与节点相关代码；⑤ 安装与 SSH 传输；⑥ 文档同步与手工验证清单。
 - 默认数据库文件名仍是 `agent.sqlite`，而旧 `agent` 二进制用过同一个名字。旧库因此会以显式错误被拒绝；升级路径是删除旧库或改用 `--database` 指向新路径。

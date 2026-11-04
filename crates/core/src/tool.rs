@@ -1,5 +1,5 @@
 //! 工具契约：定义、字节上限、失败原因，以及工具调用的结局与错误码。
-//! 工具实现在 `crates/executor/src/tools`；agent 只按定义拼模型请求并透传参数。
+//! 工具实现在 `apps/executor/src/tools`；agent 只按定义拼模型请求并透传参数。
 
 use std::time::Duration;
 

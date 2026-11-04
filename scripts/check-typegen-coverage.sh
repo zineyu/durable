@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-generated=client/src/api/generated
+generated=apps/client/src/api/generated
 
 cat > "$work/derived.awk" <<'AWK'
 FNR == 1 { pending = 0 }
@@ -28,7 +28,7 @@ pending && $0 ~ /^(pub(\([^)]*\))? )?(struct|enum) / {
 { pending = 0 }
 AWK
 
-git ls-files -z 'crates/*/src/*.rs' |
+git ls-files -z 'crates/*/src/*.rs' 'apps/*/src/*.rs' |
   xargs -0 awk -f "$work/derived.awk" |
   sort -u > "$work/derived.txt"
 
@@ -49,7 +49,7 @@ done < "$work/derived.txt"
 if [ -s "$work/missing.txt" ]; then
   printf '这些类型派生了 TS，但 %s/ 里没有对应文件：\n' "$generated" >&2
   sed 's/^/  /' "$work/missing.txt" >&2
-  printf '在 crates/agent/src/lib.rs 的 export_types 里补 <类型>::export_all(&config)。\n' >&2
+  printf '在 apps/agent/src/lib.rs 的 export_types 里补 <类型>::export_all(&config)。\n' >&2
   exit 1
 fi
 

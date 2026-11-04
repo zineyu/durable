@@ -56,7 +56,7 @@
 
 记录在此，避免被当成遗漏：
 
-- `@typescript-eslint/no-unnecessary-condition` 关闭。TypeScript 把闭包内改写的存活标志错定为常量，`await` 之后重复的存活检查被判为死代码；这些检查在断线重连路径上必需。理由写在 `client/eslint.config.js`。
+- `@typescript-eslint/no-unnecessary-condition` 关闭。TypeScript 把闭包内改写的存活标志错定为常量，`await` 之后重复的存活检查被判为死代码；这些检查在断线重连路径上必需。理由写在 `apps/client/eslint.config.js`。
 - `clippy::cargo_common_metadata` 与 `clippy::multiple_crate_versions` 允许。前者要求 crates.io 元数据，本仓库不发布；后者是上游依赖树里 `syn` 2 与 3 并存，无法在不降级依赖的前提下消除。
 - 未启用 `clippy::nursery`。它的语义会随工具链变动，不适合当作阻断门禁。
 
