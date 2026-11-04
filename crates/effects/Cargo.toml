@@ -1,0 +1,14 @@
+[package]
+name = "effects"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

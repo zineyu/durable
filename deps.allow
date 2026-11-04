@@ -33,6 +33,8 @@ durable tracing # 结构化日志
 durable ts-rs # 导出 TS 协议类型
 durable uuid # 标识符生成
 
+effects tokio # perform 用 tokio 的截止时间包住工作体
+
 executor clap # 命令行参数解析
 executor durable # 工具契约与 link 帧
 executor libc # 终止工具子进程组，标准库没有该接口

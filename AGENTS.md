@@ -24,6 +24,7 @@
 | `crates/runtime` | 进程级支撑（包名 `runtime`）；平台标准目录解析与日志初始化 |
 | `crates/agent` | agent 二进制；HTTP/SSE 协议、编译期内嵌的 `client/dist` 与 `ts-rs` 导出入口 |
 | `crates/executor` | host 上的工具执行端；经 link 帧执行四个工具，不持有数据库 |
+| `crates/effects` | 通用副作用库（包名 `effects`）；类别表、能力令牌与覆盖率，不依赖领域内核 |
 | `client` | React + Vite + TypeScript 客户端 |
 | `docs` | 规格、ADR（索引见 `docs/adr/README.md`）、术语表 |
 | `scripts` | 门禁与检查脚本；编辑时跑 `bash scripts/lint-fast.sh` |
@@ -50,6 +51,8 @@
 | `storage/` | 快照查询与全部 SQL |
 
 `runtime`：`dirs.rs` 跨平台标准目录与启动路径；`logging.rs` 日志双写与轮转。
+
+`effects`（包名 `effects`）：`policy.rs` 是类别表与 `settle`；`token.rs` 是许可证与四条流程（登记、发货、执行、弃）；`coverage.rs` 记录已发生的类别，并报出声明覆盖却没出现过的缺口。它不认识会话、消息、run 与工具，也不持有存储。
 
 `agent`：
 
@@ -88,6 +91,7 @@
 | 客户端状态推导 | 事实归约在 `client/src/view/reducer.ts` 与 `state.ts`，呈现所需的派生在 `derived.ts` |
 | 客户端写命令与对话框 | `client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
 | 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
+| 副作用类别、许可证与覆盖率 | `crates/effects/src/policy.rs` 的类别表，`token.rs` 的四条流程，`coverage.rs` 的缺口 |
 | 集成测试 | `crates/*/tests/`，脚手架在 `tests/support/` |
 | 浏览器端到端测试 | `client/e2e/` |
 
