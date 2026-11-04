@@ -55,10 +55,13 @@ impl RunEngine {
             tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
             let started = Instant::now();
             let state = match self.tools.execute(&call, &context).await {
-                ToolEnd::Ended(outcome) => ToolResultState::Finished {
-                    outcome,
-                    duration_ms: elapsed_ms(started.elapsed()),
-                },
+                ToolEnd::Ended(outcome) => {
+                    log_outcome(session, &call.name, &outcome);
+                    ToolResultState::Finished {
+                        outcome,
+                        duration_ms: elapsed_ms(started.elapsed()),
+                    }
+                }
                 ToolEnd::HostGone(closed) => {
                     tracing::warn!(
                         session = %session.as_str(),
@@ -78,7 +81,6 @@ impl RunEngine {
                     });
                 }
             };
-            log_outcome(session, &call.name, &state);
             self.finish_call(session, message_id, &call.id, state)
                 .await
                 .map_err(|error| storage_failure(&error))?;
@@ -144,26 +146,19 @@ impl RunEngine {
     }
 }
 
-fn log_outcome(session: &SessionId, name: &str, state: &ToolResultState) {
-    match state {
-        ToolResultState::Finished {
-            outcome: durable::ToolOutcome::Failed { code, message },
-            ..
-        } => tracing::warn!(
+/// 日志记录一次工具结局。只收结局：工具循环里能走到的只有成功与失败两支，
+/// 「结果未知」在宿主丢失的分支里单独记录。
+fn log_outcome(session: &SessionId, name: &str, outcome: &durable::ToolOutcome) {
+    match outcome {
+        durable::ToolOutcome::Failed { code, message } => tracing::warn!(
             session = %session.as_str(),
             tool = name,
             code = ?code,
             message = %message,
             "工具失败"
         ),
-        ToolResultState::Finished {
-            outcome: durable::ToolOutcome::Succeeded { .. },
-            ..
-        } => {
+        durable::ToolOutcome::Succeeded { .. } => {
             tracing::debug!(session = %session.as_str(), tool = name, "工具成功");
-        }
-        ToolResultState::Declared | ToolResultState::Dispatched | ToolResultState::Unknown => {
-            tracing::warn!(session = %session.as_str(), tool = name, "工具结局未知");
         }
     }
 }
