@@ -248,10 +248,12 @@ mod tests {
 
     #[test]
     fn both_unobserved_states_read_as_running_for_the_model() {
+        let declared = tool_result_content(&ToolResultState::Declared);
+        let dispatched = tool_result_content(&ToolResultState::Dispatched);
         assert_eq!(
-            tool_result_content(&ToolResultState::Declared),
-            tool_result_content(&ToolResultState::Dispatched),
-            "形态扩张不改模型输入"
+            declared, r#"{"error":"running","message":"工具仍在执行"}"#,
+            "两个未观测态的文案是模型输入的一部分，改动必须显式"
         );
+        assert_eq!(dispatched, declared, "形态扩张不改模型输入");
     }
 }
