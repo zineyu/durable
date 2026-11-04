@@ -30,6 +30,24 @@ pub enum Lost {
     Cancelled,
 }
 
+/// 弃的原因。已登记的动作一定没发生，因此没有「超时」这一支。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Abandon {
+    /// 用户取消，或批次进行到一半放弃。
+    Cancelled,
+    /// 链路断开，剩余的调用不再执行。
+    HostGone(String),
+}
+
+impl Abandon {
+    fn into_lost(self) -> Lost {
+        match self {
+            Abandon::Cancelled => Lost::Cancelled,
+            Abandon::HostGone(detail) => Lost::HostGone(detail),
+        }
+    }
+}
+
 /// 一次动作的结论：拿到观测，或丢失观测。
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[must_use]
@@ -46,8 +64,8 @@ pub trait Ledger {
     type Effect: Effect;
     /// 动作的意图。写库与返回都要用它，因此必须能复制一份。
     type Intent: Clone;
-    /// 动作的观测。
-    type Observation;
+    /// 动作的观测。写库与返回都要用它，因此必须能复制一份。
+    type Observation: Clone;
     /// 使用方的错误类型。库只做传播，不定义错误。
     type Error;
 
@@ -175,7 +193,6 @@ pub async fn perform<L, F, Fut>(
 ) -> Result<Outcome<L::Observation>, L::Error>
 where
     L: Ledger,
-    L::Observation: Clone,
     F: FnOnce(&Dispatched<L::Effect, L::Intent>) -> Fut,
     Fut: Future<Output = Outcome<L::Observation>>,
 {
@@ -207,8 +224,9 @@ where
 pub async fn abandon<L: Ledger>(
     ledger: &L,
     declared: Declared<L::Effect, L::Intent>,
-    lost: Lost,
+    reason: Abandon,
 ) -> Result<Outcome<L::Observation>, L::Error> {
+    let lost = reason.into_lost();
     ledger
         .write(Transition::Lost(declared.intent, lost.clone()))
         .await?;

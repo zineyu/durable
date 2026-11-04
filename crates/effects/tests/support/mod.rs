@@ -9,7 +9,6 @@
     reason = "测试夹具用 expect 直接报告失败；本模块被每个测试目标各编译一次，未被该目标用到的条目属正常情况。"
 )]
 
-use core::future::Future;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -125,18 +124,17 @@ impl Ledger for MemoryLedger {
     type Observation = Observation;
     type Error = WriteFailed;
 
-    fn write(
+    async fn write(
         &self,
         transition: Transition<Self::Intent, Self::Observation>,
-    ) -> impl Future<Output = Result<(), Self::Error>> {
-        async move {
-            let mut state = self.state();
-            if state.fail_at == Some(state.writes.len() + 1) {
-                return Err(WriteFailed);
-            }
-            state.writes.push(transition);
-            Ok(())
+    ) -> Result<(), Self::Error> {
+        tokio::task::yield_now().await;
+        let mut state = self.state();
+        if state.fail_at == Some(state.writes.len() + 1) {
+            return Err(WriteFailed);
         }
+        state.writes.push(transition);
+        Ok(())
     }
 }
 

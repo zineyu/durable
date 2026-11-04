@@ -6,7 +6,7 @@ use std::future::pending;
 use std::time::Instant;
 
 use effects::policy::Effect;
-use effects::token::{Ledger, Lost, Outcome, Transition, abandon, declare, perform};
+use effects::token::{Abandon, Ledger, Lost, Outcome, Transition, abandon, declare, perform};
 use support::{Intent, MemoryLedger, Probe, WriteFailed, declared, dispatched};
 
 #[tokio::test]
@@ -103,7 +103,7 @@ async fn perform_forwards_an_unobserved_ending_as_is() {
 async fn abandon_writes_the_lost_evidence_for_an_undispatched_call() {
     let ledger = MemoryLedger::new();
 
-    let outcome = abandon(&ledger, declared(&ledger).await, Lost::Cancelled)
+    let outcome = abandon(&ledger, declared(&ledger).await, Abandon::Cancelled)
         .await
         .expect("放弃写入成功");
 
