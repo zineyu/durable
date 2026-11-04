@@ -39,6 +39,15 @@
     bash scripts/lint-fast.sh
   '';
 
+  scripts.durable-lint-crate.exec = ''
+    set -e
+    if [ $# -ne 1 ]; then
+      echo "用法：durable-lint-crate <crate>" >&2
+      exit 1
+    fi
+    cargo clippy -p "$1" --all-targets -- -D warnings
+  '';
+
   scripts.durable-test.exec = ''
     set -e
     durable-lint
