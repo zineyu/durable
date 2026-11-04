@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 术语表自检：docs/glossary.md 里标识符形状的反引号术语必须能在源码里找到。
+# 已跟踪与未跟踪的文件一并算入：写完文件立刻跑本脚本，与提交前跑，结果必须相同。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -15,7 +16,7 @@ while read -r term; do
   case "$term" in
     '' | *[!A-Za-z0-9_:.]*) continue ;;
   esac
-  if ! git grep -qF -- "$term" -- crates client; then
+  if ! git grep -qF --untracked -- "$term" -- crates client; then
     printf '%s\n' "$term" >> "$work/missing.txt"
   fi
 done < "$work/terms.txt"
