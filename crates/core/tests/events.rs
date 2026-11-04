@@ -9,7 +9,8 @@
 mod support;
 
 use durable::{
-    ContentPart, FactEvent, MessageId, RunStatus, Store, StoreError, StreamEvent, ToolResultState,
+    ContentPart, FactEvent, MessageId, PartState, RunStatus, Store, StoreError, StreamEvent,
+    ToolResultState,
 };
 use support::{enqueue, facts_after, max_event_id, store_with_session, text, tree};
 
@@ -150,6 +151,11 @@ async fn tool_state_facts_keep_their_order() {
         vec![ToolResultState::Declared],
         "入树时为已登记未下发"
     );
+    assert_eq!(
+        skeleton_states(&store, &session, tool.id).await,
+        vec![PartState::Running],
+        "已登记未下发的骨架状态是 running"
+    );
 
     store
         .set_tool_state(&session, tool.id, "call-1", ToolResultState::Dispatched)
@@ -160,11 +166,21 @@ async fn tool_state_facts_keep_their_order() {
         vec![ToolResultState::Dispatched],
         "下发后为已下发未观测"
     );
+    assert_eq!(
+        skeleton_states(&store, &session, tool.id).await,
+        vec![PartState::Running],
+        "已下发未观测的骨架状态同为 running，存储因此只有一个未观测取值"
+    );
 
     store
         .set_tool_state(&session, tool.id, "call-1", ToolResultState::Unknown)
         .await
         .expect("写入结果未知");
+    assert_eq!(
+        skeleton_states(&store, &session, tool.id).await,
+        vec![PartState::Unknown],
+        "结果未知在骨架上有自己的取值"
+    );
 
     let facts = facts_after(&store, before).await;
     assert_eq!(facts.len(), 4, "入树一次（含移动 active leaf），改状态两次");
@@ -200,6 +216,24 @@ async fn states_of(
         .expect("工具节点在链上")
         .tool_results()
         .map(|(_, state)| state.clone())
+        .collect()
+}
+
+/// 从骨架读回一个工具节点的块状态。骨架状态就是存储里 `message_part.state` 列的取值。
+async fn skeleton_states(
+    store: &Store,
+    session: &durable::SessionId,
+    message: MessageId,
+) -> Vec<PartState> {
+    tree(store, session)
+        .await
+        .nodes
+        .into_iter()
+        .find(|node| node.id == message)
+        .expect("工具节点在树上")
+        .parts
+        .into_iter()
+        .map(|part| part.state)
         .collect()
 }
 
