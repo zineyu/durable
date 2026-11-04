@@ -92,6 +92,7 @@
 | 客户端写命令与对话框 | `client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
 | 样式 token 与组件样式 | `client/src/styles/tokens.css` 与组件同名 `*.module.css` |
 | 副作用类别、许可证与覆盖率 | `crates/effects/src/policy.rs` 的类别表，`token.rs` 的四条流程，`coverage.rs` 的缺口 |
+| 新增一条外部通道（网络、子进程、文件写入、后台任务） | `scripts/external-channels.allow` 补一行「<路径> <类别> # 理由」，见 `docs/adr/0057-external-channel-gate.md` |
 | 集成测试 | `crates/*/tests/`，脚手架在 `tests/support/` |
 | 浏览器端到端测试 | `client/e2e/` |
 
@@ -149,6 +150,12 @@
 两条检查由 `scripts/check-source-budget.sh` 与 `scripts/check-deps.sh` 执行，已包含在 `durable-lint` 内。
 
 门禁本身不写在检查脚本里：`.github/workflows/gate-watch.yml` 在 PR 上比对门禁文件与 `.github/` 的改动，命中时评论提醒审查者，不阻断合并。
+
+## 外部通道
+
+网络、子进程、文件写入与后台任务只允许出现在 `scripts/external-channels.allow` 登记过的文件里。登记行写「<路径> <类别> # 理由」，未登记、已失效、重复与格式错误都失败。范围是产品代码：`crates/*/src` 与 `client/src`；测试、Storybook 与生成物不在范围内。
+
+脚本 `scripts/check-external-channels.sh`，已包含在 `durable-lint` 内。理由与识别式见 `docs/adr/0057-external-channel-gate.md`。
 
 ## 契约一致性
 

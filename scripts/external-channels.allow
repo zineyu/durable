@@ -1,0 +1,40 @@
+# 外部通道白名单：逐行「<路径> <类别> # 理由」。
+# 类别：network、subprocess、file-write、background。
+# 一条登记只说明「这个文件需要这条通道」，不说明「这个文件可以随意新增通道」：
+# 新增一条通道仍要在 scripts/external-channels.allow 补一行并写清理由。
+# 白名单由 scripts/check-external-channels.sh 比对，未登记与已失效都失败。
+
+# core：SQLite 是唯一的事实存储。
+crates/core/src/storage/sqlite/mod.rs file-write # SQLite 文件由 sqlx 建立；这里的父目录创建是唯一建库前置。
+crates/core/src/store/mod.rs file-write # 提交点副本目录在这里建立；崩溃前缀矩阵靠它枚举崩溃点（ADR 0056）。
+
+# runtime：日志双写的文件一侧。
+crates/runtime/src/logging.rs file-write # 轮转目录与每日 JSON Lines 文件只在这里建立。
+
+# agent：唯一的浏览器入口与唯一的对外进程。
+crates/agent/src/main.rs network # 启动时绑定监听地址，随后交给 api::serve。
+crates/agent/src/api.rs network # 入站只有一条路径：axum 服务与它的路由表。
+crates/agent/src/provider.rs network # 模型出站请求的唯一调用点：reqwest 客户端只在这里构造。
+crates/agent/src/link/transport.rs subprocess # link 的两种传输都在这里起进程：本机拉 executor，远端经 ssh。
+crates/agent/src/link/ssh.rs subprocess # 远端探测与安装：在 ssh 上跑探测脚本、把 executor 载荷写进远端目录。
+crates/agent/src/link/mod.rs subprocess # 持有子进程句柄与三条管道，帧经它们读写。
+crates/agent/src/link/mod.rs background # 写帧、读帧与子进程看守各一条常驻任务。
+crates/agent/src/hosts/connect.rs background # 每个 host 一组连接与退避重连任务。
+crates/agent/src/hosts/mod.rs background # host 心跳是一条常驻任务。
+crates/agent/src/engine/mod.rs background # 每个 session 的 run 由一条后台任务推进。
+crates/agent/src/lib.rs file-write # export_types 创建类型导出目录，供 durable-typegen 调用。
+
+# executor：host 上唯一执行工具的进程。
+crates/executor/src/main.rs background # 读帧主循环之外的写回任务与并发工具任务。
+crates/executor/src/tools/bash.rs subprocess # bash 工具是唯一执行任意命令的入口。
+crates/executor/src/tools/bash.rs background # 两条管道排空任务，避免子进程因管道写满而阻塞。
+crates/executor/src/tools/write_file.rs file-write # write_file 工具的唯一写入点。
+crates/executor/src/tools/edit_file.rs file-write # edit_file 工具的唯一写入点。
+crates/executor/src/tools/paths.rs file-write # 只有测试模块写临时目录，用于验证路径边界。
+
+# client：浏览器侧只有一条 HTTP 入口与一处持久化实现。
+client/src/api/client.ts network # 客户端唯一的 HTTP 请求入口，组件不直接调用 fetch。
+client/src/api/events.ts network # 客户端唯一的事件流订阅，断线重连也在这里。
+client/src/App.tsx file-write # 浏览器存储的生产实现从装配处注入，子模块只接收接口。
+client/src/view/use-commands.ts file-write # 草稿的读写使用浏览器存储。
+client/src/view/use-transcript-scroll.ts file-write # transcript 滚动位置按 session 存入浏览器存储。

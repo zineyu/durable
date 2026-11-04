@@ -60,4 +60,5 @@
 | [0054](0054-error-classification-without-payload-free-copy.md) | 错误分类不再复制一份无载荷枚举 | 已接受。细化 ADR 0043 的分类形状 | 删除 `StoreErrorKind`：`StoreError::class()` 与 `code_of(&StoreError)` 直接匹配十九个带载荷变体，枚举从三个减到两个，一条机械映射与它的自反测试表消失。 |
 | [0055](0055-client-follow-ups.md) | 客户端收尾：滚动恢复、不可用 host 的说明与连接状态升级 | 已接受。细化 ADR 0048 的客户端部分与 ADR 0017 的派生视图接线 | transcript 滚动位置按 session 存入浏览器存储并在每次提交后重试恢复；不可用说明落在 `WorkspaceSummary.notice`；不可用 host 只禁用依赖它的写操作；连续 3 次重连失败升级为「已断开」。 |
 | [0056](0056-crash-prefix-matrix.md) | 崩溃点是提交前缀，矩阵逐个重启 | 已接受。细化 ADR 0037 的「恢复点从树推导」与「测试必须能杀掉进程」，落实 ADR 0046 的 seam 五、seam 六 | `Store::open_recording` 在每个提交点留一份库副本，`crash_matrix` 对每个副本重启并断言收敛、不变量、历史只增不减、非幂等副作用至多一次；`check_invariants` 成为领域检查，单一写入线由 `scripts/check-write-path.sh` 守门。 |
+| [0057](0057-external-channel-gate.md) | 外部通道门禁 | 已接受。补充 ADR 0033 的第二层门禁 | 网络、子进程、文件写入与后台任务只在白名单文件里出现，登记行写「<路径> <类别> # 理由」；未登记、已失效与格式错误都失败；范围是产品代码。 |
 | [0061](0061-tool-and-run-durations.md) | 工具与 run 的耗时只测一处并落在已有的位置上 | 已接受。细化 ADR 0019 的工具节点与 ADR 0014 的 run 记录；补充 ADR 0042 的元数据约定与 ADR 0053 的单一基线规矩 | 耗时在 agent 的调用点用单调时钟测一次；工具耗时放进 `ToolResultState::Finished`，run 耗时折进单一基线且可为空；结束时刻沿用 `updated_at`；`bash` 正文的命令耗时保留；不递增协议版本。 |
