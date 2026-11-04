@@ -129,12 +129,14 @@ impl Ledger for MemoryLedger {
         &self,
         transition: Transition<Self::Intent, Self::Observation>,
     ) -> impl Future<Output = Result<(), Self::Error>> {
-        let mut state = self.state();
-        if state.fail_at == Some(state.writes.len() + 1) {
-            return core::future::ready(Err(WriteFailed));
+        async move {
+            let mut state = self.state();
+            if state.fail_at == Some(state.writes.len() + 1) {
+                return Err(WriteFailed);
+            }
+            state.writes.push(transition);
+            Ok(())
         }
-        state.writes.push(transition);
-        core::future::ready(Ok(()))
     }
 }
 

@@ -69,6 +69,18 @@ pub trait Ledger {
 struct Seal;
 
 /// 已登记的许可证：动作一定没有发生。
+///
+/// 字段私有，且没有构造入口，外部无法凭空造出一张：
+///
+/// ```compile_fail
+/// use effects::token::Declared;
+///
+/// let forged: Declared<(), ()> = Declared {
+///     effect: (),
+///     intent: (),
+///     _seal: (),
+/// };
+/// ```
 #[must_use]
 pub struct Declared<E, I> {
     effect: E,
@@ -77,6 +89,16 @@ pub struct Declared<E, I> {
 }
 
 /// 已下发的许可证：动作可能已经发生。它不实现 [`Clone`]，一次下发只产出一个结局。
+///
+/// ```compile_fail
+/// use effects::token::Dispatched;
+///
+/// fn requires_clone<T: Clone>(_: T) {}
+///
+/// fn probe<E, I>(token: Dispatched<E, I>) {
+///     requires_clone(token);
+/// }
+/// ```
 #[must_use]
 pub struct Dispatched<E, I> {
     effect: E,

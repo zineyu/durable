@@ -6,7 +6,7 @@ use std::future::pending;
 use std::time::Instant;
 
 use effects::policy::Effect;
-use effects::token::{Lost, Outcome, Transition, abandon, declare, perform};
+use effects::token::{Ledger, Lost, Outcome, Transition, abandon, declare, perform};
 use support::{Intent, MemoryLedger, Probe, WriteFailed, declared, dispatched};
 
 #[tokio::test]
@@ -146,4 +146,19 @@ async fn a_failed_declare_issues_no_token() {
 
     assert!(result.is_err(), "写入失败时不得发出许可证");
     assert!(ledger.writes().is_empty(), "失败的写入不落行");
+}
+
+#[tokio::test]
+async fn a_write_lands_only_when_its_future_is_awaited() {
+    let ledger = MemoryLedger::new();
+
+    let pending = ledger.write(Transition::Declared(Intent("发送")));
+    assert!(
+        ledger.writes().is_empty(),
+        "未 await 的写入不得落行：崩溃在写库之前就是这个状态"
+    );
+
+    pending.await.expect("写入成功");
+
+    assert_eq!(ledger.writes(), vec![Transition::Declared(Intent("发送"))]);
 }

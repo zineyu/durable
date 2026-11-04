@@ -12,6 +12,7 @@ fn declared_always_redoes() {
         (Probe::Redo, false),
         (Probe::GiveUp, false),
         (Probe::IfIdempotent, false),
+        (Probe::IfIdempotent, true),
         (Probe::GiveUp, true),
     ];
 
