@@ -20,7 +20,8 @@ use agent::{
     ToolEnd, ToolResultState, WorkspacePath,
 };
 use async_trait::async_trait;
-use durable::ContentPart;
+use durable::{ContentPart, EffectIntent};
+use effects::token::Dispatched;
 use tokio::sync::broadcast;
 
 /// 只回答宿主丢失的执行端。
@@ -32,7 +33,12 @@ impl ToolBox for GoneTools {
         durable::tool_definitions()
     }
 
-    async fn execute(&self, _call: &ToolCall, _context: &ToolContext) -> ToolEnd {
+    async fn execute(
+        &self,
+        _call: &ToolCall,
+        _context: &ToolContext,
+        _dispatched: &Dispatched<EffectIntent>,
+    ) -> ToolEnd {
         ToolEnd::HostGone(LinkClosed::unavailable("测试：host 已离线".to_owned()))
     }
 }

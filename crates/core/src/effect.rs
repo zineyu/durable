@@ -1,5 +1,5 @@
 //! 副作用类别表与证据落点：领域内核的六类对外动作，以及把一次证据写进现有领域行的
-//! 唯一入口。
+//! 唯一入口。未登记的工具名不属于六类，它没有副作用，落点仍是 tool 节点。
 //! 策略合成、许可证与覆盖率在 `effects`；写入线与写命令在 `store`；run 的失败码在
 //! `run`；工具定义与工具结局在 `tool`。超时不在这张表里，它归各介质层（ADR 0059）。
 
@@ -87,11 +87,13 @@ impl EffectClass {
 
 /// 一次动作的意图：它是哪一类，以及它落在哪条领域行上。
 ///
-/// 类别与落点的搭配由三个构造入口固定，因此不合法的搭配造不出来；意图与观测的搭配
+/// 类别与落点的搭配由构造入口固定，因此不合法的搭配造不出来；意图与观测的搭配
 /// 由 [`Store`] 的落点表判定。
+///
+/// 类别可以缺席：未登记的工具名不属于六类，它一定没有副作用。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectIntent {
-    class: EffectClass,
+    class: Option<EffectClass>,
     subject: Subject,
 }
 
@@ -133,7 +135,7 @@ impl EffectIntent {
     #[must_use]
     pub fn model_step(session: SessionId, run: RunId, message: MessageId) -> Self {
         Self {
-            class: EffectClass::ModelStep,
+            class: Some(EffectClass::ModelStep),
             subject: Subject::ModelStep {
                 session,
                 run,
@@ -146,7 +148,7 @@ impl EffectIntent {
     #[must_use]
     pub fn compaction(session: SessionId, message: MessageId) -> Self {
         Self {
-            class: EffectClass::Compaction,
+            class: Some(EffectClass::Compaction),
             subject: Subject::Compaction { session, message },
         }
     }
@@ -161,7 +163,7 @@ impl EffectIntent {
         call_id: impl Into<String>,
     ) -> Self {
         Self {
-            class,
+            class: Some(class),
             subject: Subject::Tool {
                 session,
                 run,
@@ -171,9 +173,31 @@ impl EffectIntent {
         }
     }
 
-    /// 本次动作的类别。
+    /// 未登记工具名的意图：它不属于六类，因此不计入覆盖率。
+    ///
+    /// 执行端对未登记的名字只答失败，这条调用一定没有副作用，重放因此按 `Redo` 处置。
+    /// 证据仍落在 tool 节点上，否则 assistant 的调用与它的结果不再配对。
     #[must_use]
-    pub fn class(&self) -> EffectClass {
+    pub fn unregistered_tool(
+        session: SessionId,
+        run: RunId,
+        message: MessageId,
+        call_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            class: None,
+            subject: Subject::Tool {
+                session,
+                run,
+                message,
+                call_id: call_id.into(),
+            },
+        }
+    }
+
+    /// 本次动作的类别。未登记的工具名没有类别。
+    #[must_use]
+    pub fn class(&self) -> Option<EffectClass> {
         self.class
     }
 }
@@ -200,7 +224,6 @@ impl EffectObservation {
 }
 
 impl Ledger for Store {
-    type Effect = EffectClass;
     type Intent = EffectIntent;
     type Observation = EffectObservation;
     type Error = StoreError;
@@ -226,7 +249,7 @@ impl Store {
         self.coverage.gaps()
     }
 
-    /// 写入一次证据。六类的落点判定只在这里。
+    /// 写入一次证据。六类与未登记工具名的落点判定只在这里。
     ///
     /// # Errors
     ///
@@ -240,7 +263,9 @@ impl Store {
             Transition::Declared(intent) => {
                 let class = intent.class();
                 self.land_declared(intent).await?;
-                self.coverage.record(class);
+                if let Some(class) = class {
+                    self.coverage.record(class);
+                }
                 Ok(())
             }
             Transition::Dispatched(intent) => self.land_dispatched(intent).await,
@@ -313,7 +338,7 @@ impl Store {
                     .map(|_| ())
             }
             (
-                EffectClass::ModelStep,
+                Some(EffectClass::ModelStep),
                 Subject::ModelStep {
                     session,
                     run,
@@ -325,7 +350,7 @@ impl Store {
                 .await
                 .map(|_| ()),
             (
-                EffectClass::Compaction,
+                Some(EffectClass::Compaction),
                 Subject::Compaction { session, message },
                 EffectObservation::Compaction { parts },
             ) => self
@@ -350,7 +375,7 @@ impl Store {
             } => {
                 expect_tool(class)?;
                 tracing::debug!(
-                    tool_class = class.name(),
+                    tool_class = class.map_or("未登记的工具名", EffectClass::name),
                     message = message.get(),
                     reason = ?lost,
                     "工具调用丢失观测，结局写为未知"
@@ -364,19 +389,19 @@ impl Store {
     }
 }
 
-fn expect_tool(class: EffectClass) -> Result<(), StoreError> {
-    if class.is_tool() {
-        return Ok(());
+fn expect_tool(class: Option<EffectClass>) -> Result<(), StoreError> {
+    match class {
+        Some(class) if !class.is_tool() => Err(StoreError::Invariant(format!(
+            "副作用类别 {} 不是工具类，不能落在 tool 节点上",
+            class.name()
+        ))),
+        Some(_) | None => Ok(()),
     }
-    Err(StoreError::Invariant(format!(
-        "副作用类别 {} 不是工具类，不能落在 tool 节点上",
-        class.name()
-    )))
 }
 
-fn mismatch(class: EffectClass, subject: &str, observation: &str) -> StoreError {
+fn mismatch(class: Option<EffectClass>, subject: &str, observation: &str) -> StoreError {
+    let name = class.map_or("未登记的工具名", EffectClass::name);
     StoreError::Invariant(format!(
-        "副作用类别 {} 的落点 {subject} 与观测 {observation} 不属于同一类",
-        class.name()
+        "副作用类别 {name} 的落点 {subject} 与观测 {observation} 不属于同一类"
     ))
 }

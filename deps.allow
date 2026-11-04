@@ -8,6 +8,7 @@ agent async-trait # provider 与工具需要异步 trait 对象
 agent axum # HTTP 与 SSE 服务端
 agent clap # 命令行参数解析
 agent durable # 领域内核
+agent effects # 工具调用的许可证与证据强度判定
 agent futures-util # 流适配与组合
 agent jiff # 时间戳
 agent mime_guess # 内嵌静态资源的 MIME 推断

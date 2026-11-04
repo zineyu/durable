@@ -144,11 +144,10 @@ fn check_prefix(
     }
 }
 
-/// 已知缺陷 #67：工具节点已入树、帧尚未下发时，非幂等调用被写成「结果未知」而不重跑，
-/// 这次调用的工作因此凭空消失。这条用例描述现状；#67 落地后 `unknown` 的计数应当变成 0，
-/// 用例也要改成断言「未下发的调用被重跑」。
+/// 工具节点已入树、帧尚未下发时，那个调用一定没有执行：恢复把它重跑一次，
+/// 而不是把这次工作记成「结果未知」丢掉（ADR 0037、ADR 0056）。
 #[tokio::test]
-async fn undispatched_calls_are_written_as_unknown_without_a_rerun() {
+async fn undispatched_calls_are_rerun_instead_of_being_written_as_unknown() {
     let directory = tempfile::tempdir().expect("创建临时目录");
     let world = run_scenario(
         directory.path(),
@@ -164,24 +163,24 @@ async fn undispatched_calls_are_written_as_unknown_without_a_rerun() {
         let Some(recovered) = restart(path, &world.session).await else {
             continue;
         };
-        let already_running = recovered
+        let declared = recovered
             .before
             .iter()
             .flat_map(|(_, states)| states)
-            .any(|(call_id, state)| call_id == "call_bash" && state.is_unobserved());
-        if !already_running {
+            .any(|(call_id, state)| call_id == "call_bash" && state == &ToolResultState::Declared);
+        if !declared {
             continue;
         }
         undispatched += 1;
         assert_eq!(
             recovered.reruns_of("call_bash"),
-            0,
-            "提交点 {prefix}：非幂等调用没有被重跑"
+            1,
+            "提交点 {prefix}：未下发的调用应当重跑一次"
         );
-        assert_eq!(
-            recovered.state_of("call_bash"),
-            Some(ToolResultState::Unknown),
-            "提交点 {prefix}：非幂等调用的结局应当是「结果未知」"
+        let state = recovered.state_of("call_bash");
+        assert!(
+            matches!(state, Some(ToolResultState::Finished { .. })),
+            "提交点 {prefix}：重跑之后应当有结局，实际是 {state:?}"
         );
     }
     assert!(

@@ -9,9 +9,11 @@
 )]
 
 use durable::{
-    FactEvent, HostKind, HostName, MessageText, QueueItem, SessionId, SessionTitle,
-    SessionTreeSnapshot, Store, SubmitMode, WorkspacePath,
+    EffectClass, EffectIntent, EffectObservation, FactEvent, HostKind, HostName, MessageId,
+    MessageText, QueueItem, RunId, SessionId, SessionTitle, SessionTreeSnapshot, Store, SubmitMode,
+    ToolResultState, WorkspacePath,
 };
+use effects::token::{Abandon, Outcome, abandon, declare, dispatch, perform};
 use tempfile::TempDir;
 
 /// `local` host 的名字。夹具里的 workspace 都登记在它名下。
@@ -118,4 +120,73 @@ pub(crate) async fn chain_ids(store: &Store, session: &SessionId) -> Vec<i64> {
         .iter()
         .map(|node| node.id.get())
         .collect()
+}
+
+/// 一次工具调用的意图。夹具里的工具调用都是非幂等的 `bash`。
+fn tool_intent(session: &SessionId, run: RunId, message: MessageId, call_id: &str) -> EffectIntent {
+    EffectIntent::tool(EffectClass::Bash, session.clone(), run, message, call_id)
+}
+
+/// 经落点表登记一个工具调用，返回新建节点的 id。
+pub(crate) async fn declare_tool(
+    store: &Store,
+    session: &SessionId,
+    run: RunId,
+    call_id: &str,
+) -> MessageId {
+    let message = store.mint_message_id().await.expect("铸造消息 id");
+    let _declared = declare(store, tool_intent(session, run, message, call_id))
+        .await
+        .expect("工具节点入树");
+    message
+}
+
+/// 经落点表把已登记的工具调用标成已下发。重复登记不写行，因此可以直接重来一次。
+pub(crate) async fn dispatch_tool(
+    store: &Store,
+    session: &SessionId,
+    run: RunId,
+    message: MessageId,
+    call_id: &str,
+) {
+    let declared = declare(store, tool_intent(session, run, message, call_id))
+        .await
+        .expect("登记写入成功");
+    let _dispatched = dispatch(store, declared).await.expect("下发写入成功");
+}
+
+/// 经落点表写入工具结局。
+pub(crate) async fn observe_tool(
+    store: &Store,
+    session: &SessionId,
+    run: RunId,
+    message: MessageId,
+    call_id: &str,
+    state: ToolResultState,
+) {
+    let declared = declare(store, tool_intent(session, run, message, call_id))
+        .await
+        .expect("登记写入成功");
+    let dispatched = dispatch(store, declared).await.expect("下发写入成功");
+    let _outcome = perform(store, dispatched, |_token| async move {
+        Outcome::Seen(EffectObservation::Tool(state))
+    })
+    .await
+    .expect("工具结局写入成功");
+}
+
+/// 经落点表放弃一个已登记的工具调用：它一定没有执行，结局写「结果未知」。
+pub(crate) async fn lose_tool(
+    store: &Store,
+    session: &SessionId,
+    run: RunId,
+    message: MessageId,
+    call_id: &str,
+) {
+    let declared = declare(store, tool_intent(session, run, message, call_id))
+        .await
+        .expect("登记写入成功");
+    let _outcome = abandon(store, declared, Abandon::Cancelled)
+        .await
+        .expect("放弃写入成功");
 }

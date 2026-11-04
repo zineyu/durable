@@ -7,6 +7,9 @@ import { missingBodyIds } from './derived';
 import type { ClientState } from './state';
 import type { ClientAction } from './reducer';
 
+/// 每次请求的令牌。迟到的旧响应靠它落不了地。
+let requestCounter = 0;
+
 type MessageBodiesOptions = {
   sessionId: string | null;
   state: ClientState;
@@ -56,20 +59,22 @@ export function useMessageBodies({
     }
     const ids = needed.split(',').map(Number);
     const signal = abortRef.current?.signal;
-    dispatch({ type: 'bodies-request', ids });
+    requestCounter += 1;
+    const token = String(requestCounter);
+    dispatch({ type: 'bodies-request', ids, token });
     void (async () => {
       const outcome = await api.messageBodies(sessionId, ids, signal);
       if (signal?.aborted === true) {
         return;
       }
       if (outcome.ok) {
-        dispatch({ type: 'bodies', ids, messages: outcome.value.messages });
+        dispatch({ type: 'bodies', ids, token, messages: outcome.value.messages });
         return;
       }
-      dispatch({ type: 'bodies-failed', ids });
+      dispatch({ type: 'bodies-failed', ids, token });
       onFailure(outcome.error);
     })();
-  }, [needed, sessionId, dispatch, onFailure]);
+  }, [needed, state.bodies, sessionId, dispatch, onFailure]);
 
   useEffect(() => {
     for (const group of schedule) {

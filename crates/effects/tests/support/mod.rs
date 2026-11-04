@@ -108,7 +108,6 @@ impl MemoryLedger {
 }
 
 impl Ledger for MemoryLedger {
-    type Effect = Probe;
     type Intent = Intent;
     type Observation = Observation;
     type Error = WriteFailed;
@@ -128,14 +127,12 @@ impl Ledger for MemoryLedger {
 }
 
 /// 只登记，意图固定为「发送」。
-pub(crate) async fn declared(ledger: &MemoryLedger) -> Declared<Probe, Intent> {
-    declare(ledger, Probe::Redo, Intent("发送"))
-        .await
-        .expect("登记写入成功")
+pub(crate) async fn declared(ledger: &MemoryLedger) -> Declared<Intent> {
+    declare(ledger, Intent("发送")).await.expect("登记写入成功")
 }
 
 /// 登记并发货，意图固定为「发送」。
-pub(crate) async fn dispatched(ledger: &MemoryLedger) -> Dispatched<Probe, Intent> {
+pub(crate) async fn dispatched(ledger: &MemoryLedger) -> Dispatched<Intent> {
     dispatch(ledger, declared(ledger).await)
         .await
         .expect("发货写入成功")

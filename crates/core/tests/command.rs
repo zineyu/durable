@@ -3,11 +3,14 @@
 
 #![expect(clippy::expect_used, reason = "测试用 expect 直接报告夹具与断言失败。")]
 
+mod support;
+
 use durable::{
     CommittedEvent, ContentPart, FactEvent, HostKind, HostName, MessageText, RunId, RunRecord,
     RunStatus, SessionId, SessionTitle, Store, StoreError, SubmitMode, WorkspaceMetadata,
     WorkspacePath,
 };
+use support::{declare_tool, observe_tool};
 use tempfile::TempDir;
 
 /// 打开临时库，注册 workspace 并创建一个 session。
@@ -175,32 +178,24 @@ async fn message_commands_fill_the_envelope() {
         .expect("队列非空时启动 run");
 
     let mut after = max_event_id(&store).await;
-    let tool = store
-        .append_tool(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            "call-1",
-        )
-        .await
-        .expect("工具节点入树");
+    let tool = declare_tool(&store, &session, start.run.id, "call-1").await;
     envelope_matches_snapshot(&store, &session, after).await;
 
     after = max_event_id(&store).await;
-    store
-        .set_tool_state(
-            &session,
-            tool.id,
-            "call-1",
-            durable::ToolResultState::Finished {
-                outcome: durable::ToolOutcome::Succeeded {
-                    content: "ok".to_owned(),
-                },
-                duration_ms: 12,
+    observe_tool(
+        &store,
+        &session,
+        start.run.id,
+        tool,
+        "call-1",
+        durable::ToolResultState::Finished {
+            outcome: durable::ToolOutcome::Succeeded {
+                content: "ok".to_owned(),
             },
-        )
-        .await
-        .expect("写入工具结局");
+            duration_ms: 12,
+        },
+    )
+    .await;
     envelope_matches_snapshot(&store, &session, after).await;
 
     after = max_event_id(&store).await;

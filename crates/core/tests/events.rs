@@ -12,7 +12,10 @@ use durable::{
     ContentPart, FactEvent, MessageId, PartState, RunStatus, Store, StoreError, StreamEvent,
     ToolResultState,
 };
-use support::{enqueue, facts_after, max_event_id, store_with_session, text, tree};
+use support::{
+    declare_tool, dispatch_tool, enqueue, facts_after, lose_tool, max_event_id, store_with_session,
+    text, tree,
+};
 
 /// 一次命令提交内的事件 id 连续递增，互不重复。
 #[tokio::test]
@@ -137,47 +140,33 @@ async fn tool_state_facts_keep_their_order() {
         .expect("队列非空时启动 run");
 
     let before = max_event_id(&store).await;
-    let tool = store
-        .append_tool(
-            &session,
-            start.run.id,
-            store.mint_message_id().await.expect("铸造消息 id"),
-            "call-1",
-        )
-        .await
-        .expect("工具节点入树");
+    let tool = declare_tool(&store, &session, start.run.id, "call-1").await;
     assert_eq!(
-        states_of(&store, &session, tool.id).await,
+        states_of(&store, &session, tool).await,
         vec![ToolResultState::Declared],
         "入树时为已登记未下发"
     );
     assert_eq!(
-        skeleton_states(&store, &session, tool.id).await,
+        skeleton_states(&store, &session, tool).await,
         vec![PartState::Running],
         "已登记未下发的骨架状态是 running"
     );
 
-    store
-        .set_tool_state(&session, tool.id, "call-1", ToolResultState::Dispatched)
-        .await
-        .expect("标记已下发");
+    dispatch_tool(&store, &session, start.run.id, tool, "call-1").await;
     assert_eq!(
-        states_of(&store, &session, tool.id).await,
+        states_of(&store, &session, tool).await,
         vec![ToolResultState::Dispatched],
         "下发后为已下发未观测"
     );
     assert_eq!(
-        skeleton_states(&store, &session, tool.id).await,
+        skeleton_states(&store, &session, tool).await,
         vec![PartState::Running],
         "已下发未观测的骨架状态同为 running，存储因此只有一个未观测取值"
     );
 
-    store
-        .set_tool_state(&session, tool.id, "call-1", ToolResultState::Unknown)
-        .await
-        .expect("写入结果未知");
+    lose_tool(&store, &session, start.run.id, tool, "call-1").await;
     assert_eq!(
-        skeleton_states(&store, &session, tool.id).await,
+        skeleton_states(&store, &session, tool).await,
         vec![PartState::Unknown],
         "结果未知在骨架上有自己的取值"
     );
@@ -185,18 +174,18 @@ async fn tool_state_facts_keep_their_order() {
     let facts = facts_after(&store, before).await;
     assert_eq!(facts.len(), 4, "入树一次（含移动 active leaf），改状态两次");
     assert!(
-        matches!(&facts[0], FactEvent::MessageAppended { message, .. } if message.id == tool.id),
+        matches!(&facts[0], FactEvent::MessageAppended { message, .. } if message.id == tool),
         "第一条是工具节点入树"
     );
     assert!(
-        matches!(&facts[1], FactEvent::ActiveLeafChanged { active_leaf: Some(id), .. } if *id == tool.id)
+        matches!(&facts[1], FactEvent::ActiveLeafChanged { active_leaf: Some(id), .. } if *id == tool)
     );
     assert!(
-        matches!(&facts[2], FactEvent::MessageUpdated { message, .. } if message.id == tool.id),
+        matches!(&facts[2], FactEvent::MessageUpdated { message, .. } if message.id == tool),
         "第三条是已下发未观测"
     );
     assert!(
-        matches!(&facts[3], FactEvent::MessageUpdated { message, .. } if message.id == tool.id),
+        matches!(&facts[3], FactEvent::MessageUpdated { message, .. } if message.id == tool),
         "第四条是结局"
     );
 }

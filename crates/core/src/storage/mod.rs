@@ -45,8 +45,8 @@ pub(crate) struct SessionSnapshot {
 
 /// 恢复后不变量的一条违例。`kind` 是稳定类别，`detail` 指出具体行。
 ///
-/// 调用点是 [`crate::Store::check_invariants`]：`RunEngine::recover` 修复完、驱动 run
-/// 之前检查一次，崩溃前缀矩阵在每个重启点检查一次（ADR 0056）。
+/// 调用点是 [`crate::Store::check_invariants`]：`RunEngine::round_zero` 修复完、run
+/// 真正开始之前检查一次，崩溃前缀矩阵在每个重启点检查一次（ADR 0056）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvariantViolation {
     pub kind: InvariantKind,

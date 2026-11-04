@@ -67,6 +67,12 @@ async fn abandons_remaining_tool_calls_when_cancelled() {
         agent::ToolResultState::Unknown,
         "未执行的调用记为结果未知"
     );
+    for (call_id, state) in &states {
+        assert!(
+            !state.is_unobserved(),
+            "run 结束后调用 {call_id} 不得残留未观测的结局：{state:?}"
+        );
+    }
 
     harness.submit_message(&session.id, "继续").await;
     let tree = harness.wait_idle(&session.id).await;

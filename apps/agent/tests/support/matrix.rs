@@ -21,9 +21,11 @@ use agent::{
 };
 use async_trait::async_trait;
 use durable::{
-    HostKind, InvariantViolation, MessageId, MessageText, MessageTree, SessionId, SessionTitle,
-    SessionTreeSnapshot, Store, SubmitMode, ToolOutcome, ToolResultState, WorkspacePath,
+    EffectIntent, HostKind, InvariantViolation, MessageId, MessageText, MessageTree, SessionId,
+    SessionTitle, SessionTreeSnapshot, Store, SubmitMode, ToolOutcome, ToolResultState,
+    WorkspacePath,
 };
+use effects::token::Dispatched;
 use futures_util::stream;
 
 /// 一次模型请求的脚本。
@@ -126,7 +128,12 @@ impl ToolBox for RecordingTools {
         durable::tool_definitions()
     }
 
-    async fn execute(&self, call: &ToolCall, _context: &ToolContext) -> ToolEnd {
+    async fn execute(
+        &self,
+        call: &ToolCall,
+        _context: &ToolContext,
+        _dispatched: &Dispatched<EffectIntent>,
+    ) -> ToolEnd {
         self.effects.lock().expect("副作用日志").push(Effect {
             call_id: call.id.clone(),
             at_commits: self.store.commits(),

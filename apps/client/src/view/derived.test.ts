@@ -495,7 +495,7 @@ describe('缺失正文', () => {
     const nodes = [message(1, null, 'user'), message(2, 1, 'tool'), message(3, 1, 'user')];
     const value = state({
       trees: { 's-1': tree(nodes, 3) },
-      bodies: begin(cacheOf({ 1: [] }), [2]),
+      bodies: begin(cacheOf({ 1: [] }), [2], 'test'),
     });
 
     expect(missingBodyIds(value, 's-1')).toEqual([3]);

@@ -70,4 +70,8 @@ async fn executor_killed_mid_tool_fails_run_and_continues_queue() {
         vec![agent::ToolResultState::Unknown],
         "在途工具调用记为结果未知"
     );
+    assert!(
+        states.iter().all(|state| !state.is_unobserved()),
+        "run 结束后不得残留未观测的结局"
+    );
 }

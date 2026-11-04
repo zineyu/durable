@@ -1,11 +1,12 @@
 //! 许可证与流程：先写库，再发出许可证；执行只接受已下发的许可证。
 //! 这是 ADR 0037「工具节点先入树再执行」的同一条规矩，推广到任意一类副作用；
-//! 账本怎么写、结局在业务上是什么意思都归使用方的 [`Ledger`]，策略表在 `policy`。
+//! 账本怎么写、动作属于哪一类、结局在业务上是什么意思都归使用方的 [`Ledger`] 与它的
+//! 意图类型，策略表在 `policy`。类别不在许可证上：同一个意图在登记、发货与执行三步都是
+//! 同一份，落点表从意图读它。
 //! 超时不在这里：工作体自己决定何时放弃，并用 [`Lost::Timeout`] 报告（ADR 0059）。
 
 use core::future::Future;
-
-use crate::policy::Effect;
+use std::fmt;
 
 /// 账本的一次写入。证据强度由变体本身表示。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +30,21 @@ pub enum Lost {
     Timeout,
     /// 已登记但决定不执行。
     Cancelled,
+    /// 进程在观测到结局之前结束。重启时发现「已下发」而没有观测，就是这一支。
+    ///
+    /// 与 [`Timeout`](Lost::Timeout) 同样，本库不产生它，只承载它：产生它的是恢复路径。
+    Interrupted,
+}
+
+impl fmt::Display for Lost {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::HostGone(detail) => formatter.write_str(detail),
+            Self::Timeout => formatter.write_str("超时"),
+            Self::Cancelled => formatter.write_str("已取消"),
+            Self::Interrupted => formatter.write_str("进程结束前没有观测到结局"),
+        }
+    }
 }
 
 /// 弃的原因。已登记的动作一定没发生，因此没有「超时」这一支。
@@ -61,9 +77,8 @@ pub enum Outcome<O> {
 
 /// 使用方的账本。库只调用 [`write`](Ledger::write)，不规定它落到哪里。
 pub trait Ledger {
-    /// 本次动作的类别。
-    type Effect: Effect;
-    /// 动作的意图。写库与返回都要用它，因此必须能复制一份。
+    /// 动作的意图：它带着本次动作的类别与它落在哪条领域行上。
+    /// 写库与返回都要用它，因此必须能复制一份。
     type Intent: Clone;
     /// 动作的观测。写库与返回都要用它，因此必须能复制一份。
     type Observation: Clone;
@@ -94,15 +109,13 @@ struct Seal;
 /// ```compile_fail
 /// use effects::token::Declared;
 ///
-/// let forged: Declared<(), ()> = Declared {
-///     effect: (),
+/// let forged: Declared<()> = Declared {
 ///     intent: (),
 ///     _seal: (),
 /// };
 /// ```
 #[must_use]
-pub struct Declared<E, I> {
-    effect: E,
+pub struct Declared<I> {
     intent: I,
     _seal: Seal,
 }
@@ -114,39 +127,26 @@ pub struct Declared<E, I> {
 ///
 /// fn requires_clone<T: Clone>(_: T) {}
 ///
-/// fn probe<E, I>(token: Dispatched<E, I>) {
+/// fn probe<I>(token: Dispatched<I>) {
 ///     requires_clone(token);
 /// }
 /// ```
 #[must_use]
-pub struct Dispatched<E, I> {
-    effect: E,
+pub struct Dispatched<I> {
     intent: I,
     _seal: Seal,
 }
 
-impl<E: Effect, I> Declared<E, I> {
-    /// 本次动作的类别。
-    #[must_use]
-    pub fn effect(&self) -> E {
-        self.effect
-    }
-
-    /// 本次动作的意图。
+impl<I> Declared<I> {
+    /// 本次动作的意图，其中带着本次动作的类别。
     #[must_use]
     pub fn intent(&self) -> &I {
         &self.intent
     }
 }
 
-impl<E: Effect, I> Dispatched<E, I> {
-    /// 本次动作的类别。
-    #[must_use]
-    pub fn effect(&self) -> E {
-        self.effect
-    }
-
-    /// 本次动作的意图。
+impl<I> Dispatched<I> {
+    /// 本次动作的意图，其中带着本次动作的类别。
     #[must_use]
     pub fn intent(&self) -> &I {
         &self.intent
@@ -160,12 +160,10 @@ impl<E: Effect, I> Dispatched<E, I> {
 /// 账本写入失败时返回使用方的错误，且不发出许可证。
 pub async fn declare<L: Ledger>(
     ledger: &L,
-    effect: L::Effect,
     intent: L::Intent,
-) -> Result<Declared<L::Effect, L::Intent>, L::Error> {
+) -> Result<Declared<L::Intent>, L::Error> {
     ledger.write(Transition::Declared(intent.clone())).await?;
     Ok(Declared {
-        effect,
         intent,
         _seal: Seal,
     })
@@ -178,13 +176,12 @@ pub async fn declare<L: Ledger>(
 /// 账本写入失败时返回使用方的错误，且不发出已下发的许可证。
 pub async fn dispatch<L: Ledger>(
     ledger: &L,
-    declared: Declared<L::Effect, L::Intent>,
-) -> Result<Dispatched<L::Effect, L::Intent>, L::Error> {
+    declared: Declared<L::Intent>,
+) -> Result<Dispatched<L::Intent>, L::Error> {
     ledger
         .write(Transition::Dispatched(declared.intent.clone()))
         .await?;
     Ok(Dispatched {
-        effect: declared.effect,
         intent: declared.intent,
         _seal: Seal,
     })
@@ -192,8 +189,8 @@ pub async fn dispatch<L: Ledger>(
 
 /// 执行：跑工作体，先把结论写库，再把结论交给调用方。
 ///
-/// 工作体拿到已下发的许可证，因此它只能在这一步之后执行。它给出的 [`Lost`] 原样
-/// 落库并原样返回；何时放弃由工作体自己决定，本函数不计时。
+/// 工作体拿走已下发的许可证，因此它只能在这一步之后执行，也只能执行一次。它给出的
+/// [`Lost`] 原样落库并原样返回；何时放弃由工作体自己决定，本函数不计时。
 ///
 /// # Errors
 ///
@@ -201,16 +198,16 @@ pub async fn dispatch<L: Ledger>(
 /// 当成动作没发生。
 pub async fn perform<L, F, Fut>(
     ledger: &L,
-    dispatched: Dispatched<L::Effect, L::Intent>,
+    dispatched: Dispatched<L::Intent>,
     work: F,
 ) -> Result<Outcome<L::Observation>, L::Error>
 where
     L: Ledger,
-    F: FnOnce(&Dispatched<L::Effect, L::Intent>) -> Fut,
+    F: FnOnce(Dispatched<L::Intent>) -> Fut,
     Fut: Future<Output = Outcome<L::Observation>>,
 {
     let intent = dispatched.intent.clone();
-    let outcome = work(&dispatched).await;
+    let outcome = work(dispatched).await;
 
     match &outcome {
         Outcome::Seen(observation) => {
@@ -233,7 +230,7 @@ where
 /// 账本写入失败时返回使用方的错误，且不给出结论。
 pub async fn abandon<L: Ledger>(
     ledger: &L,
-    declared: Declared<L::Effect, L::Intent>,
+    declared: Declared<L::Intent>,
     reason: Abandon,
 ) -> Result<Outcome<L::Observation>, L::Error> {
     let lost = reason.into_lost();

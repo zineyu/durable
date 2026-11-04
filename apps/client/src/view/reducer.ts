@@ -23,10 +23,10 @@ export type ClientAction =
   | { type: 'stream'; event: StreamFactEvent }
   | { type: 'tree'; tree: SessionTreeSnapshot }
   | { type: 'session'; session: SessionMetadata }
-  | { type: 'bodies-request'; ids: number[] }
-  | { type: 'bodies-failed'; ids: number[] }
+  | { type: 'bodies-request'; ids: number[]; token: string }
+  | { type: 'bodies-failed'; ids: number[]; token: string }
   | { type: 'bodies-retry'; ids: number[] }
-  | { type: 'bodies'; ids: number[]; messages: MessageBody[] }
+  | { type: 'bodies'; ids: number[]; token: string; messages: MessageBody[] }
   | { type: 'seen'; sessionId: string; at: number }
   | { type: 'connection'; connection: ConnectionState }
   | { type: 'error'; error: ClientError }
@@ -46,13 +46,13 @@ export function reduce(state: ClientState, action: ClientAction): ClientState {
     case 'session':
       return storeSession(state, action.session);
     case 'bodies-request':
-      return { ...state, bodies: begin(state.bodies, action.ids) };
+      return { ...state, bodies: begin(state.bodies, action.ids, action.token) };
     case 'bodies-failed':
-      return { ...state, bodies: fail(state.bodies, action.ids) };
+      return { ...state, bodies: fail(state.bodies, action.ids, action.token) };
     case 'bodies-retry':
       return { ...state, bodies: retry(state.bodies, action.ids) };
     case 'bodies':
-      return { ...state, bodies: arrive(state.bodies, action.ids, action.messages) };
+      return { ...state, bodies: arrive(state.bodies, action.ids, action.token, action.messages) };
     case 'seen':
       return markSeen(state, action.sessionId, action.at);
     case 'connection':

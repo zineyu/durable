@@ -1,5 +1,5 @@
 //! 恢复后的不变量检查：把「静默错乱」变成一份可断言的违例清单。
-//! SQL 在 `crate::storage::sqlite::invariants`；调用点是 `RunEngine::recover` 与崩溃前缀矩阵。
+//! SQL 在 `crate::storage::sqlite::invariants`；调用点是 `RunEngine::round_zero` 与崩溃前缀矩阵。
 
 use crate::error::StoreError;
 use crate::storage::InvariantViolation;

@@ -71,7 +71,6 @@ async fn a_tool_call_shows_the_declared_dispatched_and_finished_states() {
 
     let declared = declare(
         &store,
-        EffectClass::Bash,
         tool_intent(EffectClass::Bash, &session, run, message),
     )
     .await
@@ -120,7 +119,6 @@ async fn lost_observations_land_as_unknown() {
         &store,
         declare(
             &store,
-            EffectClass::EditFile,
             tool_intent(EffectClass::EditFile, &session, run, gone),
         )
         .await
@@ -148,7 +146,6 @@ async fn lost_observations_land_as_unknown() {
         &store,
         declare(
             &store,
-            EffectClass::ReadFile,
             tool_intent(EffectClass::ReadFile, &session, run, cancelled),
         )
         .await
@@ -177,7 +174,6 @@ async fn model_steps_and_compactions_write_no_row_before_the_observation() {
         &store,
         declare(
             &store,
-            EffectClass::ModelStep,
             EffectIntent::model_step(session.clone(), run, message),
         )
         .await
@@ -227,7 +223,6 @@ async fn model_steps_and_compactions_write_no_row_before_the_observation() {
         &store,
         declare(
             &store,
-            EffectClass::Compaction,
             EffectIntent::compaction(session.clone(), compaction),
         )
         .await
@@ -254,6 +249,46 @@ async fn model_steps_and_compactions_write_no_row_before_the_observation() {
     );
 }
 
+/// 未登记的工具名没有类别：落点仍是 tool 节点，但不计入覆盖率。
+#[tokio::test]
+async fn an_unregistered_tool_lands_on_its_node_without_coverage() {
+    let (_directory, store, session, run) = fixture().await;
+    let message = store.mint_message_id().await.expect("铸造消息 id");
+    let intent = || EffectIntent::unregistered_tool(session.clone(), run, message, "call_1");
+
+    let declared = declare(&store, intent()).await.expect("登记写入成功");
+    assert_eq!(
+        tool_state(&store, &session, message).await,
+        ToolResultState::Declared,
+        "未登记的工具名照常入树"
+    );
+
+    let dispatched = dispatch(&store, declared).await.expect("发货写入成功");
+    assert_eq!(
+        tool_state(&store, &session, message).await,
+        ToolResultState::Dispatched,
+        "照常落成已下发"
+    );
+
+    let seen = perform(&store, dispatched, |_token| async {
+        observed_tool(ToolResultState::Finished {
+            outcome: ToolOutcome::Failed {
+                code: durable::ToolErrorCode::UnknownTool,
+                message: "未知工具: list_dir".to_owned(),
+            },
+            duration_ms: 3,
+        })
+    })
+    .await
+    .expect("观测写入成功");
+
+    assert!(matches!(seen, Outcome::Seen(_)), "结局写入成功");
+    assert!(
+        store.effects_declared().is_empty(),
+        "没有类别，因此不计入覆盖率"
+    );
+}
+
 /// 落点与观测错配被拒绝，且不落任何行。
 #[tokio::test]
 async fn mismatched_landings_are_invariant_errors() {
@@ -263,7 +298,6 @@ async fn mismatched_landings_are_invariant_errors() {
         &store,
         declare(
             &store,
-            EffectClass::Bash,
             tool_intent(EffectClass::Bash, &session, run, message),
         )
         .await
@@ -297,7 +331,6 @@ async fn mismatched_landings_are_invariant_errors() {
 
     let Err(error) = declare(
         &store,
-        EffectClass::ModelStep,
         tool_intent(EffectClass::ModelStep, &session, run, message),
     )
     .await
@@ -336,7 +369,7 @@ async fn coverage_records_each_declared_class_once() {
         EffectClass::Bash,
     ] {
         let message = store.mint_message_id().await.expect("铸造消息 id");
-        let _declared = declare(&store, class, tool_intent(class, &session, run, message))
+        let _declared = declare(&store, tool_intent(class, &session, run, message))
             .await
             .expect("登记写入成功");
     }
@@ -359,7 +392,6 @@ async fn coverage_records_each_declared_class_once() {
 
     let _model_step = declare(
         &store,
-        EffectClass::ModelStep,
         EffectIntent::model_step(
             session.clone(),
             run,
@@ -370,7 +402,6 @@ async fn coverage_records_each_declared_class_once() {
     .expect("登记写入成功");
     let _compaction = declare(
         &store,
-        EffectClass::Compaction,
         EffectIntent::compaction(
             session.clone(),
             store.mint_message_id().await.expect("铸造"),
@@ -397,7 +428,6 @@ async fn concurrent_declarations_keep_every_node_once() {
             let message = store.mint_message_id().await.expect("铸造消息 id");
             let _declared = declare(
                 &*store,
-                EffectClass::ReadFile,
                 tool_intent(EffectClass::ReadFile, &session, run, message),
             )
             .await

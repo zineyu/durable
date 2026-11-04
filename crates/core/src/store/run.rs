@@ -221,23 +221,36 @@ impl Store {
     ///
     /// 下发前由调用方改写成 [`ToolResultState::Dispatched`]。
     ///
+    /// 同一节点、同一调用的重复登记不写行：重启后要在已有节点上重跑，证据只增不减。
+    ///
     /// # Errors
     ///
-    /// 同 [`Store::append_assistant`]。
-    pub async fn append_tool(
+    /// - `StoreError::MessageRoleMismatch`：目标节点不是 tool 节点。
+    /// - `StoreError::Invariant`：节点存在，但不含这次调用的工具结果块。
+    /// - 其余同 [`Store::append_assistant`]。
+    pub(crate) async fn append_tool(
         &self,
         session: &SessionId,
         run_id: RunId,
         id: MessageId,
         call_id: &str,
     ) -> Result<MessageNode, StoreError> {
-        self.append_message(
-            session,
-            run_id,
-            id,
-            MessageRole::Tool,
-            vec![ContentPart::tool_result(call_id, ToolResultState::Declared)],
-        )
+        self.command(session, async |command| {
+            if let Some(stored) = self.storage.message(session, id).await? {
+                return declared_node(id, call_id, stored.node);
+            }
+            let node = MessageNode {
+                id,
+                parent_id: command.session().active_leaf,
+                role: MessageRole::Tool,
+                interrupted: false,
+                parts: vec![ContentPart::tool_result(call_id, ToolResultState::Declared)],
+                run_id: Some(run_id),
+                created_at: command.now(),
+            };
+            append_node(command, &node);
+            Ok(node)
+        })
         .await
     }
 
@@ -284,7 +297,7 @@ impl Store {
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
     /// 副作用：替换块、写入 `message_updated` 事实事件。
-    pub async fn set_tool_state(
+    pub(crate) async fn set_tool_state(
         &self,
         session: &SessionId,
         id: MessageId,
@@ -453,6 +466,24 @@ impl Store {
     pub async fn running_run(&self, session: &SessionId) -> Result<Option<RunRecord>, StoreError> {
         self.storage.running_run(session).await
     }
+}
+
+/// 已存在节点上的重复登记：只接受同一调用的 tool 节点。
+fn declared_node(
+    id: MessageId,
+    call_id: &str,
+    node: MessageNode,
+) -> Result<MessageNode, StoreError> {
+    if node.role != MessageRole::Tool {
+        return Err(StoreError::MessageRoleMismatch(id, node.role));
+    }
+    if node.tool_results().any(|(existing, _)| existing == call_id) {
+        return Ok(node);
+    }
+    Err(StoreError::Invariant(format!(
+        "消息 {} 已存在，但不含调用 {call_id} 的工具结果块",
+        id.get()
+    )))
 }
 
 fn not_running(run: RunId) -> StoreError {

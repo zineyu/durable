@@ -1,6 +1,9 @@
 //! run 引擎的门面：执行循环、run 生命周期与 run 动作驱动。
 //! 下一步的判定在 `plan`，模型流在 `step`，工具循环在 `tools`，请求装配在 `prompt`，
 //! 上下文压缩在 `compact`，进度节流在 `progress`。
+//!
+//! 中断现场不在启动路径单独收尾：每次开跑前的第 0 圈把它们落成事实，启动恢复与日常
+//! 续跑因此走同一条路（ADR 0037）。
 
 mod compact;
 mod plan;
@@ -14,9 +17,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use durable::{
-    EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunId, RunStart, RunStatus,
-    SessionId, Store, StoreError, ToolResultState,
+    EffectClass, EffectIntent, EventBus, MessageId, MessageRole, RunFailure, RunFailureCode, RunId,
+    RunStart, RunStatus, SessionId, Store, StoreError, ToolResultState,
 };
+use effects::policy::{Evidence, Replay, settle};
+use effects::token::{Ledger, Lost, Transition};
 use tokio::sync::{Mutex, Notify};
 
 use self::compact::{CompactionBudget, CompactionEnd};
@@ -96,24 +101,17 @@ impl RunEngine {
         })
     }
 
-    /// 启动恢复：把中断的工具节点标成结局，把流式进度入树为已中断消息，
-    /// 并为需要执行的 session 启动驱动。
+    /// 启动：为每个有活要干的 session 启动执行循环。
+    ///
+    /// 中断现场的处理不在这里，而在每次开跑前的第 0 圈（`drive_run` 里的
+    /// `round_zero`）。启动恢复因此没有专用收尾函数：它与日常续跑走同一条路，
+    /// 不可能只修好其中一边。
     ///
     /// # Errors
     ///
-    /// - `StoreError::Database`：读取中断的 run、消息或队列时数据库操作失败。
-    /// - `StoreError::Serialization`：恢复过程写出的记录无法序列化。
-    /// - `StoreError::CorruptedData`：存储值不符合领域约束。
-    /// - `StoreError::Invariant`：存储不变量被破坏。
+    /// - `StoreError::Database`：读取有活要干的 session 时数据库操作失败。
     pub async fn recover(self: &Arc<Self>) -> Result<(), StoreError> {
-        let sessions = self.store.sessions_with_work().await?;
-        for session in &sessions {
-            self.resolve_interrupted_tools(session).await?;
-            self.resolve_interrupted_progress(session).await?;
-        }
-        // 检查放在修复之后、驱动之前：此刻库是静的，违例就是崩溃留下的真实形状。
-        self.report_invariants().await;
-        for session in sessions {
+        for session in self.store.sessions_with_work().await? {
             self.ensure_driver(session).await;
         }
         Ok(())
@@ -135,19 +133,6 @@ impl RunEngine {
             }
             Err(error) => tracing::warn!(error = %error, "检查恢复后的不变量失败"),
         }
-    }
-
-    /// 启动恢复时把流式进度入树为已中断消息。续跑推导随后从这条消息之后继续。
-    async fn resolve_interrupted_progress(&self, session: &SessionId) -> Result<(), StoreError> {
-        let Some(message) = self.store.materialize_progress(session).await? else {
-            return Ok(());
-        };
-        tracing::info!(
-            session = %session.as_str(),
-            message = message.id.get(),
-            "流式进度入树为已中断消息"
-        );
-        Ok(())
     }
 
     /// 有新入队时唤醒该 session 的执行循环。
@@ -288,6 +273,10 @@ impl RunEngine {
     async fn drive_run(&self, start: &RunStart, cancellation: &Cancellation) -> RunOutcome {
         let session = &start.run.session_id;
         let mut compaction = CompactionBudget::new();
+        // 第 0 圈：先把上次留下的半成品与未观测的结局落成事实，再让 `plan` 判定下一步。
+        if let Err(error) = self.round_zero(session, start.run.id).await {
+            return failed(storage_failure(&error));
+        }
         loop {
             let transcript = match self.store.transcript(session).await {
                 Ok(transcript) => transcript,
@@ -367,40 +356,97 @@ impl RunEngine {
             .is_empty())
     }
 
-    /// 启动恢复时处理结局未观测的工具节点：非幂等工具的结局写为未知，
-    /// 等待续跑时重跑幂等工具。
-    async fn resolve_interrupted_tools(&self, session: &SessionId) -> Result<(), StoreError> {
+    /// 开跑前的第 0 圈：让流式进度入树，再按证据强度处置未观测的工具节点。
+    ///
+    /// 启动恢复与日常续跑都从这里进去（ADR 0037）。
+    async fn round_zero(&self, session: &SessionId, run: RunId) -> Result<(), StoreError> {
+        if let Some(message) = self.store.materialize_progress(session).await? {
+            tracing::info!(
+                session = %session.as_str(),
+                message = message.id.get(),
+                "流式进度入树为已中断消息"
+            );
+        }
+        self.settle_unobserved_tools(session, run).await?;
+        // 检查放在修复之后、这一步开始之前：此刻修复已完成，违例就是崩溃留下的真实形状。
+        self.report_invariants().await;
+        Ok(())
+    }
+
+    /// 按证据强度处置未观测的工具节点。
+    ///
+    /// 「已登记」一定没有执行，留给 `plan` 重跑；「已下发」按幂等分流，只有给出
+    /// `GiveUp` 的才写「结果未知」。工具名找不到的节点按放弃处置：`plan` 无法重跑一条
+    /// 找不到调用的节点，留着它就会永远显示「执行中」。
+    async fn settle_unobserved_tools(
+        &self,
+        session: &SessionId,
+        run: RunId,
+    ) -> Result<(), StoreError> {
         let transcript = self.store.transcript(session).await?;
         for node in &transcript {
             if node.role != MessageRole::Tool {
                 continue;
             }
             for (call_id, state) in node.tool_results() {
-                if !state.is_unobserved() {
-                    continue;
-                }
-                let Some(name) = call_name(&transcript, call_id) else {
-                    tracing::warn!(
-                        message = node.id.get(),
-                        "结局未观测的工具节点找不到调用记录"
-                    );
+                let Some(evidence) = evidence_of(state) else {
                     continue;
                 };
-                if idempotent(self.tools.as_ref(), name) {
-                    tracing::info!(tool = name, message = node.id.get(), "重跑幂等工具");
+                let name = call_name(&transcript, call_id);
+                let class = name.and_then(EffectClass::of_tool);
+                let replay = match (name, class) {
+                    (Some(name), Some(class)) => {
+                        settle(class, evidence, idempotent(self.tools.as_ref(), name))
+                    }
+                    // 未登记的工具名没有副作用，重跑一定安全。
+                    (Some(_), None) => Replay::Redo,
+                    // 找不到调用：`plan` 无法重跑它，留着只会一直显示「执行中」。
+                    (None, _) => Replay::GiveUp,
+                };
+                if replay == Replay::Redo {
+                    tracing::info!(
+                        tool = name,
+                        message = node.id.get(),
+                        "结局未观测的调用将重跑"
+                    );
                     continue;
                 }
                 tracing::warn!(
                     tool = name,
                     message = node.id.get(),
-                    "非幂等工具结局记为未知"
+                    "非幂等调用可能已经执行，结局记为未知"
                 );
+                let message = node.run_id.unwrap_or(run);
+                let intent = match class {
+                    Some(class) => EffectIntent::tool(
+                        class,
+                        session.clone(),
+                        message,
+                        node.id,
+                        call_id.to_owned(),
+                    ),
+                    None => EffectIntent::unregistered_tool(
+                        session.clone(),
+                        message,
+                        node.id,
+                        call_id.to_owned(),
+                    ),
+                };
                 self.store
-                    .set_tool_state(session, node.id, call_id, ToolResultState::Unknown)
+                    .write(Transition::Lost(intent, Lost::Interrupted))
                     .await?;
             }
         }
         Ok(())
+    }
+}
+
+/// 未观测态对应的证据强度。有结局的节点不参与恢复判定。
+fn evidence_of(state: &ToolResultState) -> Option<Evidence> {
+    match state {
+        ToolResultState::Declared => Some(Evidence::Declared),
+        ToolResultState::Dispatched => Some(Evidence::Dispatched),
+        ToolResultState::Finished { .. } | ToolResultState::Unknown => None,
     }
 }
 

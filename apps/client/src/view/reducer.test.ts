@@ -354,18 +354,19 @@ describe('正文缓存', () => {
 
     expect(missingBodyIds(state, 's-1')).toEqual([1, 2]);
 
-    const requested = reduce(state, { type: 'bodies-request', ids: [1, 2] });
+    const requested = reduce(state, { type: 'bodies-request', ids: [1, 2], token: '1' });
     expect(missingBodyIds(requested, 's-1')).toEqual([]);
   });
 
   it('拉到的正文按消息 id 缓存，未返回的 id 记为空正文', () => {
     const state = reduce(
       withTree(loaded(), tree('s-1', 7, 1, [message(1, null, 'user')])),
-      { type: 'bodies-request', ids: [1, 2] },
+      { type: 'bodies-request', ids: [1, 2], token: '1' },
     );
     const loadedBodies = reduce(state, {
       type: 'bodies',
       ids: [1, 2],
+      token: '1',
       messages: [{ id: 1, parts: text('问') }],
     });
 
@@ -382,11 +383,12 @@ describe('正文缓存', () => {
         message(2, 1, 'assistant', { parts: parts(['tool_call']) }),
         message(3, 2, 'tool', { parts: parts(['tool_result']) }),
       ])),
-      { type: 'bodies-request', ids: [2, 3] },
+      { type: 'bodies-request', ids: [2, 3], token: '1' },
     );
     const withBodies = reduce(state, {
       type: 'bodies',
       ids: [2, 3],
+      token: '1',
       messages: [
         { id: 2, parts: [{ kind: 'tool_call', callId: 'call_1', name: 'read_file', arguments: '{}', providerMeta: null }] },
         { id: 3, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'dispatched' }, providerMeta: null }] },
@@ -413,8 +415,8 @@ describe('正文缓存', () => {
 
   it('拉取失败的消息不再自动重试，快照重载后恢复', () => {
     const state = withTree(loaded(), tree('s-1', 7, 1, [message(1, null, 'user')]));
-    const requested = reduce(state, { type: 'bodies-request', ids: [1] });
-    const failed = reduce(requested, { type: 'bodies-failed', ids: [1] });
+    const requested = reduce(state, { type: 'bodies-request', ids: [1], token: '1' });
+    const failed = reduce(requested, { type: 'bodies-failed', ids: [1], token: '1' });
 
     expect(missingBodyIds(failed, 's-1')).toEqual([]);
 
@@ -424,7 +426,7 @@ describe('正文缓存', () => {
 
   it('快照重载清空在途请求，被中断的正文可以重新拉取', () => {
     const state = withTree(loaded(), tree('s-1', 7, 1, [message(1, null, 'user')]));
-    const requested = reduce(state, { type: 'bodies-request', ids: [1] });
+    const requested = reduce(state, { type: 'bodies-request', ids: [1], token: '1' });
     expect(missingBodyIds(requested, 's-1')).toEqual([]);
 
     const reloaded = withTree(requested, tree('s-1', 7, 1, [message(1, null, 'user')]));
@@ -436,7 +438,7 @@ describe('正文缓存', () => {
       message(1, null, 'user'),
       message(2, 1, 'tool', { parts: parts(['tool_result']) }),
     ]));
-    const requested = reduce(state, { type: 'bodies-request', ids: [2] });
+    const requested = reduce(state, { type: 'bodies-request', ids: [2], token: '1' });
     const invalidated = streamed(
       requested,
       fact(
@@ -452,6 +454,7 @@ describe('正文缓存', () => {
     const late = reduce(invalidated, {
       type: 'bodies',
       ids: [2],
+      token: '1',
       messages: [
         { id: 2, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'dispatched' }, providerMeta: null }] },
       ],
@@ -461,11 +464,75 @@ describe('正文缓存', () => {
     expect(missingBodyIds(late, 's-1')).toEqual([1, 2]);
   });
 
+  it('被新请求取代之后，迟到的旧正文不写缓存', () => {
+    const state = withTree(loaded(), tree('s-1', 7, 2, [
+      message(1, null, 'user'),
+      message(2, 1, 'tool', { parts: parts(['tool_result']) }),
+    ]));
+    const requested = reduce(state, { type: 'bodies-request', ids: [2], token: '1' });
+    const invalidated = streamed(
+      requested,
+      fact(
+        8,
+        {
+          kind: 'message_updated',
+          sessionId: 's-1',
+          message: message(2, 1, 'tool', { parts: parts(['tool_result']) }),
+        },
+        session('s-1', '/work/a', 200),
+      ),
+    );
+    const rerequested = reduce(invalidated, {
+      type: 'bodies-request',
+      ids: [1, 2],
+      token: '2',
+    });
+    const late = reduce(rerequested, {
+      type: 'bodies',
+      ids: [2],
+      token: '1',
+      messages: [
+        { id: 2, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'dispatched' }, providerMeta: null }] },
+      ],
+    });
+
+    expect(bodyOf(late, 2)).toBeNull();
+
+    const fresh = reduce(late, {
+      type: 'bodies',
+      ids: [1, 2],
+      token: '2',
+      messages: [
+        {
+          id: 2,
+          parts: [
+            {
+              kind: 'tool_result',
+              callId: 'call_1',
+              state: { status: 'finished', outcome: { status: 'succeeded', content: '好' }, durationMs: 3 },
+              providerMeta: null,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(bodyOf(fresh, 2)).toEqual([
+      {
+        kind: 'tool_result',
+        callId: 'call_1',
+        state: { status: 'finished', outcome: { status: 'succeeded', content: '好' }, durationMs: 3 },
+        providerMeta: null,
+      },
+    ]);
+    expect(missingBodyIds(fresh, 's-1')).toEqual([]);
+  });
+
   it('拉取失败的消息可以显式重试', () => {
     const state = withTree(loaded(), tree('s-1', 7, 1, [message(1, null, 'user')]));
     const failed = reduce(
-      reduce(state, { type: 'bodies-request', ids: [1] }),
-      { type: 'bodies-failed', ids: [1] },
+      reduce(state, { type: 'bodies-request', ids: [1], token: '1' }),
+      { type: 'bodies-failed', ids: [1], token: '1' },
     );
     expect(missingBodyIds(failed, 's-1')).toEqual([]);
 
@@ -478,10 +545,12 @@ describe('正文缓存', () => {
       reduce(withTree(loaded(), tree('s-1', 7, 1, [message(1, null, 'user')])), {
         type: 'bodies-request',
         ids: [1],
+        token: '1',
       }),
       {
         type: 'bodies',
         ids: [1],
+        token: '1',
         messages: [{ id: 1, parts: text('问') }],
       },
     );

@@ -7,9 +7,12 @@ import type { MessageBody } from '../api/generated/MessageBody';
 const RETRY_DELAYS_MS = [1000, 3000];
 
 /// 一条消息的拉取阶段。`ready` 表示该拉取正文：尚未发出请求，或失败之后已被放行重试。
+///
+/// `pending` 带着本次请求的令牌。正文被改写后缓存条目会被丢弃，随后的请求可能取代仍在途的
+/// 那一次；令牌让迟到的旧响应落不了地，否则界面会停在旧状态（例如工具的「执行中」）。
 type Entry =
   | { phase: 'ready'; attempts: number }
-  | { phase: 'pending'; attempts: number }
+  | { phase: 'pending'; attempts: number; token: string }
   | { phase: 'cached'; parts: ContentPart[] }
   | { phase: 'failed'; attempts: number };
 
@@ -55,19 +58,29 @@ export function retrying(cache: BodyCache): { ids: number[]; delayMs: number }[]
     .sort((left, right) => left.delayMs - right.delayMs);
 }
 
-/// 标记这些消息的正文正在拉取。已在途或已缓存的 id 不改。
-export function begin(cache: BodyCache, ids: number[]): BodyCache {
+/// 标记这些消息的正文正在拉取，并记下本次请求的令牌。已缓存的 id 不改。
+export function begin(cache: BodyCache, ids: number[], token: string): BodyCache {
   return update(cache, ids, (entry) => {
-    if (entry?.phase === 'pending' || entry?.phase === 'cached') {
+    if (entry?.phase === 'cached') {
       return null;
     }
-    return { phase: 'pending', attempts: attemptsOf(entry) };
+    return { phase: 'pending', attempts: attemptsOf(entry), token };
   });
 }
 
-/// 写入批量拉取的正文。只接受在途的 id：已失效或快照重载丢弃的响应不写缓存。
-export function arrive(cache: BodyCache, ids: number[], bodies: MessageBody[]): BodyCache {
-  const accepted = new Set(ids.filter((id) => cache.entries[id]?.phase === 'pending'));
+/// 写入批量拉取的正文。只接受令牌相符的在途请求：被更新的请求取代之后迟到的响应不写缓存。
+export function arrive(
+  cache: BodyCache,
+  ids: number[],
+  token: string,
+  bodies: MessageBody[],
+): BodyCache {
+  const accepted = new Set(
+    ids.filter((id) => {
+      const entry = cache.entries[id];
+      return entry?.phase === 'pending' && entry.token === token;
+    }),
+  );
   if (accepted.size === 0) {
     return cache;
   }
@@ -85,10 +98,12 @@ export function arrive(cache: BodyCache, ids: number[], bodies: MessageBody[]): 
   return { entries };
 }
 
-/// 拉取失败：记一次尝试。只有在途的 id 计入，迟到的失败不改状态。
-export function fail(cache: BodyCache, ids: number[]): BodyCache {
+/// 拉取失败：记一次尝试。只有令牌相符的在途请求计入，迟到的失败不改状态。
+export function fail(cache: BodyCache, ids: number[], token: string): BodyCache {
   return update(cache, ids, (entry) =>
-    entry?.phase === 'pending' ? { phase: 'failed', attempts: entry.attempts + 1 } : null,
+    entry?.phase === 'pending' && entry.token === token
+      ? { phase: 'failed', attempts: entry.attempts + 1 }
+      : null,
   );
 }
 

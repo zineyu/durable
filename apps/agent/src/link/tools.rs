@@ -1,11 +1,16 @@
 //! 工具的 agent 侧：`ToolBox` 契约与按 host 路由到 link 的 `RemoteTools`。
 //! 帧与子进程在 `super`；host 的 link 表在 `crate::hosts`；工具定义在 `durable::tool`，
 //! 实现在 `apps/executor`。
+//!
+//! 执行只接受一张已下发的许可证：没有先写「已下发」，就发不出这一帧（ADR 0037）。
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use durable::{Cancellation, HostName, ToolCall, ToolDefinition, ToolOutcome, WorkspacePath};
+use durable::{
+    Cancellation, EffectIntent, HostName, ToolCall, ToolDefinition, ToolOutcome, WorkspacePath,
+};
+use effects::token::Dispatched;
 
 use super::LinkClosed;
 use crate::hosts::HostRegistry;
@@ -37,7 +42,13 @@ pub trait ToolBox: Send + Sync {
     /// 每轮模型请求携带的工具定义。
     fn definitions(&self) -> Vec<ToolDefinition>;
 
-    async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolEnd;
+    /// 执行一次调用。许可证是「已下发」这一行的凭据：它的证据先落库，帧才发得出去。
+    async fn execute(
+        &self,
+        call: &ToolCall,
+        context: &ToolContext,
+        dispatched: &Dispatched<EffectIntent>,
+    ) -> ToolEnd;
 }
 
 /// 把工具调用经 session 所属 host 的 link 交给 executor 的执行器。
@@ -60,7 +71,12 @@ impl ToolBox for RemoteTools {
         durable::tool_definitions()
     }
 
-    async fn execute(&self, call: &ToolCall, context: &ToolContext) -> ToolEnd {
+    async fn execute(
+        &self,
+        call: &ToolCall,
+        context: &ToolContext,
+        _dispatched: &Dispatched<EffectIntent>,
+    ) -> ToolEnd {
         let Some(link) = self.hosts.link(&context.host).await else {
             return ToolEnd::HostGone(LinkClosed::unavailable(
                 self.hosts.unavailable_detail(&context.host).await,

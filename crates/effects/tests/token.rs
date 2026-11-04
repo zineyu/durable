@@ -3,13 +3,13 @@
 mod support;
 
 use effects::token::{Abandon, Ledger, Lost, Outcome, Transition, abandon, declare, perform};
-use support::{Intent, MemoryLedger, Probe, WriteFailed, declared, dispatched};
+use support::{Intent, MemoryLedger, WriteFailed, declared, dispatched};
 
 #[tokio::test]
 async fn declare_writes_declared_evidence_before_issuing_the_token() {
     let ledger = MemoryLedger::new();
 
-    let token = declare(&ledger, Probe::Redo, Intent("发送"))
+    let token = declare(&ledger, Intent("发送"))
         .await
         .expect("登记写入成功");
 
@@ -76,6 +76,24 @@ async fn perform_forwards_an_unobserved_ending_as_is() {
 }
 
 #[tokio::test]
+async fn an_interrupted_ending_names_the_reason_that_restarts_report() {
+    let ledger = MemoryLedger::new();
+
+    let _outcome = perform(&ledger, dispatched(&ledger).await, |_token| async {
+        Outcome::Lost(Lost::Interrupted)
+    })
+    .await
+    .expect("重启结论写入成功");
+
+    assert_eq!(
+        ledger.writes().last(),
+        Some(&Transition::Lost(Intent("发送"), Lost::Interrupted)),
+        "恢复路径直接写丢失观测：没有许可证能跨进程存活"
+    );
+    assert_eq!(Lost::Interrupted.to_string(), "进程结束前没有观测到结局");
+}
+
+#[tokio::test]
 async fn abandon_writes_the_lost_evidence_for_an_undispatched_call() {
     let ledger = MemoryLedger::new();
 
@@ -118,7 +136,7 @@ async fn a_failed_perform_write_propagates_and_stays_dispatched() {
 async fn a_failed_declare_issues_no_token() {
     let ledger = MemoryLedger::failing_at(1);
 
-    let result = declare(&ledger, Probe::Redo, Intent("发送")).await;
+    let result = declare(&ledger, Intent("发送")).await;
 
     assert!(result.is_err(), "写入失败时不得发出许可证");
     assert!(ledger.writes().is_empty(), "失败的写入不落行");

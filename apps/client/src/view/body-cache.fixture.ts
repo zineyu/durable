@@ -4,8 +4,11 @@ import type { ContentPart } from '../api/generated/ContentPart';
 import { arrive, begin, emptyBodyCache } from './body-cache';
 import type { BodyCache } from './body-cache';
 
+/// 夹具里的固定请求令牌：这些构造不模拟迟到的响应。
+const TOKEN = 'fixture';
+
 export function cacheOf(bodies: Record<number, ContentPart[]>): BodyCache {
   const ids = Object.keys(bodies).map(Number);
   const messages = ids.map((id) => ({ id, parts: bodies[id] ?? [] }));
-  return arrive(begin(emptyBodyCache, ids), ids, messages);
+  return arrive(begin(emptyBodyCache, ids, TOKEN), ids, TOKEN, messages);
 }
