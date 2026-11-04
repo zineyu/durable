@@ -1,6 +1,7 @@
 //! 许可证与流程：先写库，再发出许可证；执行只接受已下发的许可证。
 //! 这是 ADR 0037「工具节点先入树再执行」的同一条规矩，推广到任意一类副作用；
 //! 账本怎么写、结局在业务上是什么意思都归使用方的 [`Ledger`]，策略表在 `policy`。
+//! 超时不在这里：工作体自己决定何时放弃，并用 [`Lost::Timeout`] 报告（ADR 0059）。
 
 use core::future::Future;
 
@@ -24,7 +25,7 @@ pub enum Transition<I, O> {
 pub enum Lost {
     /// host 断开，附原文。
     HostGone(String),
-    /// 类别上界到点。
+    /// 介质层判定超时：链路还在，但我们不再等。
     Timeout,
     /// 已登记但决定不执行。
     Cancelled,
@@ -125,6 +126,12 @@ pub struct Dispatched<E, I> {
 }
 
 impl<E: Effect, I> Declared<E, I> {
+    /// 本次动作的类别。
+    #[must_use]
+    pub fn effect(&self) -> E {
+        self.effect
+    }
+
     /// 本次动作的意图。
     #[must_use]
     pub fn intent(&self) -> &I {
@@ -133,6 +140,12 @@ impl<E: Effect, I> Declared<E, I> {
 }
 
 impl<E: Effect, I> Dispatched<E, I> {
+    /// 本次动作的类别。
+    #[must_use]
+    pub fn effect(&self) -> E {
+        self.effect
+    }
+
     /// 本次动作的意图。
     #[must_use]
     pub fn intent(&self) -> &I {
@@ -177,10 +190,10 @@ pub async fn dispatch<L: Ledger>(
     })
 }
 
-/// 执行：把工作体包在类别上界内，先把结论写库，再把结论交给调用方。
+/// 执行：跑工作体，先把结论写库，再把结论交给调用方。
 ///
-/// 工作体拿到已下发的许可证，因此它只能在这一步之后执行。上界到点按
-/// [`Lost::Timeout`] 收尾，工作体给出的 [`Lost`] 原样落库并原样返回。
+/// 工作体拿到已下发的许可证，因此它只能在这一步之后执行。它给出的 [`Lost`] 原样
+/// 落库并原样返回；何时放弃由工作体自己决定，本函数不计时。
 ///
 /// # Errors
 ///
@@ -196,11 +209,8 @@ where
     F: FnOnce(&Dispatched<L::Effect, L::Intent>) -> Fut,
     Fut: Future<Output = Outcome<L::Observation>>,
 {
-    let bound = dispatched.effect.bound();
     let intent = dispatched.intent.clone();
-    let outcome = tokio::time::timeout(bound, work(&dispatched))
-        .await
-        .unwrap_or(Outcome::Lost(Lost::Timeout));
+    let outcome = work(&dispatched).await;
 
     match &outcome {
         Outcome::Seen(observation) => {

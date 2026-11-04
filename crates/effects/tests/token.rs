@@ -2,10 +2,6 @@
 
 mod support;
 
-use std::future::pending;
-use std::time::Instant;
-
-use effects::policy::Effect;
 use effects::token::{Abandon, Ledger, Lost, Outcome, Transition, abandon, declare, perform};
 use support::{Intent, MemoryLedger, Probe, WriteFailed, declared, dispatched};
 
@@ -57,26 +53,6 @@ async fn perform_writes_the_observation_then_returns_it() {
             Transition::Observed(Intent("发送"), "发送"),
         ],
         "正常路径是三次写入，顺序固定"
-    );
-}
-
-#[tokio::test]
-async fn perform_stops_at_the_effect_bound_and_writes_a_timeout() {
-    let ledger = MemoryLedger::new();
-    let started = Instant::now();
-
-    let outcome = perform(&ledger, dispatched(&ledger).await, |_token| pending())
-        .await
-        .expect("超时结论写入成功");
-
-    assert_eq!(outcome, Outcome::Lost(Lost::Timeout));
-    assert!(
-        started.elapsed() >= Probe::Redo.bound(),
-        "上界必须来自类别的 bound()，而不是工作体自己"
-    );
-    assert_eq!(
-        ledger.writes().last(),
-        Some(&Transition::Lost(Intent("发送"), Lost::Timeout))
     );
 }
 

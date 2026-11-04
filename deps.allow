@@ -22,6 +22,7 @@ agent tokio # 异步运行时
 agent tracing # 结构化日志
 agent ts-rs # 导出 TS 协议类型
 
+durable effects # 副作用类别表、许可证与覆盖率
 durable jiff # 时间戳
 durable serde # 协议结构序列化
 durable serde_json # JSON 编解码
@@ -33,7 +34,7 @@ durable tracing # 结构化日志
 durable ts-rs # 导出 TS 协议类型
 durable uuid # 标识符生成
 
-effects tokio # perform 用 tokio 的截止时间包住工作体
+effects tokio # 测试的异步用例（`#[tokio::test]` 与任务让出）；库本身不依赖运行时
 
 executor clap # 命令行参数解析
 executor durable # 工具契约与 link 帧

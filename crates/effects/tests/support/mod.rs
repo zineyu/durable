@@ -10,9 +10,8 @@
 )]
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::Duration;
 
-use effects::policy::{Effect, EffectScope, Evidence, Replay, Terminal};
+use effects::policy::{Effect, EffectScope, Evidence, Replay};
 use effects::token::{Declared, Dispatched, Ledger, Transition, declare, dispatch};
 
 /// 只用于断言的类别：三种重放策略与「别处覆盖」各一个取值。
@@ -29,8 +28,6 @@ pub(crate) enum Probe {
 }
 
 impl Effect for Probe {
-    type Failure = &'static str;
-
     const ALL: &'static [Self] = &[
         Probe::Redo,
         Probe::GiveUp,
@@ -47,20 +44,12 @@ impl Effect for Probe {
         }
     }
 
-    fn bound(self) -> Duration {
-        Duration::from_millis(50)
-    }
-
     fn replay(self, _evidence: Evidence) -> Replay {
         match self {
             Probe::Redo | Probe::Elsewhere => Replay::Redo,
             Probe::GiveUp => Replay::GiveUp,
             Probe::IfIdempotent => Replay::IfIdempotent,
         }
-    }
-
-    fn on_timeout(self) -> Terminal<Self::Failure> {
-        Terminal::Failure("probe_timeout")
     }
 
     fn matrix_scope(self) -> EffectScope {

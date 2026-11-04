@@ -20,6 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex;
 
 use crate::change::Changeset;
+use crate::effect::EffectClass;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::id::{SessionId, WorkspacePath};
@@ -30,6 +31,7 @@ use crate::storage::sqlite::SqliteStorage;
 use crate::storage::{SessionSnapshot, Snapshot};
 use crate::stream::{EventBus, StreamEvent};
 use crate::tree::MessageTree;
+use effects::coverage::Coverage;
 
 /// 一次 run 开始时可用的上下文。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +54,8 @@ pub struct Store {
     commit_snapshots: Option<PathBuf>,
     /// 已提交的次数。记录副本时它同时是副本的序号。
     commits: AtomicU64,
+    /// 本进程里已登记过的副作用类别（`crate::effect` 记录与读取）。
+    pub(crate) coverage: Coverage<EffectClass>,
 }
 
 impl Store {
@@ -102,6 +106,7 @@ impl Store {
             bus: EventBus::default(),
             commit_snapshots,
             commits: AtomicU64::new(0),
+            coverage: Coverage::new(),
         })
     }
 

@@ -3,6 +3,7 @@
 
 mod cancel;
 mod change;
+mod effect;
 mod error;
 mod event;
 mod host;
@@ -21,6 +22,7 @@ mod workspace;
 
 pub use cancel::Cancellation;
 pub use change::Changeset;
+pub use effect::{EffectClass, EffectIntent, EffectObservation};
 pub use error::{StoreError, StoreErrorClass};
 pub use event::{CommittedEvent, FactEvent};
 pub use host::{HostKind, HostMetadata, HostName, HostNameError, HostStatus, HostUpdate};
