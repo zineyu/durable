@@ -17,7 +17,9 @@ export type ToolCardModel = {
   durationLabel: string | null;
 };
 
-/// 把工具调用块与它的结局合成卡片模型。结局未到时按执行中渲染。
+/// 把工具调用块与它的结局合成卡片模型。
+///
+/// 结局未到时的两个未观测态（已登记未下发、已下发未观测）都按执行中渲染，不新增可见状态。
 export function toolCardModel(
   call: ToolCallPart,
   state: ToolResultState | undefined,
@@ -31,7 +33,11 @@ export function toolCardModel(
     result: null,
     durationLabel: null,
   };
-  if (state === undefined || state.status === 'running') {
+  if (
+    state === undefined ||
+    state.status === 'declared' ||
+    state.status === 'dispatched'
+  ) {
     return model;
   }
   if (state.status === 'unknown') {

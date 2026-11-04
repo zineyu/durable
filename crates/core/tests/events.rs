@@ -1,9 +1,16 @@
 //! 事件序列与水位：一次提交内的事件 id、提交后广播、失败不落地、bootstrap 与快照水位。
 //! 写命令入口的 session 视图信封在 `command`；各对象的写命令各有自己的文件。
 
+#![expect(
+    clippy::expect_used,
+    reason = "读回工具节点的辅助函数不在 #[test] 里，用 expect 直接报告夹具失败。"
+)]
+
 mod support;
 
-use durable::{ContentPart, FactEvent, MessageId, RunStatus, StoreError, StreamEvent};
+use durable::{
+    ContentPart, FactEvent, MessageId, RunStatus, Store, StoreError, StreamEvent, ToolResultState,
+};
 use support::{enqueue, facts_after, max_event_id, store_with_session, text, tree};
 
 /// 一次命令提交内的事件 id 连续递增，互不重复。
@@ -115,6 +122,85 @@ async fn bootstrap_watermark_matches_last_committed_event() {
         snapshot.max_event_id, bootstrap.max_event_id,
         "session 快照水位与 bootstrap 一致"
     );
+}
+
+/// 工具节点的事实按「已登记未下发 → 已下发未观测 → 结局」提交。
+#[tokio::test]
+async fn tool_state_facts_keep_their_order() {
+    let (_directory, store, session) = store_with_session().await;
+    enqueue(&store, &session, "问题").await;
+    let start = store
+        .start_run(&session)
+        .await
+        .expect("启动 run")
+        .expect("队列非空时启动 run");
+
+    let before = max_event_id(&store).await;
+    let tool = store
+        .append_tool(
+            &session,
+            start.run.id,
+            store.mint_message_id().await.expect("铸造消息 id"),
+            "call-1",
+        )
+        .await
+        .expect("工具节点入树");
+    assert_eq!(
+        states_of(&store, &session, tool.id).await,
+        vec![ToolResultState::Declared],
+        "入树时为已登记未下发"
+    );
+
+    store
+        .set_tool_state(&session, tool.id, "call-1", ToolResultState::Dispatched)
+        .await
+        .expect("标记已下发");
+    assert_eq!(
+        states_of(&store, &session, tool.id).await,
+        vec![ToolResultState::Dispatched],
+        "下发后为已下发未观测"
+    );
+
+    store
+        .set_tool_state(&session, tool.id, "call-1", ToolResultState::Unknown)
+        .await
+        .expect("写入结果未知");
+
+    let facts = facts_after(&store, before).await;
+    assert_eq!(facts.len(), 4, "入树一次（含移动 active leaf），改状态两次");
+    assert!(
+        matches!(&facts[0], FactEvent::MessageAppended { message, .. } if message.id == tool.id),
+        "第一条是工具节点入树"
+    );
+    assert!(
+        matches!(&facts[1], FactEvent::ActiveLeafChanged { active_leaf: Some(id), .. } if *id == tool.id)
+    );
+    assert!(
+        matches!(&facts[2], FactEvent::MessageUpdated { message, .. } if message.id == tool.id),
+        "第三条是已下发未观测"
+    );
+    assert!(
+        matches!(&facts[3], FactEvent::MessageUpdated { message, .. } if message.id == tool.id),
+        "第四条是结局"
+    );
+}
+
+/// 从存储读回一个工具节点的全部工具结果状态。
+async fn states_of(
+    store: &Store,
+    session: &durable::SessionId,
+    message: MessageId,
+) -> Vec<ToolResultState> {
+    store
+        .transcript(session)
+        .await
+        .expect("读取 transcript")
+        .into_iter()
+        .find(|node| node.id == message)
+        .expect("工具节点在链上")
+        .tool_results()
+        .map(|(_, state)| state.clone())
+        .collect()
 }
 
 /// run 生命周期的全部事实按固定顺序提交。

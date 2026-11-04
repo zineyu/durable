@@ -94,7 +94,7 @@ fn tool_result_content(state: &ToolResultState) -> String {
             outcome: ToolOutcome::Failed { code, message },
             ..
         } => serde_json::json!({ "error": code, "message": message }).to_string(),
-        ToolResultState::Running => {
+        ToolResultState::Declared | ToolResultState::Dispatched => {
             serde_json::json!({ "error": "running", "message": "工具仍在执行" }).to_string()
         }
         ToolResultState::Unknown => {
@@ -244,5 +244,14 @@ mod tests {
         assert_eq!(messages.len(), 5, "工具结果两侧的 assistant 消息不合并");
         assert_eq!(messages[3].role, ChatRole::Tool);
         assert_eq!(messages[4].content, "读到了。");
+    }
+
+    #[test]
+    fn both_unobserved_states_read_as_running_for_the_model() {
+        assert_eq!(
+            tool_result_content(&ToolResultState::Declared),
+            tool_result_content(&ToolResultState::Dispatched),
+            "形态扩张不改模型输入"
+        );
     }
 }

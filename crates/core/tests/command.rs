@@ -188,7 +188,7 @@ async fn message_commands_fill_the_envelope() {
 
     after = max_event_id(&store).await;
     store
-        .finish_tool(
+        .set_tool_state(
             &session,
             tool.id,
             "call-1",

@@ -74,7 +74,7 @@ fn requests_started(transcript: &[MessageNode], run: RunId) -> usize {
 ///
 /// 末条是用户或压缩消息时发请求；末条是已中断的 assistant 消息时发请求，让模型接着
 /// 自己写过的部分继续；末条是 assistant 且没有工具调用时收尾；否则按最近一条 assistant
-/// 消息的调用列表找出尚未完成的工具：缺节点的补入树，执行中的节点重跑。
+/// 消息的调用列表找出尚未观测到结局的工具：缺节点的补入树，已有节点的在它上面重跑。
 /// 工具批次中途崩溃因此不会丢掉剩余调用。
 fn action_of(transcript: &[MessageNode]) -> NextAction {
     let Some(last) = transcript.last() else {
@@ -100,10 +100,10 @@ fn action_of(transcript: &[MessageNode]) -> NextAction {
         .tool_calls()
         .filter_map(|(call_id, name, arguments)| {
             let node = match results.get(call_id) {
-                Some(&(_, ToolResultState::Finished { .. } | ToolResultState::Unknown)) => {
-                    return None;
-                }
-                Some(&(message, ToolResultState::Running)) => Some(message),
+                // 有结局，包括「结果未知」：不再重跑。
+                Some(&(_, state)) if !state.is_unobserved() => return None,
+                // 两个未观测态都在已有节点上重跑，不重复入树。
+                Some(&(message, _)) => Some(message),
                 None => None,
             };
             Some(PendingCall {
@@ -290,14 +290,30 @@ mod tests {
     }
 
     #[test]
-    fn running_tool_is_rerun_on_its_own_node() {
+    fn declared_tool_is_rerun_on_its_own_node() {
         let transcript = [
             user(1),
             assistant_of_current_run(2, 1, &["call_a"]),
-            tool(3, 2, "call_a", ToolResultState::Running),
+            tool(3, 2, "call_a", ToolResultState::Declared),
         ];
         let super::NextAction::Tools(pending) = plan(&transcript, usize::MAX).action else {
-            panic!("应重跑执行中的工具");
+            panic!("应重跑已登记未下发的工具");
+        };
+        assert_eq!(
+            pending[0].node,
+            Some(MessageId::parse(3).expect("合法消息 id"))
+        );
+    }
+
+    #[test]
+    fn dispatched_tool_is_rerun_on_its_own_node() {
+        let transcript = [
+            user(1),
+            assistant_of_current_run(2, 1, &["call_a"]),
+            tool(3, 2, "call_a", ToolResultState::Dispatched),
+        ];
+        let super::NextAction::Tools(pending) = plan(&transcript, usize::MAX).action else {
+            panic!("应重跑已下发未观测的工具");
         };
         assert_eq!(
             pending[0].node,
@@ -528,7 +544,7 @@ mod tests {
                         MessageRole::Tool,
                         vec![ContentPart::tool_result(
                             &call.call.id,
-                            ToolResultState::Running,
+                            ToolResultState::Dispatched,
                         )],
                     );
                     node.run_id = Some(current_run());

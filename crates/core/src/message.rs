@@ -245,13 +245,14 @@ impl ContentPart {
     }
 
     /// 块在骨架中的状态。
+    ///
+    /// 骨架只有三种状态：两个未观测态都归入 [`PartState::Running`]，呈现层因此不区分
+    /// 「已登记未下发」与「已下发未观测」。存储的 `message_part.state` 取值仍只有这三种，
+    /// 读取未观测工具节点的查询写 `state = 'running'` 即同时覆盖两态。
     #[must_use]
     pub fn state(&self) -> PartState {
         match self {
-            Self::ToolResult {
-                state: ToolResultState::Running,
-                ..
-            } => PartState::Running,
+            Self::ToolResult { state, .. } if state.is_unobserved() => PartState::Running,
             Self::ToolResult {
                 state: ToolResultState::Unknown,
                 ..

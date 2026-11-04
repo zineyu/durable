@@ -2,18 +2,19 @@
 //! 规格 user story A-38 与 ADR 0047：流式进度落库。内核层的对应分支在 `crates/core/tests/progress.rs`。
 
 #![expect(
+    clippy::expect_used,
     clippy::panic,
-    reason = "进程级测试用 panic 直接报告夹具失败；其余断言用 assert 宏。"
+    reason = "进程级测试的夹具辅助函数不在 #[test] 里，用 expect 与 panic 直接报告失败；断言用 assert 宏。"
 )]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod support;
 
 use support::process::{Process, create_session, nodes_of, submit, text_of, wait_for, wait_idle};
 use support::provider::ToolCallSpec;
-use support::{Script, ScriptedProvider};
+use support::{Script, ScriptedProvider, connect};
 
 /// 等待流式进度落库。进度是进程被杀之后唯一留下的部分输出。
 async fn wait_for_progress(
@@ -29,8 +30,29 @@ async fn wait_for_progress(
     .await
 }
 
+/// 直接读库得到的全部工具结局状态，按节点 id 与块序排列。进程已停时用它。
+async fn stored_tool_states(database: &Path) -> Vec<agent::ToolResultState> {
+    let bodies: Vec<String> = sqlx::query_scalar(
+        "SELECT p.body FROM message_part p JOIN message m ON m.id = p.message_id \
+         WHERE m.role = 'tool' ORDER BY m.id ASC, p.seq ASC",
+    )
+    .fetch_all(&mut connect(database).await)
+    .await
+    .expect("查询工具正文");
+    bodies
+        .iter()
+        .map(|body| {
+            let part: agent::ContentPart = serde_json::from_str(body).expect("解析工具正文");
+            let agent::ContentPart::ToolResult { state, .. } = part else {
+                panic!("工具节点的块是工具结果");
+            };
+            state
+        })
+        .collect()
+}
+
 /// 等待工作副本中的标记文件出现，即工具已经开始执行。
-async fn wait_for_marker(marker: &std::path::Path) {
+async fn wait_for_marker(marker: &Path) {
     for _ in 0..250 {
         if marker.exists() {
             return;
@@ -113,6 +135,12 @@ async fn kills_during_a_tool_and_reports_an_unknown_outcome() {
     let marker: PathBuf = workspace.join("started.txt");
     wait_for_marker(&marker).await;
     process.kill().await;
+
+    assert_eq!(
+        stored_tool_states(&database).await,
+        vec![agent::ToolResultState::Dispatched],
+        "工具节点在交给执行端之后、得到结局之前为已下发未观测"
+    );
 
     let process = Process::start(&database, &workspace, &provider).await;
     let tree = wait_idle(&process, &session.id).await;

@@ -119,7 +119,7 @@ fn check_prefix(
     }
     for (call_id, state) in &recovered.after {
         assert!(
-            !matches!(state, ToolResultState::Running),
+            !state.is_unobserved(),
             "{scenario} 的提交点 {prefix}：调用 {call_id} 停在执行中"
         );
     }
@@ -164,14 +164,11 @@ async fn undispatched_calls_are_written_as_unknown_without_a_rerun() {
         let Some(recovered) = restart(path, &world.session).await else {
             continue;
         };
-        let already_running =
-            recovered
-                .before
-                .iter()
-                .flat_map(|(_, states)| states)
-                .any(|(call_id, state)| {
-                    call_id == "call_bash" && matches!(state, ToolResultState::Running)
-                });
+        let already_running = recovered
+            .before
+            .iter()
+            .flat_map(|(_, states)| states)
+            .any(|(call_id, state)| call_id == "call_bash" && state.is_unobserved());
         if !already_running {
             continue;
         }

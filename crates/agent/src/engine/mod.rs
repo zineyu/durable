@@ -367,7 +367,8 @@ impl RunEngine {
             .is_empty())
     }
 
-    /// 启动恢复时处理执行中的工具节点：非幂等工具的结局写为未知，等待续跑时重跑幂等工具。
+    /// 启动恢复时处理结局未观测的工具节点：非幂等工具的结局写为未知，
+    /// 等待续跑时重跑幂等工具。
     async fn resolve_interrupted_tools(&self, session: &SessionId) -> Result<(), StoreError> {
         let transcript = self.store.transcript(session).await?;
         for node in &transcript {
@@ -375,11 +376,14 @@ impl RunEngine {
                 continue;
             }
             for (call_id, state) in node.tool_results() {
-                if !matches!(state, ToolResultState::Running) {
+                if !state.is_unobserved() {
                     continue;
                 }
                 let Some(name) = call_name(&transcript, call_id) else {
-                    tracing::warn!(message = node.id.get(), "执行中的工具节点找不到调用记录");
+                    tracing::warn!(
+                        message = node.id.get(),
+                        "结局未观测的工具节点找不到调用记录"
+                    );
                     continue;
                 };
                 if idempotent(self.tools.as_ref(), name) {
@@ -392,7 +396,7 @@ impl RunEngine {
                     "非幂等工具结局记为未知"
                 );
                 self.store
-                    .finish_tool(session, node.id, call_id, ToolResultState::Unknown)
+                    .set_tool_state(session, node.id, call_id, ToolResultState::Unknown)
                     .await?;
             }
         }

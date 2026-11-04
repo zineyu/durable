@@ -56,8 +56,11 @@ pub enum ToolOutcome {
 
 /// tool 节点里工具结果块的状态。
 ///
-/// 工具在执行前入树，此时为 [`ToolResultState::Running`]；执行完毕写入结局；
-/// 非幂等工具在执行中崩溃后写 [`ToolResultState::Unknown`]，表示丢失了观测。
+/// 两个未观测态在时间上前后相接：节点先以 [`ToolResultState::Declared`] 入树，
+/// 交给执行端之前改写成 [`ToolResultState::Dispatched`]，再把结局或
+/// [`ToolResultState::Unknown`] 写回同一节点（ADR 0037）。
+///
+/// 结果未知表示丢失了观测，既不是成功也不是工具失败。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
     tag = "status",
@@ -65,7 +68,13 @@ pub enum ToolOutcome {
     rename_all_fields = "camelCase"
 )]
 pub enum ToolResultState {
-    Running,
+    /// 已登记入树，尚未交给执行端。
+    Declared,
+    /// 已交给执行端，结局尚未观测到。
+    ///
+    /// 旧库把这一态写作 `running`，读入时按别名接住；写出只产生 `dispatched`。
+    #[serde(alias = "running")]
+    Dispatched,
     /// 执行完毕，带回结局与工具耗时。
     ///
     /// `duration_ms` 是 agent 在调用点用单调时钟测得的端到端耗时，包含 link 往返；
@@ -76,6 +85,14 @@ pub enum ToolResultState {
         duration_ms: u64,
     },
     Unknown,
+}
+
+impl ToolResultState {
+    /// 结局尚未观测到：已登记未下发，或已下发未观测。
+    #[must_use]
+    pub fn is_unobserved(&self) -> bool {
+        matches!(self, Self::Declared | Self::Dispatched)
+    }
 }
 
 /// 暴露给模型的工具定义，对应 `OpenAI` 的 `function` 声明。
@@ -266,6 +283,35 @@ mod tests {
             assert_eq!(found, definition);
         }
         assert!(tool_definition("move_file").is_none());
+    }
+
+    #[test]
+    fn unobserved_states_are_declared_and_dispatched() {
+        assert!(ToolResultState::Declared.is_unobserved());
+        assert!(ToolResultState::Dispatched.is_unobserved());
+        assert!(!ToolResultState::Unknown.is_unobserved());
+        assert!(
+            !ToolResultState::Finished {
+                outcome: ToolOutcome::Succeeded {
+                    content: String::new()
+                },
+                duration_ms: 0,
+            }
+            .is_unobserved()
+        );
+    }
+
+    #[test]
+    fn legacy_running_reads_as_dispatched() {
+        let state: ToolResultState =
+            serde_json::from_str(r#"{"status":"running"}"#).expect("旧库取值可读入");
+        assert_eq!(state, ToolResultState::Dispatched);
+    }
+
+    #[test]
+    fn dispatched_serializes_with_its_own_name() {
+        let state = serde_json::to_value(ToolResultState::Dispatched).expect("可序列化");
+        assert_eq!(state, json!({ "status": "dispatched" }));
     }
 
     #[test]

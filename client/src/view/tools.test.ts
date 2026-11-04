@@ -39,16 +39,17 @@ describe('工具卡片归约', () => {
     expect(model.durationLabel).toBe('4.2s');
   });
 
-  it('结局未到时按执行中渲染，没有结果正文', () => {
-    const pending = toolCardModel(call('call_3', 'read_file', '{"path":"README.md"}'), undefined);
-    const running = toolCardModel(call('call_3', 'read_file', '{"path":"README.md"}'), {
-      status: 'running',
-    });
+  it('两个未观测态都按执行中渲染，没有结果正文', () => {
+    const toolCall = call('call_3', 'read_file', '{"path":"README.md"}');
+    const pending = toolCardModel(toolCall, undefined);
+    const declared = toolCardModel(toolCall, { status: 'declared' });
+    const dispatched = toolCardModel(toolCall, { status: 'dispatched' });
 
     expect(pending.state).toBe('running');
     expect(pending.result).toBeNull();
     expect(pending.durationLabel).toBeNull();
-    expect(running).toEqual(pending);
+    expect(declared).toEqual(pending);
+    expect(dispatched).toEqual(pending);
   });
 
   it('结局丢失观测时给出未知状态与说明', () => {

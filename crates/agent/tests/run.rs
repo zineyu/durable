@@ -197,8 +197,10 @@ async fn executes_tool_calls_in_order_and_continues() {
             "message_appended",
             "active_leaf_changed",
             "message_updated",
+            "message_updated",
             "message_appended",
             "active_leaf_changed",
+            "message_updated",
             "message_updated",
             "message_appended",
             "active_leaf_changed",
@@ -481,7 +483,7 @@ async fn passes_tool_failure_to_model_and_continues() {
     );
 }
 
-/// ADR 0038：tool 节点在执行前入树，结局用 `message_updated` 广播。
+/// ADR 0038 与 ADR 0037：tool 节点在开始执行前入树，下发前写一次已下发，结局用 `message_updated` 广播。
 #[tokio::test]
 async fn broadcasts_tool_node_before_and_after_execution() {
     let harness = Harness::start_with(
@@ -503,8 +505,8 @@ async fn broadcasts_tool_node_before_and_after_execution() {
     harness.submit_message(&session.id, "写入").await;
 
     let mut running = None;
-    let mut finished = None;
-    while finished.is_none() {
+    let mut updates = Vec::new();
+    loop {
         let event = tokio::time::timeout(Duration::from_secs(10), events.next())
             .await
             .expect("等待 SSE 事件")
@@ -521,19 +523,33 @@ async fn broadcasts_tool_node_before_and_after_execution() {
             agent::FactEvent::MessageUpdated { message, .. }
                 if message.role == agent::MessageRole::Tool =>
             {
-                finished = Some(message);
+                let ended = message.parts[0].state == agent::PartState::Complete;
+                updates.push(message);
+                if ended {
+                    break;
+                }
             }
             agent::FactEvent::RunFinished { .. } => panic!("工具节点必须在 run 结束前广播"),
             _ => {}
         }
     }
 
-    let running = running.expect("tool 节点先以执行中状态入树");
+    let running = running.expect("tool 节点先以未观测状态入树");
     assert_eq!(running.parts.len(), 1);
     assert_eq!(running.parts[0].state, agent::PartState::Running);
-    let finished = finished.expect("结局以 message_updated 广播");
+    assert_eq!(
+        updates.len(),
+        2,
+        "先广播一次已下发，再广播一次结局：{updates:?}"
+    );
+    assert_eq!(
+        updates[0].parts[0].state,
+        agent::PartState::Running,
+        "下发前的更新仍是未观测态"
+    );
+    assert_eq!(updates[1].parts[0].state, agent::PartState::Complete);
+    let finished = updates.pop().expect("最后一次更新是结局");
     assert_eq!(finished.id, running.id);
-    assert_eq!(finished.parts[0].state, agent::PartState::Complete);
     assert_eq!(
         tool_outcomes(&harness, &session.id, finished.id).await,
         vec![("call_1".to_owned(), succeeded("写入 6 字节: notes.txt"))]

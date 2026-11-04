@@ -389,7 +389,7 @@ describe('正文缓存', () => {
       ids: [2, 3],
       messages: [
         { id: 2, parts: [{ kind: 'tool_call', callId: 'call_1', name: 'read_file', arguments: '{}', providerMeta: null }] },
-        { id: 3, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'running' }, providerMeta: null }] },
+        { id: 3, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'dispatched' }, providerMeta: null }] },
       ],
     });
 
@@ -453,7 +453,7 @@ describe('正文缓存', () => {
       type: 'bodies',
       ids: [2],
       messages: [
-        { id: 2, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'running' }, providerMeta: null }] },
+        { id: 2, parts: [{ kind: 'tool_result', callId: 'call_1', state: { status: 'dispatched' }, providerMeta: null }] },
       ],
     });
 

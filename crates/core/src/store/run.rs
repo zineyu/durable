@@ -1,4 +1,4 @@
-//! run 的生命周期写入：开始、定型 assistant、工具节点三态、流式进度与结束。
+//! run 的生命周期写入：开始、定型 assistant、工具节点的结局四态、流式进度与结束。
 //! 调度与 run 动作判定在 `crates/agent/src/engine`；队列项在此之前写入 `queue`。
 
 use super::{Store, append_node};
@@ -217,7 +217,9 @@ impl Store {
             .await
     }
 
-    /// 工具节点入树：状态为执行中，父节点为当前 active leaf。
+    /// 工具节点入树：状态为 [`ToolResultState::Declared`]（已登记未下发），父节点为当前 active leaf。
+    ///
+    /// 下发前由调用方改写成 [`ToolResultState::Dispatched`]。
     ///
     /// # Errors
     ///
@@ -234,7 +236,7 @@ impl Store {
             run_id,
             id,
             MessageRole::Tool,
-            vec![ContentPart::tool_result(call_id, ToolResultState::Running)],
+            vec![ContentPart::tool_result(call_id, ToolResultState::Declared)],
         )
         .await
     }
@@ -268,7 +270,10 @@ impl Store {
         .await
     }
 
-    /// 写入工具结局：替换 tool 节点的全部块。
+    /// 写入工具节点的工具结果状态：替换该节点的全部块。
+    ///
+    /// 三个阶段共用这一条命令：下发前写 [`ToolResultState::Dispatched`]，执行完写结局，
+    /// 丢失观测时写 [`ToolResultState::Unknown`]。
     ///
     /// # Errors
     ///
@@ -279,7 +284,7 @@ impl Store {
     /// - `StoreError::Serialization`：事实事件序列化失败。
     ///
     /// 副作用：替换块、写入 `message_updated` 事实事件。
-    pub async fn finish_tool(
+    pub async fn set_tool_state(
         &self,
         session: &SessionId,
         id: MessageId,

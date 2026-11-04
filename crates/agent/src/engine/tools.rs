@@ -1,5 +1,5 @@
-//! 工具循环：先让 tool 节点入树，再执行，再写入结局。批次中途取消时，
-//! 剩余调用以「结果未知」入树，保持 assistant 的调用与 tool 节点配对。
+//! 工具循环：先让 tool 节点入树（已登记未下发），下发前写一次已下发，再执行，再写入结局。
+//! 批次中途取消时，剩余调用以「结果未知」入树，保持 assistant 的调用与 tool 节点配对。
 //! 工具经 link 交给 executor；契约在 `crate::link`，下一步判定在 `plan`。
 //!
 //! 宿主丢失只有一处翻译：在途调用与剩余调用写「结果未知」，run 以 `host_unreachable` 结束。
@@ -48,6 +48,10 @@ impl RunEngine {
                 .await
                 .map_err(|error| storage_failure(&error))?;
             let call = pending.call;
+            // 可恢复状态先落库，再执行（ADR 0037）。
+            self.finish_call(session, message_id, &call.id, ToolResultState::Dispatched)
+                .await
+                .map_err(|error| storage_failure(&error))?;
             tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
             let started = Instant::now();
             let state = match self.tools.execute(&call, &context).await {
@@ -97,7 +101,7 @@ impl RunEngine {
         state: ToolResultState,
     ) -> Result<(), StoreError> {
         self.store
-            .finish_tool(session, message_id, call_id, state)
+            .set_tool_state(session, message_id, call_id, state)
             .await
             .map(|_| ())
     }
@@ -158,7 +162,7 @@ fn log_outcome(session: &SessionId, name: &str, state: &ToolResultState) {
         } => {
             tracing::debug!(session = %session.as_str(), tool = name, "工具成功");
         }
-        ToolResultState::Running | ToolResultState::Unknown => {
+        ToolResultState::Declared | ToolResultState::Dispatched | ToolResultState::Unknown => {
             tracing::warn!(session = %session.as_str(), tool = name, "工具结局未知");
         }
     }

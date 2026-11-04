@@ -470,10 +470,13 @@ export type ToolOutcome = { "status": "succeeded", content: string, } | { "statu
 /**
  * tool 节点里工具结果块的状态。
  *
- * 工具在执行前入树，此时为 [`ToolResultState::Running`]；执行完毕写入结局；
- * 非幂等工具在执行中崩溃后写 [`ToolResultState::Unknown`]，表示丢失了观测。
+ * 两个未观测态在时间上前后相接：节点先以 [`ToolResultState::Declared`] 入树，
+ * 交给执行端之前改写成 [`ToolResultState::Dispatched`]，再把结局或
+ * [`ToolResultState::Unknown`] 写回同一节点（ADR 0037）。
+ *
+ * 结果未知表示丢失了观测，既不是成功也不是工具失败。
  */
-export type ToolResultState = { "status": "running" } | { "status": "finished", outcome: ToolOutcome, durationMs: number, } | { "status": "unknown" };
+export type ToolResultState = { "status": "declared" } | { "status": "dispatched" } | { "status": "finished", outcome: ToolOutcome, durationMs: number, } | { "status": "unknown" };
 ```
 
 ## UpdateHostRequest
