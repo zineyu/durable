@@ -485,19 +485,10 @@ async fn concurrent_declarations_keep_every_node_once() {
     );
 }
 
-/// 类别清单由一条测试钉住：变体集合与 `ALL` 一致，名字是稳定字面量。
+/// 标签是日志、告警与界面据以开口的字面量，因此改标签必须是一次有意的改动。
+/// 清单本身由 `effects::effect_table!` 从同一份声明生成，不再需要手写副本。
 #[test]
-fn the_class_list_matches_the_hand_written_set() {
-    let hand_written = [
-        EffectClass::ModelStep,
-        EffectClass::Compaction,
-        EffectClass::ReadFile,
-        EffectClass::WriteFile,
-        EffectClass::EditFile,
-        EffectClass::Bash,
-    ];
-    assert_eq!(EffectClass::ALL, hand_written, "新增一类必须同时改这张清单");
-
+fn the_class_labels_are_stable_literals() {
     let names = EffectClass::ALL
         .iter()
         .map(|class| class.name())

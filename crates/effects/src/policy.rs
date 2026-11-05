@@ -8,7 +8,9 @@ use core::fmt::Debug;
 pub trait Effect: Copy + Eq + Debug + 'static {
     /// 唯一的类别清单。覆盖率与矩阵都遍历它。
     ///
-    /// 这里是全套里唯一靠测试而不是编译器守住的清单：少写一行编译器不会出声。
+    /// 清单与变体集合的一致性由 [`effect_table!`](crate::effect_table) 保证：一份声明同时
+    /// 生成枚举与清单，因此不存在「清单落后于变体」这个形状（ADR 0062）。手写实现要自己担
+    /// 这个风险。
     const ALL: &'static [Self];
 
     /// 稳定字面量，不用 `Debug` 的格式串。日志、告警与测试失败信息都据它说话。

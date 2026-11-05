@@ -61,11 +61,11 @@ impl RunEngine {
             tracing::debug!(session = %session.as_str(), tool = %call.name, "执行工具");
             let started = Instant::now();
             let outcome = perform(self.store.as_ref(), dispatched, |token| {
-                // 借用与许可证分开取：工作体拿走许可证，调用与上下文仍归循环所有。
+                // 工作体拿走许可证：一张许可证只能换一次执行（ADR 0062）。
                 let call = &call;
                 let context = &context;
                 async move {
-                    match self.tools.execute(call, context, &token).await {
+                    match self.tools.execute(call, context, token).await {
                         ToolEnd::Ended(outcome) => {
                             log_outcome(session, &call.name, &outcome);
                             Outcome::Seen(EffectObservation::Tool(ToolResultState::Finished {

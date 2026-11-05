@@ -14,42 +14,30 @@ use crate::message::ContentPart;
 use crate::store::Store;
 use crate::tool::ToolResultState;
 
-/// 领域内核的一类对外动作。清单的唯一定义是 [`EffectClass::ALL`]，由一条测试钉住。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectClass {
-    /// 一次模型步骤请求。
-    ModelStep,
-    /// 一次压缩请求。
-    Compaction,
-    /// 一次 `read_file` 调用。
-    ReadFile,
-    /// 一次 `write_file` 调用。
-    WriteFile,
-    /// 一次 `edit_file` 调用。
-    EditFile,
-    /// 一次 `bash` 调用。
-    Bash,
+effects::effect_table! {
+    /// 领域内核的一类对外动作。清单的唯一定义就是这张表：枚举、全量清单与稳定标签
+    /// 都由宏生成，因此不存在「清单落后于变体」这个形状（ADR 0062）。
+    pub enum EffectClass {
+        /// 一次模型步骤请求。
+        ModelStep => "model_step",
+        /// 一次压缩请求。
+        Compaction => "compaction",
+        /// 一次 `read_file` 调用。
+        ReadFile => "read_file",
+        /// 一次 `write_file` 调用。
+        WriteFile => "write_file",
+        /// 一次 `edit_file` 调用。
+        EditFile => "edit_file",
+        /// 一次 `bash` 调用。
+        Bash => "bash",
+    }
 }
 
 impl Effect for EffectClass {
-    const ALL: &'static [Self] = &[
-        Self::ModelStep,
-        Self::Compaction,
-        Self::ReadFile,
-        Self::WriteFile,
-        Self::EditFile,
-        Self::Bash,
-    ];
+    const ALL: &'static [Self] = Self::ALL_CLASSES;
 
     fn name(self) -> &'static str {
-        match self {
-            Self::ModelStep => "model_step",
-            Self::Compaction => "compaction",
-            Self::ReadFile => "read_file",
-            Self::WriteFile => "write_file",
-            Self::EditFile => "edit_file",
-            Self::Bash => "bash",
-        }
+        self.label()
     }
 
     /// 模型步骤与压缩重发没有副作用；四个工具按幂等标记分流，因为幂等是工具定义上的
@@ -70,10 +58,10 @@ impl EffectClass {
     /// 四个工具类。它们的证据落在 tool 节点上，模型与压缩落在消息入树上。
     #[must_use]
     pub fn is_tool(self) -> bool {
-        matches!(
-            self,
-            Self::ReadFile | Self::WriteFile | Self::EditFile | Self::Bash
-        )
+        match self {
+            Self::ReadFile | Self::WriteFile | Self::EditFile | Self::Bash => true,
+            Self::ModelStep | Self::Compaction => false,
+        }
     }
 
     /// 按工具名取类别。未登记的工具返回 `None`。

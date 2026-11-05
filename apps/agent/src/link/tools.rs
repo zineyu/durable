@@ -43,11 +43,13 @@ pub trait ToolBox: Send + Sync {
     fn definitions(&self) -> Vec<ToolDefinition>;
 
     /// 执行一次调用。许可证是「已下发」这一行的凭据：它的证据先落库，帧才发得出去。
+    ///
+    /// 许可证按值收：它不实现 `Clone`，因此一张许可证只能换一次执行（ADR 0062）。
     async fn execute(
         &self,
         call: &ToolCall,
         context: &ToolContext,
-        dispatched: &Dispatched<EffectIntent>,
+        dispatched: Dispatched<EffectIntent>,
     ) -> ToolEnd;
 }
 
@@ -75,7 +77,7 @@ impl ToolBox for RemoteTools {
         &self,
         call: &ToolCall,
         context: &ToolContext,
-        _dispatched: &Dispatched<EffectIntent>,
+        _dispatched: Dispatched<EffectIntent>,
     ) -> ToolEnd {
         let Some(link) = self.hosts.link(&context.host).await else {
             return ToolEnd::HostGone(LinkClosed::unavailable(

@@ -45,7 +45,7 @@ impl ToolBox for RecordingTools {
         &self,
         call: &ToolCall,
         _context: &ToolContext,
-        _dispatched: &Dispatched<EffectIntent>,
+        _dispatched: Dispatched<EffectIntent>,
     ) -> ToolEnd {
         self.calls.lock().await.push(call.id.clone());
         ToolEnd::Ended(ToolOutcome::Succeeded {

@@ -1,147 +1,109 @@
 //! 崩溃前缀矩阵：把「任意位置崩溃」降成「每个提交点重启一次」。
 //!
-//! 事务是原子的，所以一次崩溃只可能落在两次提交之间；`Store::open_recording` 在每个
-//! 提交点留下一份副本，因此遍历副本就等于遍历全部崩溃点。每个副本上断言同一组性质：
-//! 恢复收敛、不变量自洽、历史只增不减、没有执行中的工具、非幂等副作用至多一次。
-//! 决策与局限见 ADR 0056。
+//! 事务是原子的，因此一次崩溃只可能落在两次提交之间；`Store::open_recording` 在每个提交点
+//! 留下一份副本，遍历副本就等于遍历全部崩溃点。遍历、逐点完备与点数对账在
+//! `effects::matrix`，断言在 `support::checks`，场景在本文件。决策与局限见 ADR 0056、ADR 0062。
 
 mod support;
 
-use durable::{RunStatus, ToolResultState};
-use support::matrix::{Call, Step, restart, run_scenario, tree_has};
+use agent::EngineConfig;
+use durable::EffectClass;
+use effects::coverage::Coverage;
+use effects::matrix::{Report, coverage_findings};
+use support::matrix::{Call, Scenario, Step, run_scenario, walk};
 
-/// 一个场景：脚本、它声明的调用（带幂等标记）与副本数量下限。
-struct Scenario {
-    name: &'static str,
-    steps: Vec<Step>,
-    calls: Vec<(&'static str, bool)>,
-}
-
+/// 四个场景：纯文本、一个工具批次、多步与幂等工具，以及上下文超限后的压缩。
 fn scenarios() -> Vec<Scenario> {
     vec![
-        Scenario {
-            name: "纯文本回答",
-            steps: vec![Step::Text("一句话回答".to_owned())],
-            calls: Vec::new(),
-        },
-        Scenario {
-            name: "一个工具批次",
-            steps: vec![
-                Step::Calls(vec![Call::new("call_bash", "bash")]),
-                Step::Text("工具之后的回答".to_owned()),
-            ],
-            calls: vec![("call_bash", false)],
-        },
-        Scenario {
-            name: "多步与幂等工具",
-            steps: vec![
+        Scenario::new(
+            "纯文本回答",
+            vec![Step::Text("一句话回答".to_owned())],
+            Vec::new(),
+        ),
+        tool_scenario(),
+        Scenario::new(
+            "多步与幂等工具",
+            vec![
                 Step::Calls(vec![
                     Call::new("call_read", "read_file"),
+                    Call::new("call_write", "write_file"),
+                    Call::new("call_edit", "edit_file"),
                     Call::new("call_bash", "bash"),
                 ]),
                 Step::Calls(vec![Call::new("call_read_again", "read_file")]),
                 Step::Text("收尾".to_owned()),
             ],
-            calls: vec![
+            vec![
                 ("call_read", true),
+                ("call_write", true),
+                ("call_edit", false),
                 ("call_bash", false),
                 ("call_read_again", true),
             ],
-        },
+        ),
+        compaction_scenario(),
     ]
 }
 
-/// 规格 user story A-24：重启前的 running run 从树尾续跑。ADR 0056：每个提交点都成立。
-#[tokio::test]
-async fn every_commit_prefix_recovers() {
-    for scenario in scenarios() {
-        let directory = tempfile::tempdir().expect("创建临时目录");
-        let world = run_scenario(directory.path(), scenario.steps.clone()).await;
-        assert!(
-            world.prefixes.len() >= 3,
-            "{}：提交点太少，矩阵没有意义",
-            scenario.name
-        );
-        let mut mid_run = 0;
-        for (prefix, path) in &world.prefixes {
-            let Some(recovered) = restart(path, &world.session).await else {
-                continue;
-            };
-            if recovered.was_busy {
-                mid_run += 1;
-            }
-            check_prefix(scenario.name, *prefix, &world, &recovered, &scenario.calls);
-        }
-        assert!(
-            mid_run >= 1,
-            "{}：没有任何提交点落在 run 中间，矩阵没覆盖到续跑",
-            scenario.name
-        );
+/// 上下文超限后压缩并重试本步：两条消息让第二步的装配超过字符上限。
+///
+/// 压缩机会只取一次，因此重试一定成功；摘要由同一份脚本 provider 给出。
+fn compaction_scenario() -> Scenario {
+    Scenario {
+        messages: vec!["第一问", "第二问"],
+        config: EngineConfig {
+            context_char_limit: 300,
+            ..EngineConfig::default()
+        },
+        ..Scenario::new(
+            "上下文超限后压缩",
+            vec![
+                Step::Text("答".repeat(200)),
+                Step::Text("摘要：第一问与回答。".to_owned()),
+                Step::Text("第二答".to_owned()),
+            ],
+            Vec::new(),
+        )
     }
 }
 
-fn check_prefix(
-    scenario: &str,
-    prefix: u64,
-    world: &support::matrix::World,
-    recovered: &support::matrix::Restart,
-    calls: &[(&str, bool)],
-) {
-    assert!(
-        !recovered.tree.session.busy && recovered.tree.queue.is_empty(),
-        "{scenario} 的提交点 {prefix}：恢复后没有收敛"
-    );
-    assert!(
-        recovered.invariants.is_empty(),
-        "{scenario} 的提交点 {prefix}：不变量有 {} 条违例: {:?}",
-        recovered.invariants.len(),
-        recovered.invariants
-    );
-    for node in &recovered.tree.nodes {
-        assert_ne!(
-            node.run_id.map(|_| ()),
-            None,
-            "{scenario} 的提交点 {prefix}：节点既不挂在 run 上也不是压缩消息"
-        );
+/// 一个工具批次：唯一一个真的会停在「已登记、未下发」的场景。
+fn tool_scenario() -> Scenario {
+    Scenario {
+        expect_declared: true,
+        ..Scenario::new(
+            "一个工具批次",
+            vec![
+                Step::Calls(vec![Call::new("call_bash", "bash")]),
+                Step::Text("工具之后的回答".to_owned()),
+            ],
+            vec![("call_bash", false)],
+        )
     }
-    for run in &recovered.tree.runs {
-        assert_ne!(
-            run.status,
-            RunStatus::Running,
-            "{scenario} 的提交点 {prefix}：恢复后仍有一条 running 的 run"
-        );
-    }
-    for (id, _) in &recovered.before {
-        assert!(
-            tree_has(&recovered.tree, *id),
-            "{scenario} 的提交点 {prefix}：崩溃前的消息 {id:?} 从链上消失了"
-        );
-    }
-    for (call_id, state) in &recovered.after {
-        assert!(
-            !state.is_unobserved(),
-            "{scenario} 的提交点 {prefix}：调用 {call_id} 停在执行中"
-        );
-    }
-    for (call_id, idempotent) in calls {
-        let before = world.effects_before(call_id, prefix);
-        let reruns = recovered.reruns_of(call_id);
-        let limit = if *idempotent { 2 } else { 1 };
-        assert!(
-            before + reruns <= limit,
-            "{scenario} 的提交点 {prefix}：{call_id} 被执行了 {} 次（崩溃前 {before}、重启后 {reruns}），上限 {limit}",
-            before + reruns
-        );
-        if reruns > 0 {
-            assert!(
-                matches!(
-                    recovered.state_of(call_id),
-                    Some(ToolResultState::Finished { .. })
-                ),
-                "{scenario} 的提交点 {prefix}：{call_id} 被重跑却没有留下结局"
-            );
+}
+
+/// 规格 user story A-24：重启前的 running run 从树尾续跑。ADR 0056：每个提交点都成立。
+///
+/// 覆盖率在全部场景跑完之后自证：声明矩阵覆盖的类别必须真的出现过（ADR 0062）。
+#[tokio::test]
+async fn every_commit_prefix_recovers() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let mut report = Report::default();
+    let coverage = Coverage::<EffectClass>::new();
+    for (index, scenario) in scenarios().into_iter().enumerate() {
+        let world = run_scenario(
+            &directory.path().join(format!("scenario-{index}")),
+            &scenario,
+        )
+        .await;
+        for class in &world.declared {
+            coverage.record(*class);
         }
+        report.merge(walk(&scenario, &world).await);
     }
+    report.extend(coverage_findings(&coverage));
+
+    assert!(report.is_clean(), "{report}");
 }
 
 /// 工具节点已入树、帧尚未下发时，那个调用一定没有执行：恢复把它重跑一次，
@@ -149,42 +111,9 @@ fn check_prefix(
 #[tokio::test]
 async fn undispatched_calls_are_rerun_instead_of_being_written_as_unknown() {
     let directory = tempfile::tempdir().expect("创建临时目录");
-    let world = run_scenario(
-        directory.path(),
-        vec![
-            Step::Calls(vec![Call::new("call_bash", "bash")]),
-            Step::Text("工具之后的回答".to_owned()),
-        ],
-    )
-    .await;
+    let scenario = tool_scenario();
+    let world = run_scenario(directory.path(), &scenario).await;
+    let report = walk(&scenario, &world).await;
 
-    let mut undispatched = 0;
-    for (prefix, path) in &world.prefixes {
-        let Some(recovered) = restart(path, &world.session).await else {
-            continue;
-        };
-        let declared = recovered
-            .before
-            .iter()
-            .flat_map(|(_, states)| states)
-            .any(|(call_id, state)| call_id == "call_bash" && state == &ToolResultState::Declared);
-        if !declared {
-            continue;
-        }
-        undispatched += 1;
-        assert_eq!(
-            recovered.reruns_of("call_bash"),
-            1,
-            "提交点 {prefix}：未下发的调用应当重跑一次"
-        );
-        let state = recovered.state_of("call_bash");
-        assert!(
-            matches!(state, Some(ToolResultState::Finished { .. })),
-            "提交点 {prefix}：重跑之后应当有结局，实际是 {state:?}"
-        );
-    }
-    assert!(
-        undispatched >= 1,
-        "没有任何提交点停在「工具节点已入树、尚未下发」，用例没覆盖到这条分支"
-    );
+    assert!(report.is_clean(), "未下发的调用应当重跑一次：{report}");
 }

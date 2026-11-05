@@ -20,7 +20,6 @@ use std::time::Duration;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{Row, SqlitePool};
 
-use crate::change::Changeset;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::host::{HostMetadata, HostName};
@@ -29,6 +28,7 @@ use crate::queue::QueueItem;
 use crate::run::RunRecord;
 use crate::session::{SessionMetadata, SessionRecord};
 use crate::storage::{SessionHead, Snapshot};
+use crate::store::change::Changeset;
 use crate::workspace::WorkspaceMetadata;
 
 pub(crate) struct SqliteStorage {

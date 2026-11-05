@@ -37,7 +37,7 @@ impl ToolBox for GoneTools {
         &self,
         _call: &ToolCall,
         _context: &ToolContext,
-        _dispatched: &Dispatched<EffectIntent>,
+        _dispatched: Dispatched<EffectIntent>,
     ) -> ToolEnd {
         ToolEnd::HostGone(LinkClosed::unavailable("测试：host 已离线".to_owned()))
     }

@@ -3,6 +3,7 @@
 //! 写命令入口在 `command`；按对象的写命令在同级各子模块；存储后端在 `crate::storage`。
 
 mod branch;
+pub(crate) mod change;
 mod command;
 mod compaction;
 mod host;
@@ -19,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::Mutex;
 
-use crate::change::Changeset;
+use self::change::Changeset;
 use crate::effect::EffectClass;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
@@ -44,7 +45,7 @@ pub struct RunStart {
 /// 领域内核：唯一写入线 + 持久化边界。
 ///
 /// 所有写入经 [`Store::command`]、[`Store::command_idle`] 与 [`Store::command_root`]
-/// 串行化，读-改-写之间不会被其它写入插入。每次写入以一个 [`Changeset`] 在一次存储
+/// 串行化，读-改-写之间不会被其它写入插入。每次写入以一份变更清单（`Changeset`）在一次存储
 /// 事务内生效；事务成功前不发布任何事实事件。
 pub struct Store {
     storage: SqliteStorage,

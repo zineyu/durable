@@ -2,7 +2,6 @@
 //! 进程启动、HTTP 协议与客户端在 `apps/agent` 与 `apps/client`，工具执行在 `apps/executor`。
 
 mod cancel;
-mod change;
 mod effect;
 mod error;
 mod event;
@@ -21,7 +20,6 @@ mod tree;
 mod workspace;
 
 pub use cancel::Cancellation;
-pub use change::Changeset;
 pub use effect::{EffectClass, EffectIntent, EffectObservation};
 pub use error::{StoreError, StoreErrorClass};
 pub use event::{CommittedEvent, FactEvent};

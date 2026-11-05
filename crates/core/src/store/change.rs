@@ -13,99 +13,118 @@ use crate::session::{SessionRecord, SessionView};
 use crate::workspace::WorkspaceMetadata;
 
 /// 一次原子提交的全部变更。字段私有，只能经下面的方法逐个登记，保证顺序与意图明确。
-#[derive(Debug, Default)]
-pub struct Changeset {
+///
+/// 类型在 crate 内可见（存储层要读它），但**构造与登记只在 `crate::store` 内可见**：
+/// 其余模块拿不出 `&Changeset`，也就调不动写事务。这是单一写入线的编译期一半，
+/// 门禁脚本是另一半（ADR 0056、ADR 0062）。
+#[derive(Debug)]
+pub(crate) struct Changeset {
     operations: Vec<Change>,
 }
 
 impl Changeset {
+    /// 空清单。只有写命令能开一份。
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub(in crate::store) fn new() -> Self {
+        Self {
+            operations: Vec::new(),
+        }
     }
 
-    pub fn insert_host(&mut self, host: HostMetadata) {
+    pub(in crate::store) fn insert_host(&mut self, host: HostMetadata) {
         self.push(Change::InsertHost(host));
     }
 
     /// 写入 host 的可变字段：名称、目标、启用标志与更新时间。
-    pub fn update_host(&mut self, host: HostMetadata) {
+    pub(in crate::store) fn update_host(&mut self, host: HostMetadata) {
         self.push(Change::UpdateHost(host));
     }
 
     /// 改名只更改主键；`ON UPDATE CASCADE` 让 workspace 与 session 跟着更换。
-    pub fn rename_host(&mut self, from: HostName, to: HostName) {
+    pub(in crate::store) fn rename_host(&mut self, from: HostName, to: HostName) {
         self.push(Change::RenameHost { from, to });
     }
 
-    pub fn delete_host(&mut self, name: HostName) {
+    pub(in crate::store) fn delete_host(&mut self, name: HostName) {
         self.push(Change::DeleteHost(name));
     }
 
     /// 记下或清空 host 上已安装的 executor 构建 id。它不是领域事实，不写事件。
-    pub fn set_host_installed_build(&mut self, name: HostName, build: Option<String>) {
+    pub(in crate::store) fn set_host_installed_build(
+        &mut self,
+        name: HostName,
+        build: Option<String>,
+    ) {
         self.push(Change::SetHostInstalledBuild { name, build });
     }
 
-    pub fn insert_workspace(&mut self, workspace: WorkspaceMetadata) {
+    pub(in crate::store) fn insert_workspace(&mut self, workspace: WorkspaceMetadata) {
         self.push(Change::InsertWorkspace(workspace));
     }
 
     /// 移除 workspace。identity 是 host 与路径这一对。
-    pub fn delete_workspace(&mut self, host: HostName, path: WorkspacePath) {
+    pub(in crate::store) fn delete_workspace(&mut self, host: HostName, path: WorkspacePath) {
         self.push(Change::DeleteWorkspace { host, path });
     }
 
-    pub fn insert_session(&mut self, session: SessionRecord) {
+    pub(in crate::store) fn insert_session(&mut self, session: SessionRecord) {
         self.push(Change::InsertSession(session));
     }
 
     /// 写入 session 的全部可变字段：标题、标题是否自动、更新时间与 active leaf。
-    pub fn update_session(&mut self, session: SessionRecord) {
+    pub(in crate::store) fn update_session(&mut self, session: SessionRecord) {
         self.push(Change::UpdateSession(session));
     }
 
-    pub fn delete_session(&mut self, id: SessionId) {
+    pub(in crate::store) fn delete_session(&mut self, id: SessionId) {
         self.push(Change::DeleteSession(id));
     }
 
-    pub fn insert_message(&mut self, message: Message) {
+    pub(in crate::store) fn insert_message(&mut self, message: Message) {
         self.push(Change::InsertMessage(message));
     }
 
-    pub fn insert_queue_item(&mut self, session: SessionId, item: QueueItem) {
+    pub(in crate::store) fn insert_queue_item(&mut self, session: SessionId, item: QueueItem) {
         self.push(Change::InsertQueueItem { session, item });
     }
 
-    pub fn delete_queue_item(&mut self, session: SessionId, item: QueueItemId) {
+    pub(in crate::store) fn delete_queue_item(&mut self, session: SessionId, item: QueueItemId) {
         self.push(Change::DeleteQueueItem { session, item });
     }
 
     /// 整体替换一条已存在消息的块。用于工具节点从执行中改为结局。
-    pub fn replace_message_parts(&mut self, id: MessageId, parts: Vec<ContentPart>) {
+    pub(in crate::store) fn replace_message_parts(
+        &mut self,
+        id: MessageId,
+        parts: Vec<ContentPart>,
+    ) {
         self.push(Change::ReplaceMessageParts { id, parts });
     }
 
     /// 把已存在的用户节点绑定到 run。用于编辑产生的节点在 run 开始时补上 run 关联。
-    pub fn bind_message_run(&mut self, id: MessageId, run_id: RunId) {
+    pub(in crate::store) fn bind_message_run(&mut self, id: MessageId, run_id: RunId) {
         self.push(Change::BindMessageRun { id, run_id });
     }
 
     /// 改写消息的父节点。用于插话接入链尾时从提交时的叶子挪到当前叶子。
-    pub fn rebind_message_parent(&mut self, id: MessageId, parent_id: Option<MessageId>) {
+    pub(in crate::store) fn rebind_message_parent(
+        &mut self,
+        id: MessageId,
+        parent_id: Option<MessageId>,
+    ) {
         self.push(Change::RebindMessageParent { id, parent_id });
     }
 
     /// 把待插入项降级为普通排队项。
-    pub fn clear_pending_steer(&mut self, session: SessionId, item: QueueItemId) {
+    pub(in crate::store) fn clear_pending_steer(&mut self, session: SessionId, item: QueueItemId) {
         self.push(Change::ClearPendingSteer { session, item });
     }
 
-    pub fn insert_run(&mut self, run: RunRecord) {
+    pub(in crate::store) fn insert_run(&mut self, run: RunRecord) {
         self.push(Change::InsertRun(run));
     }
 
-    pub fn update_run(
+    pub(in crate::store) fn update_run(
         &mut self,
         id: RunId,
         status: RunStatus,
@@ -123,14 +142,14 @@ impl Changeset {
     }
 
     /// 改写 run 的流式进度。不推进 run 的更新时间，也不影响 session 视图。
-    pub fn update_run_progress(&mut self, id: RunId, progress: Option<&str>) {
+    pub(in crate::store) fn update_run_progress(&mut self, id: RunId, progress: Option<&str>) {
         self.push(Change::UpdateRunProgress {
             id,
             progress: progress.map(ToOwned::to_owned),
         });
     }
 
-    pub fn append_event(&mut self, event: FactEvent, created_at: i64) {
+    pub(in crate::store) fn append_event(&mut self, event: FactEvent, created_at: i64) {
         self.push(Change::AppendEvent { event, created_at });
     }
 

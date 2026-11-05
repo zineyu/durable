@@ -3,7 +3,7 @@
 //! 各对象的写命令在 `session`、`queue`、`run`、`branch`、`compaction`、`workspace`、`host`；
 //! 读方法留在同一门面，不加锁。
 
-use crate::change::{Change, Changeset};
+use super::change::{Change, Changeset};
 use crate::error::StoreError;
 use crate::id::SessionId;
 use crate::session::{SessionMetadata, SessionRecord, SessionView};
@@ -57,7 +57,7 @@ impl SessionCommand<'_> {
     }
 
     /// 本次变更清单。
-    pub fn changes(&mut self) -> &mut Changeset {
+    pub(in crate::store) fn changes(&mut self) -> &mut Changeset {
         self.changes
     }
 
@@ -106,7 +106,7 @@ pub struct Command<'a> {
 
 impl Command<'_> {
     /// 本次变更清单。
-    pub fn changes(&mut self) -> &mut Changeset {
+    pub(in crate::store) fn changes(&mut self) -> &mut Changeset {
         self.changes
     }
 

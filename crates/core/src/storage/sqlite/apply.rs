@@ -3,7 +3,6 @@
 
 use sqlx::sqlite::{SqliteConnection, SqliteQueryResult};
 
-use crate::change::Change;
 use crate::error::StoreError;
 use crate::event::{CommittedEvent, FactEvent};
 use crate::host::{HostMetadata, HostName};
@@ -12,6 +11,7 @@ use crate::message::{ContentPart, Message};
 use crate::queue::QueueItem;
 use crate::run::{RunFailure, RunRecord, RunStatus};
 use crate::session::{SessionMetadata, SessionRecord};
+use crate::store::change::Change;
 use crate::workspace::WorkspaceMetadata;
 
 /// 把单条变更写入事务；事实事件在写入后追加到 `committed`。

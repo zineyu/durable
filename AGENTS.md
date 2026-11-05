@@ -50,14 +50,13 @@
 | `workspace.rs` | workspace 元数据 |
 | `tree.rs` | 消息树的问题：transcript、子树叶子与祖先；存储只返回行，链上顺序由它回答 |
 | `event.rs` | `FactEvent` 领域事实枚举 |
-| `change.rs` | 一次事务内的变更清单 |
 | `stream.rs` | `StreamEvent` 与进程内广播 |
-| `store/` | 唯一写入线：`mod.rs` 门面与读方法、`command.rs` 写命令入口、其余子模块按对象分写入命令 |
+| `store/` | 唯一写入线：`mod.rs` 门面与读方法、`command.rs` 写命令入口、`change.rs` 变更清单（构造只在 `store` 内可见）、其余子模块按对象分写入命令 |
 | `storage/` | 快照查询与全部 SQL |
 
 `runtime`：`dirs.rs` 跨平台标准目录与启动路径；`logging.rs` 日志双写与轮转。
 
-`effects`（包名 `effects`）：`policy.rs` 是类别表与 `settle`；`token.rs` 是许可证与四条流程（登记、发货、执行、弃）；`coverage.rs` 记录已发生的类别，并报出声明覆盖却没出现过的缺口。它不认识会话、消息、run 与工具，也不持有存储。
+`effects`（包名 `effects`）：`policy.rs` 是类别表与 `settle`；`token.rs` 是许可证与四条流程（登记、发货、执行、弃）；`coverage.rs` 记录已发生的类别，并报出声明覆盖却没出现过的缺口；`matrix.rs` 是崩溃点契约与遍历（逐点完备、点数对账、报告汇总）；`table.rs` 是 `effect_table!`，从一份声明生成类别清单。它不认识会话、消息、run 与工具，也不持有存储。
 
 `agent`：
 
@@ -87,7 +86,7 @@
 | --- | --- |
 | agent 的 HTTP 接口 | `apps/agent/src/api.rs` 的路由表与处理器，DTO 在 `protocol.rs` |
 | SSE 事件载荷 | `apps/agent/src/sse.rs`（传输）与 `crates/core/src/stream.rs`（类型） |
-| 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `change.rs` |
+| 新的领域事实 | `crates/core/src/event.rs`，写入路径在 `store/` 与 `store/change.rs` |
 | 新的 LLM 工具 | `apps/executor/src/tools/` 新文件，并在 `tools/mod.rs` 的 `execute()` 里登记；定义在 `crates/core/src/tool.rs` |
 | link 帧与传输 | 帧类型在 `crates/core/src/link.rs`；agent 侧驱动在 `apps/agent/src/link/mod.rs`，传输在 `link/transport.rs`、`link/ssh.rs`，executor 侧在 `apps/executor/src/main.rs` |
 | 表结构或迁移 | `crates/core/migrations/` 新增文件，SQL 在 `crates/core/src/storage/sqlite/mod.rs` 与同级的 `apply.rs` |
@@ -97,6 +96,7 @@
 | 客户端写命令与对话框 | `apps/client/src/view/use-commands.ts`；主面板分支在 `components/MainPane.tsx` |
 | 样式 token 与组件样式 | `apps/client/src/styles/tokens.css` 与组件同名 `*.module.css` |
 | 副作用类别、许可证与覆盖率 | `crates/effects/src/policy.rs` 的类别表，`token.rs` 的四条流程，`coverage.rs` 的缺口 |
+| 崩溃点矩阵的遍历与报告 | `crates/effects/src/matrix.rs`；场景与断言在 `apps/agent/tests/crash_matrix.rs` 与 `support/checks.rs` |
 | 新增一条外部通道（网络、子进程、文件写入、后台任务） | `scripts/external-channels.allow` 补一行「<路径> <类别> # 理由」，见 `docs/adr/0057-external-channel-gate.md` |
 | 集成测试 | `crates/*/tests/` 与 `apps/*/tests/`，脚手架在 `tests/support/` |
 | 浏览器端到端测试 | `apps/client/e2e/` |

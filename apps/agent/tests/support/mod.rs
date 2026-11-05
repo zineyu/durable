@@ -21,6 +21,7 @@ use std::time::Duration;
 use reqwest::{Response, StatusCode};
 use tempfile::TempDir;
 
+pub(crate) mod checks;
 pub(crate) mod db;
 mod event_stream;
 mod hosts;

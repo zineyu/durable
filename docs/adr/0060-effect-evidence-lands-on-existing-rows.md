@@ -55,3 +55,11 @@
 **两个工具写方法收为 crate 内可见。** `append_tool` 与 `set_tool_state` 只剩落点表调用，其中「已登记」的写入是幂等的：同一节点、同一调用重复登记不写行，重启后才能在已有节点上重跑。`append_assistant` 与 `append_compaction` 仍被引擎直接调用，它们随模型步骤与压缩的接线（`#82`）一起收口。
 
 **四个写方法都已收口（`#82`）。** 引擎不再直接调用 `append_assistant` 与 `append_compaction`：模型步骤与压缩先登记、再发货（都不写行），收货时经 `Transition::Observed` 把消息入树。四个写方法因此都是 `pub(crate)`，证据的落点判定是接口上的唯一入口，而不只是实现上的。测试要造一条已定型的消息时也走落点表（`crates/core/tests/support` 的两个辅助）。
+
+## 状态说明（2026-11-05）：清单由宏生成，三条覆盖率缺口已由场景关闭
+
+**「唯一靠测试守住的清单」这句话失效。** `EffectClass` 改由 `effects::effect_table!` 从一份声明生成枚举、`ALL_CLASSES` 与稳定标签，因此「清单落后于变体集合」这个形状不存在；`crates/core/tests/effect.rs` 的手写变体表随之删除，只留标签字面量的稳定性断言（标签进日志与告警）。`policy.rs` 里「少写一行编译器不会出声」的说明同时改写。
+
+**覆盖率缺口由真实场景关闭，不标 `Elsewhere`。** 六个类别里 `write_file`、`edit_file`、`compaction` 从未出现过；现在前两类进「多步与幂等工具」场景，压缩单开一个场景（`context_char_limit` 触发，与 `run_failure.rs` 同一条引擎路径）。因此 `matrix_scope` 六个类别仍全部 `Covered`，且「把别处覆盖改成矩阵覆盖就立刻红」有常驻用例（ADR 0062）。
+
+**覆盖率仍在进程内核对。** 每个场景跑完后取 `Store::effects_declared()`，四个场景的并集由一份 `Coverage` 汇总，再经 `effects::matrix::coverage_findings` 变成报告行。逐点重启打开的副本各自从零开始，因此不在副本上核对覆盖面。

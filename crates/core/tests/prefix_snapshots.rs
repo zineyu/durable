@@ -106,3 +106,48 @@ async fn the_last_copy_matches_the_live_store() {
     assert_eq!(live.workspaces, copied.workspaces);
     assert_eq!(live.max_event_id, copied.max_event_id);
 }
+
+/// 副本写不出来时提交照旧成功，但副本目录留下一个空洞，矩阵的点数对账因此报红。
+///
+/// 这里用「目标文件已存在」确定性地制造一次复制失败，不依赖磁盘满或权限；生产路径的
+/// 行为不变：事务已经提交，副本缺失不让写命令失败（ADR 0062）。
+#[tokio::test]
+async fn a_copy_that_cannot_be_written_leaves_a_hole() {
+    let directory = tempfile::tempdir().expect("创建临时目录");
+    let snapshots = directory.path().join("prefixes");
+    std::fs::create_dir_all(&snapshots).expect("建立副本目录");
+    let placeholder = snapshots.join("prefix-000001.sqlite");
+    std::fs::write(&placeholder, b"placeholder").expect("写入占位文件");
+
+    let store = Store::open_recording(&directory.path().join("store.sqlite"), &snapshots)
+        .await
+        .expect("打开数据库");
+    store
+        .register_host(support::local_host(), HostKind::Local, None)
+        .await
+        .expect("注册 host");
+
+    assert_eq!(store.commits(), 1, "提交照旧成功");
+    let content = std::fs::read(&placeholder).expect("读回占位文件");
+    assert_eq!(content, b"placeholder", "复制失败不覆盖已经存在的文件");
+
+    let copies: Vec<String> = std::fs::read_dir(&snapshots)
+        .expect("读取副本目录")
+        .map(|entry| {
+            entry
+                .expect("目录项")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert_eq!(
+        copies,
+        vec!["prefix-000001.sqlite"],
+        "序号 1 没有可用的副本"
+    );
+    assert!(
+        Store::open(&placeholder).await.is_err(),
+        "占位文件不是数据库，因此这一份副本打不开：矩阵的点表会比提交次数少"
+    );
+}
